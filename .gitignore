@@ -1,0 +1,38 @@
+# Local reference sources and generated design artifacts
+/Sample_previous_code/
+/zwt-finance-ui-prototype/*.png
+/zwt-finance-ui-prototype/.npm-cache/
+
+# JavaScript
+**/node_modules/
+**/dist/
+**/.vite/
+**/coverage/
+**/.npm-cache/
+*.tsbuildinfo
+
+# Python
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+*.py[cod]
+
+# Secrets and local runtime state
+**/.env
+!**/.env.example
+**/attachments/
+**/backups/
+**/logs/
+**/runtime/
+
+# Local tooling
+/.playwright-mcp/
+/.superpowers/
+.DS_Store
+Thumbs.db
+
+# Manual Windows releases are built outside source control
+**/releases/
+**/current/
+
