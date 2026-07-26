@@ -1,0 +1,56 @@
+{
+	admin 127.0.0.1:2019
+}
+
+# Administrator supplies ZWT_SITE_ADDRESS, for example finance.intra.example:8443.
+# No listener or redirect is configured on ports 80/443.
+{$ZWT_SITE_ADDRESS} {
+	tls internal
+	encode zstd gzip
+
+	@bom_batch {
+		path /api/v1/tax-invoice/bom/import
+	}
+	request_body @bom_batch {
+		max_size 202MiB
+	}
+
+	@dual_file {
+		path /api/v1/wht/import/dual /api/v1/tax-invoice/import/dual
+	}
+	request_body @dual_file {
+		max_size 42MiB
+	}
+
+	@single_file {
+		path /api/*
+		not path /api/v1/tax-invoice/bom/import
+		not path /api/v1/wht/import/dual
+		not path /api/v1/tax-invoice/import/dual
+	}
+	request_body @single_file {
+		max_size 20MiB
+	}
+
+	# 后端监听 8100（BOI 占用 8000，ZWT 一律 "BOI + 100"）。
+	# 改端口时必须同步 winsw/zwt-finance-api.xml 的 ZWT_API_PORT。
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8100
+	}
+
+	handle {
+		root * {$ZWT_CURRENT_ROOT}\frontend\dist
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output file {$ZWT_LOG_ROOT}\caddy-access.json {
+			roll_size 50MiB
+			roll_keep 10
+			roll_keep_for 168h
+		}
+		format json
+	}
+}
+

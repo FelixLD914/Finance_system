@@ -20,7 +20,7 @@ or user workstation.
 
 Thai business values must be marked with `lang="th"`. The CSS family order is
 `TH SarabunPSK`, `TH Sarabun New`, bundled `Sarabun`, then Windows fallbacks. Thai body
-copy is rendered at `1.14em` with a `1.3` line height so its perceived size remains
+copy is rendered at `1.28em` with a `1.2` line height so its perceived size remains
 balanced with nearby Chinese and Latin text without making finance tables loose.
 
 ## Mixed-script rules

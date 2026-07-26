@@ -9,6 +9,8 @@
 **/.vite/
 **/coverage/
 **/.npm-cache/
+**/output/playwright/*
+!**/output/playwright/.gitkeep
 *.tsbuildinfo
 
 # Python
@@ -16,7 +18,12 @@
 **/__pycache__/
 **/.pytest_cache/
 **/.ruff_cache/
+**/.pip-cache/
+**/*.egg-info/
 *.py[cod]
+# setuptools / `python -m build` 产物，内容是 app/ 的逐字副本，不入库。
+**/build/lib/
+/zwt-finance-system/backend/build/
 
 # Secrets and local runtime state
 **/.env
@@ -27,7 +34,10 @@
 **/runtime/
 
 # Local tooling
+/.local/
+/.tmp/
 /.playwright-mcp/
+**/.playwright-cli/
 /.superpowers/
 .DS_Store
 Thumbs.db
@@ -35,4 +45,3 @@ Thumbs.db
 # Manual Windows releases are built outside source control
 **/releases/
 **/current/
-

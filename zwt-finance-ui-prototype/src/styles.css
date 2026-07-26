@@ -54,8 +54,8 @@ textarea {
 .thai-copy,
 :lang(th) {
   font-family: var(--font-thai);
-  font-size: 1.14em;
-  line-height: 1.3;
+  font-size: 1.28em;
+  line-height: 1.2;
   letter-spacing: 0;
 }
 

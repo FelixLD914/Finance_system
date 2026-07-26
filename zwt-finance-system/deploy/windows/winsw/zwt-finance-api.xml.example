@@ -1,0 +1,32 @@
+<service>
+  <id>ZWTFinanceApi</id>
+  <name>ZWT Finance API</name>
+  <description>ZWT Finance FastAPI service</description>
+  <executable>%BASE%\..\..\current\backend\.venv\Scripts\python.exe</executable>
+  <arguments>-m app.run_windows</arguments>
+  <workingdirectory>%BASE%\..\..\current\backend</workingdirectory>
+  <env name="ZWT_ENVIRONMENT" value="production"/>
+  <env name="ZWT_API_PREFIX" value="/api"/>
+  <env name="ZWT_API_HOST" value="127.0.0.1"/>
+  <!-- 8100 = BOI 8000 + 100；改动必须同步 Caddyfile 的 reverse_proxy。 -->
+  <env name="ZWT_API_PORT" value="8100"/>
+  <env name="ZWT_API_WORKERS" value="1"/>
+  <env name="ZWT_DATABASE_URL" value="%ZWT_DATABASE_URL%"/>
+  <env name="ZWT_ATTACHMENT_ROOT" value="%ZWT_ATTACHMENT_ROOT%"/>
+  <env name="ZWT_WHT_TEMPLATE_PATH" value="%ZWT_WHT_TEMPLATE_PATH%"/>
+  <!-- PDF template and Sarabun font are bundled with the application package. -->
+  <env name="ZWT_MAX_FILE_MIB" value="20"/>
+  <env name="ZWT_LOG_LEVEL" value="INFO"/>
+  <logpath>%BASE%\..\..\logs\api</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyyMMdd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+    <zipOlderThanNumDays>2</zipOlderThanNumDays>
+    <zipDateFormat>yyyyMMdd</zipDateFormat>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+</service>

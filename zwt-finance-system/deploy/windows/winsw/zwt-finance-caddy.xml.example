@@ -1,0 +1,23 @@
+<service>
+  <id>ZWTFinanceCaddy</id>
+  <name>ZWT Finance Caddy</name>
+  <description>ZWT Finance internal HTTPS reverse proxy</description>
+  <executable>%BASE%\caddy.exe</executable>
+  <arguments>run --config "%BASE%\Caddyfile"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <env name="ZWT_SITE_ADDRESS" value="%ZWT_SITE_ADDRESS%"/>
+  <env name="ZWT_CURRENT_ROOT" value="%ZWT_CURRENT_ROOT%"/>
+  <env name="ZWT_LOG_ROOT" value="%ZWT_LOG_ROOT%"/>
+  <logpath>%BASE%\..\..\logs\caddy</logpath>
+  <log mode="roll-by-size-time">
+    <sizeThreshold>10240</sizeThreshold>
+    <pattern>yyyyMMdd</pattern>
+    <autoRollAtTime>00:00:00</autoRollAtTime>
+    <zipOlderThanNumDays>2</zipOlderThanNumDays>
+    <zipDateFormat>yyyyMMdd</zipDateFormat>
+  </log>
+  <onfailure action="restart" delay="10 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>30 sec</stoptimeout>
+</service>
+
