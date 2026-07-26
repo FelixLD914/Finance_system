@@ -46,24 +46,26 @@ _APPROVE: frozenset[str] = frozenset(
     }
 )
 
-# TODO(策略确认)：下面是一个可用的默认职责分离方案，请按 ZWT 财务部的实际
-# 授权制度调整。目前的假设是：
+# 职责分离方案（2026-07-26 经业务方确认，见 test_authz.py 的策略锁定测试）：
 #
 #   viewer    只读，不能改动任何数据
 #   operator  录入/导入/编辑未批准记录，但**不能批准或作废** —— 这是职责分离的
-#             关键一刀。默认新建用户就是这个角色（User.role 默认 operator）。
+#             关键一刀。新建用户默认就是这个角色（User.role 默认 operator），
+#             因此默认情况下录入人无法批准自己录的单。
 #   approver  operator 的全部权限，外加批准、作废、更正、生成正式文件
 #   admin     全部权限，含签名图片库与用户管理
 #
-# 需要你确认的点：
-#   1. approver 是否应该同时拥有 operator 的录入权限？如果制度要求"录入人不得
-#      是批准人"，那 approver 就不该包含 _PREPARE，需要改成 _READ_ONLY | _APPROVE。
-#   2. 作废（void）和更正（correct）是否要比批准更高一级？有些制度里作废一张
-#      已签发税票需要更高审批。
-#   3. WHT 和 TAX INV 是否共用同一批批准人？现在是共用；要分开的话把 _APPROVE
-#      拆成 _APPROVE_INVOICE / _APPROVE_WHT 两组，再配 approver:invoice 之类的角色。
-#   4. signature:manage 现在只给 admin。签名图片决定正式 PDF 上盖谁的名字，
-#      是否要独立成一个角色？
+# 三项已确认的决定，改动前需要重新走业务确认：
+#   1. approver **包含**录入权限（_PREPARE | _APPROVE）。即制度不要求
+#      "录入人不得是批准人"，approver 可以自己录、自己批。职责分离靠的是
+#      operator 拿不到批准权，而不是反过来限制 approver。
+#   2. 作废与批准**同级**：invoice:void 和 invoice:approve 都在 _APPROVE 里，
+#      作废一张已签发税票不需要比批准更高的授权。
+#   3. WHT 与 TAX INV **共用同一批批准人**：_APPROVE 是一个整体，不拆成
+#      _APPROVE_INVOICE / _APPROVE_WHT。
+#
+# 尚未确认：signature:manage 目前只给 admin。签名图片决定正式 PDF 上盖谁的
+# 名字，若要独立授权需新增角色，届时把它从 ALL_PERMISSIONS 里单拆出来。
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "viewer": _READ_ONLY,
     "operator": _PREPARE,

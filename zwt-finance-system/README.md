@@ -67,17 +67,33 @@ $env:ZWT_ADMIN_PW = Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlai
 
 ### 角色与职责分离
 
-角色到权限点的映射在 `app/core/authz.py`，默认方案：
+角色到权限点的映射在 `app/core/authz.py`（2026-07-26 经业务方确认）：
 
-| 角色 | 权限 |
-| --- | --- |
-| `viewer` | 只读 |
-| `operator` | 录入/导入/编辑未批准记录，**不能批准或作废** |
-| `approver` | operator 全部权限 + 批准、作废、更正、生成正式文件 |
-| `admin` | 全部，含签名图片库与用户管理 |
+| 权限点 | viewer | operator | approver | admin |
+| --- | :-: | :-: | :-: | :-: |
+| `invoice:read` / `wht:read` | ✓ | ✓ | ✓ | ✓ |
+| `invoice:write` / `wht:write` | | ✓ | ✓ | ✓ |
+| `invoice:approve` / `wht:approve` | | | ✓ | ✓ |
+| `invoice:void` / `invoice:correct` | | | ✓ | ✓ |
+| `invoice:generate` / `wht:generate` | | | ✓ | ✓ |
+| `signature:manage` / `user:manage` | | | | ✓ |
 
-新建用户默认是 `operator`，即录入人不能自己批准自己录的单。这套映射带
-`TODO(策略确认)` 注释，需要按财务部实际授权制度确认后再定稿。
+三项已确认的决定，**改动前需重新走业务确认**：
+
+1. `approver` 包含录入权限，可以自己录、自己批。职责分离靠的是 `operator`
+   拿不到批准权，而不是反过来限制 `approver`。
+2. 作废与批准同级 —— 作废一张已签发税票不需要更高授权。
+3. WHT 与 TAX INV 共用同一批批准人，`_APPROVE` 不拆分。
+
+新建用户默认是 `operator`（`User.role` 的默认值），因此默认情况下录入人
+无法批准自己录的单。
+
+这三条在 `tests/test_authz.py` 里有对应的策略锁定测试：断言的是"能批准的
+角色集合 == 能作废的角色集合"这类关系而非具体角色名，任何一侧被单独收紧
+或放宽都会让测试失败，避免策略被静默改掉。
+
+尚未确认：`signature:manage` 目前只给 `admin`。签名图片决定正式 PDF 上盖
+谁的名字，若要独立授权需新增角色。
 
 ## Port allocation
 

@@ -51,6 +51,54 @@ def test_every_declared_role_uses_only_known_permissions() -> None:
         assert not unknown, f"角色 {role} 引用了未定义的权限点: {sorted(unknown)}"
 
 
+# --- 策略锁定 -----------------------------------------------------------------
+#
+# 以下三条对应 2026-07-26 业务方确认的职责分离决定。它们不是实现细节，
+# 改动前需要重新走业务确认 —— 所以用测试钉住，而不是只写在注释里。
+
+
+def _roles_with(permission: str) -> set[str]:
+    return {role for role in ROLE_PERMISSIONS if role_has(role, permission)}
+
+
+def test_confirmed_approver_also_has_preparation_rights() -> None:
+    """已确认：approver 包含录入权限，可以自己录、自己批。
+
+    职责分离靠的是 operator 拿不到批准权，而不是反过来限制 approver。
+    """
+    assert role_has("approver", "invoice:write")
+    assert role_has("approver", "wht:write")
+    assert role_has("approver", "invoice:approve")
+
+
+def test_confirmed_void_is_same_level_as_approve() -> None:
+    """已确认：作废与批准同级，不需要更高授权。
+
+    断言"能批准的角色集合"与"能作废的角色集合"完全一致；任何一方被单独
+    收紧或放宽都会让这条失败。
+    """
+    assert _roles_with("invoice:void") == _roles_with("invoice:approve")
+    assert _roles_with("invoice:correct") == _roles_with("invoice:approve")
+
+
+def test_confirmed_wht_and_tax_invoice_share_approvers() -> None:
+    """已确认：WHT 与 TAX INV 共用同一批批准人。
+
+    若日后要拆开，_APPROVE 需拆成两组并新增角色，这条会失败以提示决策变更。
+    """
+    assert _roles_with("wht:approve") == _roles_with("invoice:approve")
+    assert _roles_with("wht:generate") == _roles_with("invoice:generate")
+
+
+def test_signature_management_remains_admin_only() -> None:
+    """尚未确认的一项：签名图片库目前只有 admin 能管。
+
+    签名决定正式 PDF 上盖谁的名字。若将来独立成角色，这条会失败，
+    提醒同步更新 authz.py 顶部的策略说明。
+    """
+    assert _roles_with("signature:manage") == {"admin"}
+
+
 def test_principal_require_raises_for_missing_permission() -> None:
     operator = build_principal(role="operator")
 
