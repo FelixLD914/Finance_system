@@ -13,7 +13,7 @@ from app.modules.tax_invoice.recognition import (
 )
 
 
-def _invoice_workbook() -> bytes:
+def _invoice_workbook(unit_price: object = 30, amount_usd: object = 300) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "CI INVOICE"
@@ -37,12 +37,12 @@ def _invoice_workbook() -> bytes:
     ]
     for column, header in enumerate(headers, start=1):
         sheet.cell(row=10, column=column, value=header)
-    values = [1, "ROUTER", "R-1", "85176243", 10, "PIECES", 30, 300]
+    values = [1, "ROUTER", "R-1", "85176243", 10, "PIECES", unit_price, amount_usd]
     for column, value in enumerate(values, start=1):
         sheet.cell(row=11, column=column, value=value)
     sheet["A12"] = "TOTAL"
     sheet["E12"] = 10
-    sheet["H12"] = 300
+    sheet["H12"] = amount_usd
     output = BytesIO()
     workbook.save(output)
     workbook.close()
@@ -71,6 +71,18 @@ def test_invoice_parser_preserves_existing_fields_and_items() -> None:
     assert parsed["customer_name"] == "TEST CUSTOMER"
     assert parsed["quantity_total"] == Decimal("10")
     assert parsed["items"][0]["hs_code"] == "85176243"
+
+
+def test_invoice_parser_degrades_out_of_range_amounts_instead_of_raising() -> None:
+    # 超出 Decimal 上下文精度的单元格（1e100）会让 quantize 抛 InvalidOperation。
+    # 识别阶段必须降级为 None，由 _review_status 标记 needs_review 交人工确认；
+    # 上传接口不能因为一个畸形单元格返回 500。
+    content = _invoice_workbook(unit_price=1e100, amount_usd=1e100)
+
+    parsed = parse_invoice_workbook(content, "invoice.xlsx")
+
+    assert parsed["items"][0]["ci_unit_price"] is None
+    assert parsed["fob_amount_usd"] is None
 
 
 def test_bot_parser_and_weekend_lookback() -> None:

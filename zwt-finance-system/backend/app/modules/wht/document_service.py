@@ -96,6 +96,10 @@ class WhtDocumentService:
         try:
             await self.session.commit()
         except Exception:
+            # 必须先 rollback：commit 失败后 session 处于不可用状态，
+            # FastAPI 依赖收尾时的任何后续语句都会再抛 PendingRollbackError，
+            # 把真正的失败原因盖掉。generate_documents 已是这个顺序。
+            await self.session.rollback()
             stored_path.unlink(missing_ok=True)
             raise
         await self.session.refresh(signature)

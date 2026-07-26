@@ -248,58 +248,69 @@ class TaxInvoiceService:
         await self.session.flush()
         source_root = self._storage_path(f"tax_invoice/sources/{batch.id}")
         source_root.mkdir(parents=True, exist_ok=False)
-        for index, (file_name, content) in enumerate(source_files, start=1):
-            safe_name = Path(file_name).name
-            target = source_root / f"{index:02d}-{safe_name}"
-            target.write_bytes(content)
+        # 原始凭证落盘必须与批次记录同生共死。批次一旦回滚，这些文件就再没有
+        # 数据库行指向它们，只能靠这里清理，否则每次导入失败都留下一份无主附件
+        # 长期占用 ZWT_ATTACHMENT_ROOT，且被每日附件备份一并带走。
+        # 与 generate_documents 的清理逻辑保持一致。
+        try:
+            for index, (file_name, content) in enumerate(source_files, start=1):
+                safe_name = Path(file_name).name
+                target = source_root / f"{index:02d}-{safe_name}"
+                target.write_bytes(content)
 
-        invoice_ids: list[uuid.UUID] = []
-        item_count = 0
-        needs_review_count = 0
-        for source_row in rows:
-            row = dict(source_row)
-            item_rows = list(row.pop("items"))
-            status = self._review_status(row, len(item_rows))
-            if status == "needs_review":
-                needs_review_count += 1
-            document_no = row.pop("document_no", None)
-            invoice = TaxInvoice(
-                **row,
-                batch_id=batch.id,
-                document_no=document_no,
-                status="approved" if document_no else status,
-                source_invoice_file_name=source_names[0],
-                source_customs_file_name=(
-                    source_names[1] if len(source_names) > 1 else None
-                ),
-                created_by_name=self.actor_name,
-                updated_by_name=self.actor_name,
-                approved_at=datetime.now(UTC) if document_no else None,
-            )
-            self.session.add(invoice)
-            await self.session.flush()
-            if document_no:
-                await self._advance_counter_for_existing_number(
-                    document_no,
-                    invoice.invoice_date,
+            invoice_ids: list[uuid.UUID] = []
+            item_count = 0
+            needs_review_count = 0
+            for source_row in rows:
+                row = dict(source_row)
+                item_rows = list(row.pop("items"))
+                status = self._review_status(row, len(item_rows))
+                if status == "needs_review":
+                    needs_review_count += 1
+                document_no = row.pop("document_no", None)
+                invoice = TaxInvoice(
+                    **row,
+                    batch_id=batch.id,
+                    document_no=document_no,
+                    status="approved" if document_no else status,
+                    source_invoice_file_name=source_names[0],
+                    source_customs_file_name=(
+                        source_names[1] if len(source_names) > 1 else None
+                    ),
+                    created_by_name=self.actor_name,
+                    updated_by_name=self.actor_name,
+                    approved_at=datetime.now(UTC) if document_no else None,
                 )
-            for item in item_rows:
-                self.session.add(TaxInvoiceItem(invoice_id=invoice.id, **item))
-            self.session.add(
-                self._event(
-                    invoice,
-                    "imported",
-                    None,
-                    invoice.status,
-                    " | ".join(source_names),
+                self.session.add(invoice)
+                await self.session.flush()
+                if document_no:
+                    await self._advance_counter_for_existing_number(
+                        document_no,
+                        invoice.invoice_date,
+                    )
+                for item in item_rows:
+                    self.session.add(TaxInvoiceItem(invoice_id=invoice.id, **item))
+                self.session.add(
+                    self._event(
+                        invoice,
+                        "imported",
+                        None,
+                        invoice.status,
+                        " | ".join(source_names),
+                    )
                 )
-            )
-            invoice_ids.append(invoice.id)
-            item_count += len(item_rows)
-        batch.status = "review" if needs_review_count else "completed"
-        batch.invoice_count = len(invoice_ids)
-        batch.item_count = item_count
-        await self.session.commit()
+                invoice_ids.append(invoice.id)
+                item_count += len(item_rows)
+            batch.status = "review" if needs_review_count else "completed"
+            batch.invoice_count = len(invoice_ids)
+            batch.item_count = item_count
+            await self.session.commit()
+        except Exception:
+            await self.session.rollback()
+            for path in source_root.glob("*"):
+                path.unlink(missing_ok=True)
+            source_root.rmdir()
+            raise
         return TaxInvoiceImportResponse(
             batch_id=batch.id,
             invoice_ids=invoice_ids,

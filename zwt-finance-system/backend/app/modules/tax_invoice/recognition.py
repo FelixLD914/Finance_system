@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import BytesIO
 from typing import Any
 
@@ -45,9 +45,12 @@ def _decimal(value: object, *, quantum: Decimal | None = None) -> Decimal | None
         return None
     try:
         parsed = Decimal(text)
-    except Exception:
+        # quantize 必须留在 try 内：单元格值超出 Decimal 上下文精度时（例如
+        # 1e100）它同样抛 InvalidOperation。识别阶段任何解析不了的数值都返回
+        # None，由 _review_status 标记 needs_review 交人工确认，不能让上传接口 500。
+        return parsed.quantize(quantum, rounding=ROUND_HALF_UP) if quantum else parsed
+    except (InvalidOperation, ValueError, TypeError):
         return None
-    return parsed.quantize(quantum, rounding=ROUND_HALF_UP) if quantum else parsed
 
 
 def _parse_date(value: object) -> date | None:
