@@ -33,6 +33,52 @@
 前端开发服务器为 `http://127.0.0.1:5273`，`/api` 仅在开发期间代理到
 `http://127.0.0.1:8100`。生产环境由 Caddy 同源转发。
 
+## Authentication
+
+所有业务接口都要求登录。只有 `/api/health/*`（供 WinSW 与发布验收探活）和
+`/api/v1/auth/login` 不需要会话。
+
+- 会话为**服务端会话**，令牌放在 `HttpOnly` + `Secure` + `SameSite=Strict`
+  Cookie 里，JS 读不到，XSS 偷不走。数据库 `core.sessions` 只存令牌的
+  SHA-256 摘要，备份泄露也换不出可用凭证。
+- 删除会话行即刻吊销，`set-password` / `deactivate` 会自动吊销该用户全部会话。
+  这是相对 JWT 选服务端会话的主要原因。
+- 写请求还需 `X-CSRF-Token` 头，值取自非 HttpOnly 的 `zwt_csrf` Cookie
+  （双提交校验）。前端 `src/shared/http.ts` 已统一处理，业务代码无需关心。
+- 口令用标准库 `hashlib.scrypt`（N=2^16, r=8, p=2），无第三方依赖。参数写进
+  哈希串本身，日后调高强度不需要迁移数据，登录时会顺带升级旧参数的记录。
+
+首次部署必须先建管理员账号。**口令不接受命令行参数**（会进 shell 历史，
+Windows 上还能被其他进程从进程列表读到），默认交互式输入：
+
+```powershell
+Set-Location .\backend
+.\.venv\Scripts\python.exe -m app.cli create-user --username admin --role admin --display-name 系统管理员
+```
+
+无人值守脚本用环境变量传：
+
+```powershell
+$env:ZWT_ADMIN_PW = Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlainText
+.\.venv\Scripts\python.exe -m app.cli create-user --username admin --role admin --password-env ZWT_ADMIN_PW
+```
+
+其他命令：`list-users`、`set-password`、`deactivate`、`purge-sessions`。
+
+### 角色与职责分离
+
+角色到权限点的映射在 `app/core/authz.py`，默认方案：
+
+| 角色 | 权限 |
+| --- | --- |
+| `viewer` | 只读 |
+| `operator` | 录入/导入/编辑未批准记录，**不能批准或作废** |
+| `approver` | operator 全部权限 + 批准、作废、更正、生成正式文件 |
+| `admin` | 全部，含签名图片库与用户管理 |
+
+新建用户默认是 `operator`，即录入人不能自己批准自己录的单。这套映射带
+`TODO(策略确认)` 注释，需要按财务部实际授权制度确认后再定稿。
+
 ## Port allocation
 
 本机与 BOI 系统并行开发，**ZWT 不得占用 BOI 的端口**。分配规则为

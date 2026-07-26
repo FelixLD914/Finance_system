@@ -3,6 +3,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import engine
+from app.modules.auth.router import router as auth_router
 from app.modules.tax_invoice.router import router as tax_invoice_router
 from app.modules.wht.router import router as wht_router
 
@@ -31,5 +32,8 @@ async def readiness() -> dict[str, str]:
     }
 
 
+# health/* 与 auth/login 是唯二不需要登录的端点：前者供 WinSW 与发布验收探活，
+# 后者是取得会话的入口。其余业务路由在各自模块里挂 PrincipalDependency。
+api_router.include_router(auth_router)
 api_router.include_router(wht_router)
 api_router.include_router(tax_invoice_router)

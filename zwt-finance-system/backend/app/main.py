@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.router import api_router
 from app.core.config import get_settings
-from app.modules.wht.service import WhtServiceError
+from app.core.errors import ServiceError
 
 
 @asynccontextmanager
@@ -29,10 +29,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    @application.exception_handler(WhtServiceError)
-    async def handle_wht_service_error(
+    # 注册在 ServiceError 上，WHT / TAX INV / auth 的异常都是它的子类，
+    # 各自用 status_code 决定响应码。
+    @application.exception_handler(ServiceError)
+    async def handle_service_error(
         _: Request,
-        exc: WhtServiceError,
+        exc: ServiceError,
     ) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,

@@ -1,3 +1,9 @@
+import {
+  ApiError,
+  UnauthorizedError,
+  apiFetch,
+  apiRequest,
+} from "../../shared/http";
 import type {
   ExchangeRate,
   ExchangeRateImportResult,
@@ -7,34 +13,11 @@ import type {
   TaxInvoiceList,
 } from "./types";
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api";
+// TaxInvoiceApiError 保留为 ApiError 的别名，既有调用方不用改。
+// 请求实现统一在 shared/http，那里处理 CSRF 头与会话凭证。
+export { ApiError as TaxInvoiceApiError, UnauthorizedError };
 
-export class TaxInvoiceApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...init?.headers,
-    },
-  });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new TaxInvoiceApiError(
-      body?.detail ?? `API request failed (${response.status})`,
-      response.status,
-    );
-  }
-  return (await response.json()) as T;
-}
+const request = apiRequest;
 
 export function listTaxInvoices(): Promise<TaxInvoiceList> {
   return request<TaxInvoiceList>("/v1/tax-invoice/invoices?pageSize=100");
@@ -162,12 +145,10 @@ export function generateTaxInvoiceXlsx(
 export async function downloadTaxInvoiceDocument(
   document: TaxInvoiceDocument,
 ): Promise<void> {
-  const response = await fetch(
-    `${apiBase}/v1/tax-invoice/documents/${document.id}/download`,
+  // 走 apiFetch：下载同样要带会话 Cookie，否则受保护的端点会 401。
+  const response = await apiFetch(
+    `/v1/tax-invoice/documents/${document.id}/download`,
   );
-  if (!response.ok) {
-    throw new TaxInvoiceApiError("文件下载失败", response.status);
-  }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const anchor = window.document.createElement("a");

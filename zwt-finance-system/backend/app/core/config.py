@@ -41,6 +41,24 @@ class Settings(BaseSettings):
     bot_api_endpoint: str = "/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/"
     bot_api_key: str = ""
     bootstrap_admin_display_name: str = "系统管理员"
+    bootstrap_admin_username: str = "admin"
+
+    # 会话：滑动过期 8 小时（覆盖一个完整工作日的连续操作），绝对上限 12 小时，
+    # 之后无论多活跃都必须重新登录。Cookie 只在同源的 /api 下发送。
+    session_idle_minutes: int = Field(default=480, ge=5, le=1440)
+    session_absolute_minutes: int = Field(default=720, ge=15, le=10080)
+    session_cookie_name: str = "zwt_session"
+    csrf_cookie_name: str = "zwt_csrf"
+    # 开发期 Vite 走 http://127.0.0.1:5273，Secure Cookie 不会被发送；
+    # 生产由 Caddy 提供 HTTPS，必须置 true。随 environment 自动切换，
+    # 需要在本机测 HTTPS 时可显式覆盖。
+    session_cookie_secure: bool | None = None
+
+    @property
+    def cookies_require_https(self) -> bool:
+        if self.session_cookie_secure is not None:
+            return self.session_cookie_secure
+        return self.environment == "production"
 
 
 @lru_cache

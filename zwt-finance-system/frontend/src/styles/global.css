@@ -1435,3 +1435,39 @@ select {
     grid-template-columns: auto 1fr;
   }
 }
+
+/* --- 登录与启动态 ------------------------------------------------------- */
+
+.app-bootstrap,
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--paper);
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 4px;
+  box-shadow: 0 18px 48px rgba(36, 33, 30, 0.08);
+}
+
+.login-title {
+  margin-bottom: 4px !important;
+  font-family: var(--font-display);
+  letter-spacing: 0.01em;
+}
+
+.login-subtitle {
+  margin-bottom: 20px !important;
+  font-size: 13px;
+}
+
+.login-error {
+  margin-bottom: 16px;
+}

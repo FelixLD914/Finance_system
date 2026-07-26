@@ -2,15 +2,29 @@ import type { PropsWithChildren } from "react";
 import {
   BellOutlined,
   DownOutlined,
+  LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   QuestionCircleOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
-import { Avatar, Button, Menu, Tooltip } from "antd";
+import { Avatar, Button, Dropdown, Menu, Tooltip } from "antd";
 
+import { useAuth } from "../auth/AuthContext";
 import type { Locale, Translate } from "../i18n";
 import { financeModules, type ModuleKey } from "../modules/registry";
+
+/** 头像缩写：中文名取姓，拉丁名取首字母缩写。 */
+function avatarInitials(displayName: string): string {
+  const trimmed = displayName.trim();
+  if (trimmed === "") return "?";
+  if (/[一-鿿]/.test(trimmed)) return trimmed.slice(0, 1);
+  return trimmed
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
 
 interface AppShellProps extends PropsWithChildren {
   activeModule: ModuleKey;
@@ -32,6 +46,7 @@ export function AppShell({
   onToggleLocale,
   t,
 }: AppShellProps) {
+  const { user, logout } = useAuth();
   const menuItems = financeModules
     .filter((module) => module.enabled)
     .map((module) => ({
@@ -83,14 +98,38 @@ export function AppShell({
             {t("common.language")}
           </Button>
           <span className="topbar-divider" />
-          <button className="profile-button" type="button">
-            <Avatar className="profile-avatar">SP</Avatar>
-            <span className="profile-copy">
-              <strong>Supaporn P.</strong>
-              <small>{t("role.supervisor")}</small>
-            </span>
-            <DownOutlined />
-          </button>
+          <Dropdown
+            trigger={["click"]}
+            menu={{
+              items: [
+                {
+                  key: "username",
+                  label: user?.username ?? "",
+                  disabled: true,
+                },
+                { type: "divider" },
+                {
+                  key: "logout",
+                  icon: <LogoutOutlined />,
+                  label: "退出登录",
+                  danger: true,
+                  onClick: () => void logout(),
+                },
+              ],
+            }}
+          >
+            <button className="profile-button" type="button">
+              <Avatar className="profile-avatar">
+                {avatarInitials(user?.displayName ?? "")}
+              </Avatar>
+              <span className="profile-copy">
+                {/* 显示真实登录用户：这个名字同时也是写进审计记录的 actor_name。 */}
+                <strong>{user?.displayName ?? ""}</strong>
+                <small>{user?.role ?? ""}</small>
+              </span>
+              <DownOutlined />
+            </button>
+          </Dropdown>
         </div>
       </header>
 

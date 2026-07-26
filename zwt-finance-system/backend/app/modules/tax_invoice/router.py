@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db_session
+from app.core.dependencies import PrincipalDependency, require_permission
 from app.modules.tax_invoice.document_service import TaxInvoiceDocumentService
 from app.modules.tax_invoice.recognition import (
     TaxInvoiceRecognitionError,
@@ -35,17 +36,23 @@ from app.modules.tax_invoice.schemas import (
 )
 from app.modules.tax_invoice.service import InvoiceAggregate, TaxInvoiceService
 
-router = APIRouter(prefix="/v1/tax-invoice", tags=["tax-invoice"])
+# 整个 TAX INV 路由组要求已登录。逐个端点再用 require_permission 收紧。
+router = APIRouter(
+    prefix="/v1/tax-invoice",
+    tags=["tax-invoice"],
+    dependencies=[Depends(require_permission("invoice:read"))],
+)
 
 
 async def get_tax_invoice_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    principal: PrincipalDependency,
 ) -> TaxInvoiceService:
-    settings = get_settings()
+    # actor_name 取自登录用户：税票的批准/作废/更正必须能归因到具体的人。
     return TaxInvoiceService(
         session=session,
-        actor_name=settings.bootstrap_admin_display_name,
-        settings=settings,
+        actor_name=principal.actor_name,
+        settings=get_settings(),
     )
 
 
@@ -54,12 +61,12 @@ ServiceDependency = Annotated[TaxInvoiceService, Depends(get_tax_invoice_service
 
 async def get_tax_invoice_document_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    principal: PrincipalDependency,
 ) -> TaxInvoiceDocumentService:
-    settings = get_settings()
     return TaxInvoiceDocumentService(
         session=session,
-        actor_name=settings.bootstrap_admin_display_name,
-        settings=settings,
+        actor_name=principal.actor_name,
+        settings=get_settings(),
     )
 
 
@@ -144,7 +151,11 @@ async def get_invoice(
     return _response(await service.get_invoice(invoice_id))
 
 
-@router.patch("/invoices/{invoice_id}", response_model=TaxInvoiceResponse)
+@router.patch(
+    "/invoices/{invoice_id}",
+    response_model=TaxInvoiceResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
 async def update_invoice(
     invoice_id: uuid.UUID,
     payload: TaxInvoiceUpdate,
@@ -153,7 +164,11 @@ async def update_invoice(
     return _response(await service.update_invoice(invoice_id, payload))
 
 
-@router.post("/invoices/{invoice_id}/approve", response_model=TaxInvoiceResponse)
+@router.post(
+    "/invoices/{invoice_id}/approve",
+    response_model=TaxInvoiceResponse,
+    dependencies=[Depends(require_permission("invoice:approve"))],
+)
 async def approve_invoice(
     invoice_id: uuid.UUID,
     payload: TaxInvoiceApproveRequest,
@@ -169,7 +184,11 @@ async def approve_invoice(
     )
 
 
-@router.post("/invoices/{invoice_id}/void", response_model=TaxInvoiceResponse)
+@router.post(
+    "/invoices/{invoice_id}/void",
+    response_model=TaxInvoiceResponse,
+    dependencies=[Depends(require_permission("invoice:void"))],
+)
 async def void_invoice(
     invoice_id: uuid.UUID,
     payload: TaxInvoiceVoidRequest,
@@ -188,6 +207,7 @@ async def void_invoice(
     "/invoices/{invoice_id}/corrections",
     response_model=TaxInvoiceResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("invoice:correct"))],
 )
 async def create_correction(
     invoice_id: uuid.UUID,
@@ -203,7 +223,11 @@ async def create_correction(
     )
 
 
-@router.post("/import/dual", response_model=TaxInvoiceImportResponse)
+@router.post(
+    "/import/dual",
+    response_model=TaxInvoiceImportResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
 async def import_invoice_and_customs(
     service: ServiceDependency,
     currency: Annotated[str, Form(min_length=3, max_length=3)] = "USD",
@@ -240,7 +264,11 @@ async def import_invoice_and_customs(
     )
 
 
-@router.post("/import/sample", response_model=TaxInvoiceImportResponse)
+@router.post(
+    "/import/sample",
+    response_model=TaxInvoiceImportResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
 async def import_existing_sample(
     service: ServiceDependency,
     file: Annotated[UploadFile, File(description="Existing TAX INV Sample.xlsx")],
@@ -268,7 +296,11 @@ async def list_exchange_rates(
     return [ExchangeRateResponse.model_validate(row) for row in rows]
 
 
-@router.post("/exchange-rates/import", response_model=ExchangeRateImportResponse)
+@router.post(
+    "/exchange-rates/import",
+    response_model=ExchangeRateImportResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
 async def import_exchange_rates(
     service: ServiceDependency,
     currency: Annotated[str, Form(min_length=3, max_length=3)] = "USD",
@@ -287,7 +319,11 @@ async def import_exchange_rates(
     )
 
 
-@router.post("/exchange-rates/fetch", response_model=ExchangeRateImportResponse)
+@router.post(
+    "/exchange-rates/fetch",
+    response_model=ExchangeRateImportResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
 async def fetch_exchange_rates(
     payload: ExchangeRateFetchRequest,
     service: ServiceDependency,
@@ -304,6 +340,7 @@ async def fetch_exchange_rates(
 @router.post(
     "/invoices/{invoice_id}/generate-documents",
     response_model=list[TaxInvoiceDocumentResponse],
+    dependencies=[Depends(require_permission("invoice:generate"))],
 )
 async def generate_documents(
     invoice_id: uuid.UUID,

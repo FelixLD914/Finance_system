@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db_session
+from app.core.dependencies import PrincipalDependency, require_permission
 from app.modules.wht.document_service import WhtDocumentService
 from app.modules.wht.legacy_import import (
     LegacyWorkbookError,
@@ -34,16 +35,21 @@ from app.modules.wht.schemas import (
 )
 from app.modules.wht.service import TaskAggregate, WhtService
 
-router = APIRouter(prefix="/v1/wht", tags=["wht"])
+# 整个 WHT 路由组要求已登录。逐个端点再用 require_permission 收紧到具体权限点。
+router = APIRouter(
+    prefix="/v1/wht",
+    tags=["wht"],
+    dependencies=[Depends(require_permission("wht:read"))],
+)
 
 
 async def get_wht_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    principal: PrincipalDependency,
 ) -> WhtService:
-    return WhtService(
-        session=session,
-        actor_name=get_settings().bootstrap_admin_display_name,
-    )
+    # actor_name 取自登录用户，审计字段因此能落到具体的人；
+    # 此前这里用的是配置里的静态名字，所有操作看起来都是同一个人做的。
+    return WhtService(session=session, actor_name=principal.actor_name)
 
 
 WhtServiceDependency = Annotated[WhtService, Depends(get_wht_service)]
@@ -51,11 +57,9 @@ WhtServiceDependency = Annotated[WhtService, Depends(get_wht_service)]
 
 async def get_wht_document_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    principal: PrincipalDependency,
 ) -> WhtDocumentService:
-    return WhtDocumentService(
-        session=session,
-        actor_name=get_settings().bootstrap_admin_display_name,
-    )
+    return WhtDocumentService(session=session, actor_name=principal.actor_name)
 
 
 WhtDocumentServiceDependency = Annotated[
@@ -149,6 +153,7 @@ async def list_tasks(
     "/tasks",
     response_model=WhtTaskResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("wht:write"))],
 )
 async def create_task(
     payload: WhtTaskCreate,
@@ -165,7 +170,11 @@ async def get_task(
     return _task_response(await service.get_task(task_id))
 
 
-@router.patch("/tasks/{task_id}", response_model=WhtTaskResponse)
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=WhtTaskResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
 async def update_task(
     task_id: uuid.UUID,
     payload: WhtTaskUpdate,
@@ -174,7 +183,11 @@ async def update_task(
     return _task_response(await service.update_task(task_id, payload))
 
 
-@router.post("/tasks/{task_id}/submit-review", response_model=WhtTaskResponse)
+@router.post(
+    "/tasks/{task_id}/submit-review",
+    response_model=WhtTaskResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
 async def submit_for_review(
     task_id: uuid.UUID,
     payload: WhtWorkflowRequest,
@@ -183,7 +196,11 @@ async def submit_for_review(
     return _task_response(await service.submit_for_review(task_id, payload.version, payload.note))
 
 
-@router.post("/tasks/{task_id}/approve", response_model=WhtTaskResponse)
+@router.post(
+    "/tasks/{task_id}/approve",
+    response_model=WhtTaskResponse,
+    dependencies=[Depends(require_permission("wht:approve"))],
+)
 async def approve_task(
     task_id: uuid.UUID,
     payload: WhtWorkflowRequest,
@@ -192,7 +209,11 @@ async def approve_task(
     return _task_response(await service.approve(task_id, payload.version, payload.note))
 
 
-@router.post("/tasks/{task_id}/return-to-draft", response_model=WhtTaskResponse)
+@router.post(
+    "/tasks/{task_id}/return-to-draft",
+    response_model=WhtTaskResponse,
+    dependencies=[Depends(require_permission("wht:approve"))],
+)
 async def return_to_draft(
     task_id: uuid.UUID,
     payload: WhtWorkflowRequest,
@@ -201,7 +222,11 @@ async def return_to_draft(
     return _task_response(await service.return_to_draft(task_id, payload.version, payload.note))
 
 
-@router.post("/tasks/import", response_model=ImportResult)
+@router.post(
+    "/tasks/import",
+    response_model=ImportResult,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
 async def import_historical_tasks(
     service: WhtServiceDependency,
     file: Annotated[UploadFile, File(description="Legacy WHT Data.xlsx")],
@@ -231,6 +256,7 @@ async def list_payees(
     "/payees",
     response_model=PayeeResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("wht:write"))],
 )
 async def create_payee(
     payload: PayeeCreate,
@@ -239,7 +265,11 @@ async def create_payee(
     return PayeeResponse.model_validate(await service.create_payee(payload))
 
 
-@router.patch("/payees/{payee_id}", response_model=PayeeResponse)
+@router.patch(
+    "/payees/{payee_id}",
+    response_model=PayeeResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
 async def update_payee(
     payee_id: uuid.UUID,
     payload: PayeeUpdate,
@@ -248,7 +278,11 @@ async def update_payee(
     return PayeeResponse.model_validate(await service.update_payee(payee_id, payload))
 
 
-@router.post("/payees/import", response_model=ImportResult)
+@router.post(
+    "/payees/import",
+    response_model=ImportResult,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
 async def import_payees(
     service: WhtServiceDependency,
     file: Annotated[UploadFile, File(description="WHT Data.xlsx with Sheet2")],
@@ -274,6 +308,7 @@ async def list_signatures(
     "/signatures",
     response_model=SignatureAssetResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("signature:manage"))],
 )
 async def create_signature(
     service: WhtDocumentServiceDependency,
@@ -297,7 +332,11 @@ async def create_signature(
     return SignatureAssetResponse.model_validate(signature)
 
 
-@router.patch("/signatures/{signature_id}", response_model=SignatureAssetResponse)
+@router.patch(
+    "/signatures/{signature_id}",
+    response_model=SignatureAssetResponse,
+    dependencies=[Depends(require_permission("signature:manage"))],
+)
 async def update_signature(
     signature_id: uuid.UUID,
     payload: SignatureAssetUpdate,
@@ -323,6 +362,7 @@ async def signature_content(
 @router.post(
     "/tasks/{task_id}/generate-documents",
     response_model=list[WhtDocumentResponse],
+    dependencies=[Depends(require_permission("wht:generate"))],
 )
 async def generate_documents(
     task_id: uuid.UUID,

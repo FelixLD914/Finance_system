@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ServiceError
 from app.modules.wht.models import IssueCounter, PayeeProfile, WhtTask, WhtTaskEvent
 from app.modules.wht.number_service import assign_number_on_approval
 from app.modules.wht.schemas import (
@@ -21,8 +22,9 @@ from app.modules.wht.schemas import (
 MONEY_QUANTUM = Decimal("0.01")
 
 
-class WhtServiceError(RuntimeError):
-    status_code = 400
+class WhtServiceError(ServiceError):
+    """WHT 模块异常基类。真正的基类已提到 app.core.errors.ServiceError，
+    这里保留原名以免改动大量既有 import。"""
 
 
 class WhtNotFoundError(WhtServiceError):

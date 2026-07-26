@@ -1,3 +1,4 @@
+import { ApiError, UnauthorizedError, apiFetch, apiRequest } from "../../shared/http";
 import { samplePayees, sampleWhtTasks } from "./sampleData";
 import type {
   ImportResult,
@@ -10,7 +11,6 @@ import type {
   WhtTaskEvent,
 } from "./types";
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "/api";
 const useDemoApi = import.meta.env.VITE_USE_MOCK_API === "true";
 
 let demoTasks = structuredClone(sampleWhtTasks);
@@ -19,29 +19,11 @@ let demoSignatures: SignatureAsset[] = [];
 let demoDocuments: WhtDocument[] = [];
 let demoEventId = 1;
 
-export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
-    super(message);
-  }
-}
+// ApiError 继续从本模块导出，避免改动所有既有 import。
+// 实现已挪到 shared/http，那里统一处理 CSRF 头与会话凭证。
+export { ApiError, UnauthorizedError };
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
-      ...init?.headers,
-    },
-  });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(body?.detail ?? `API request failed (${response.status})`, response.status);
-  }
-  return (await response.json()) as T;
-}
+const request = apiRequest;
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -365,8 +347,8 @@ export async function generateWhtDocuments(
 
 export async function downloadWhtDocument(document: WhtDocument): Promise<void> {
   if (useDemoApi) return;
-  const response = await fetch(`${apiBase}/v1/wht/documents/${document.id}/download`);
-  if (!response.ok) throw new ApiError(`Download failed (${response.status})`, response.status);
+  // 走 apiFetch：下载同样要带会话 Cookie，否则受保护的端点会 401。
+  const response = await apiFetch(`/v1/wht/documents/${document.id}/download`);
   const url = URL.createObjectURL(await response.blob());
   const anchor = window.document.createElement("a");
   anchor.href = url;
