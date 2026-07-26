@@ -55,7 +55,7 @@ _APPROVE: frozenset[str] = frozenset(
 #   approver  operator 的全部权限，外加批准、作废、更正、生成正式文件
 #   admin     全部权限，含签名图片库与用户管理
 #
-# 三项已确认的决定，改动前需要重新走业务确认：
+# 四项已确认的决定，改动前需要重新走业务确认：
 #   1. approver **包含**录入权限（_PREPARE | _APPROVE）。即制度不要求
 #      "录入人不得是批准人"，approver 可以自己录、自己批。职责分离靠的是
 #      operator 拿不到批准权，而不是反过来限制 approver。
@@ -64,8 +64,8 @@ _APPROVE: frozenset[str] = frozenset(
 #   3. WHT 与 TAX INV **共用同一批批准人**：_APPROVE 是一个整体，不拆成
 #      _APPROVE_INVOICE / _APPROVE_WHT。
 #
-# 尚未确认：signature:manage 目前只给 admin。签名图片决定正式 PDF 上盖谁的
-# 名字，若要独立授权需新增角色，届时把它从 ALL_PERMISSIONS 里单拆出来。
+#   4. signature:manage 只给 admin。签名图片决定正式 PDF 上盖谁的名字，
+#      不下放给 approver 或 operator。
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "viewer": _READ_ONLY,
     "operator": _PREPARE,

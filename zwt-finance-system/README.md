@@ -12,26 +12,64 @@
 
 ## Local development
 
-1. 复制 `.env.example` 为 `.env`，按本机 PostgreSQL 15 修改连接信息。
-2. 前端：
+首次部署，一条命令完成依赖安装、`.env` 生成、数据库迁移和管理员账号创建：
 
-   ```powershell
-   Set-Location .\frontend
-   npm.cmd install --cache .npm-cache
-   npm.cmd run dev
-   ```
+```powershell
+.\scripts\Initialize-ZwtDev.ps1
+```
 
-3. 后端：
+之后每次启动：
 
-   ```powershell
-   Set-Location .\backend
-   py -m venv .venv
-   .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-   .\.venv\Scripts\python.exe -m app.run_windows
-   ```
+```powershell
+.\scripts\Start-Zwt.ps1
+```
+
+停止：
+
+```powershell
+.\scripts\Stop-Zwt.ps1
+```
 
 前端开发服务器为 `http://127.0.0.1:5273`，`/api` 仅在开发期间代理到
 `http://127.0.0.1:8100`。生产环境由 Caddy 同源转发。
+
+### 脚本说明
+
+| 脚本 | 作用 |
+| --- | --- |
+| `Initialize-ZwtDev.ps1` | 首次部署。可重复执行，已完成的步骤自动跳过 |
+| `Start-Zwt.ps1` | 启动后端与前端（各开一个窗口，日志可见），等健康检查通过后开浏览器 |
+| `Stop-Zwt.ps1` | 按端口停止本项目进程 |
+
+常用参数：
+
+```powershell
+.\scripts\Start-Zwt.ps1 -BackendOnly      # 只起后端
+.\scripts\Start-Zwt.ps1 -Recreate         # 端口被本项目旧进程占用时先停再起
+.\scripts\Start-Zwt.ps1 -NoBrowser        # 不自动开浏览器
+.\scripts\Initialize-ZwtDev.ps1 -SkipInstall   # 只做 .env 与迁移
+```
+
+两条安全约束写进了脚本，不是靠人记：
+
+- **启动前后都检查本项目没有占用 BOI 的 5173 / 4173 / 8000。** 一旦某处配置
+  退回旧默认值，`Start-Zwt.ps1` 会打出占用端口的 PID 和完整命令行并中止，
+  而不是让两套系统互相踩。
+- **`Stop-Zwt.ps1` 只停命令行里含 `zwt-finance-system` 的进程。** 目标端口上
+  如果是别的程序，只报告不动手，需要 `-Force` 才会停 —— 避免误杀 BOI 的服务。
+
+后端等待的是 `/api/health/ready` 而不是 `/live`：前者会真的执行一次
+PostgreSQL `SELECT 1`，能把"进程起来了但连不上库"当场暴露出来。
+
+手工启动（不用脚本）：
+
+```powershell
+Set-Location .\backend; .\.venv\Scripts\python.exe -m app.run_windows
+Set-Location .\frontend; npm.cmd run dev
+```
+
+Windows 上后端必须走 `app.run_windows`，直接 `uvicorn` 会用 Proactor 事件循环，
+psycopg 的异步实现不支持。
 
 ## Authentication
 
@@ -78,22 +116,20 @@ $env:ZWT_ADMIN_PW = Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlai
 | `invoice:generate` / `wht:generate` | | | ✓ | ✓ |
 | `signature:manage` / `user:manage` | | | | ✓ |
 
-三项已确认的决定，**改动前需重新走业务确认**：
+四项已确认的决定，**改动前需重新走业务确认**：
 
 1. `approver` 包含录入权限，可以自己录、自己批。职责分离靠的是 `operator`
    拿不到批准权，而不是反过来限制 `approver`。
 2. 作废与批准同级 —— 作废一张已签发税票不需要更高授权。
 3. WHT 与 TAX INV 共用同一批批准人，`_APPROVE` 不拆分。
+4. `signature:manage` 只给 `admin`。能批准一张税票，不等于能改上面盖谁的章。
 
 新建用户默认是 `operator`（`User.role` 的默认值），因此默认情况下录入人
 无法批准自己录的单。
 
-这三条在 `tests/test_authz.py` 里有对应的策略锁定测试：断言的是"能批准的
+这四条在 `tests/test_authz.py` 里有对应的策略锁定测试：断言的是"能批准的
 角色集合 == 能作废的角色集合"这类关系而非具体角色名，任何一侧被单独收紧
 或放宽都会让测试失败，避免策略被静默改掉。
-
-尚未确认：`signature:manage` 目前只给 `admin`。签名图片决定正式 PDF 上盖
-谁的名字，若要独立授权需新增角色。
 
 ## Port allocation
 

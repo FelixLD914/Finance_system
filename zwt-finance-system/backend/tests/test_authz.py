@@ -90,13 +90,14 @@ def test_confirmed_wht_and_tax_invoice_share_approvers() -> None:
     assert _roles_with("wht:generate") == _roles_with("invoice:generate")
 
 
-def test_signature_management_remains_admin_only() -> None:
-    """尚未确认的一项：签名图片库目前只有 admin 能管。
+def test_confirmed_signature_management_is_admin_only() -> None:
+    """已确认：签名图片库只有 admin 能管，不下放给 approver 或 operator。
 
-    签名决定正式 PDF 上盖谁的名字。若将来独立成角色，这条会失败，
-    提醒同步更新 authz.py 顶部的策略说明。
+    签名决定正式 PDF 上盖谁的名字，因此与批准权分离：能批准一张税票，
+    不等于能改上面盖谁的章。
     """
     assert _roles_with("signature:manage") == {"admin"}
+    assert not role_has("approver", "signature:manage")
 
 
 def test_principal_require_raises_for_missing_permission() -> None:
