@@ -10,6 +10,44 @@
 - Service: WinSW
 - Reverse proxy: Caddy，内网非标准 HTTPS 端口
 
+## Database instance
+
+ZWT 使用**独立的 PostgreSQL 15 集群**，不与 BOI 共用实例。开发机上的实例分布：
+
+| 服务 | 端口 | 用途 |
+| --- | --- | --- |
+| `postgresql-x64-18` | 5432 | 只有系统库，非本项目使用 |
+| `postgresql-x64-15` | 5434 | **BOI 的实例**（约 250 个 `boi_*` 库），不要连 |
+| `postgresql-zwt15` | 5435 | **ZWT 专用**，由 `Initialize-ZwtPostgres.ps1` 建立 |
+
+三者端口不冲突，可以同时运行。
+
+项目边界要求"独立数据库，不读取或写入 BOI 数据库"。在 BOI 的集群里新建一个库
+只能做到逻辑隔离 —— 连接数、共享内存、WAL、备份与 PITR 恢复窗口仍是同一份，
+BOI 做一次全库恢复就会波及 ZWT。因此改为独立集群：数据目录、Windows 服务、
+端口、超级用户口令、WAL 与备份全部独立，只共用同版本的程序文件。
+
+首次建立（需要**管理员权限**的 PowerShell）：
+
+```powershell
+.\scripts\Initialize-ZwtPostgres.ps1
+```
+
+集群参数及其理由：
+
+- `--encoding=UTF8` —— 泰文与中文数据的硬性要求。
+- `--locale=C` —— 确定性的字节序排序。Windows 上 libc locale 名称各机器不一致，
+  用 C 避免"换台机器排序结果就变"。代价是 `ORDER BY` 对泰文/中文按字节序而非
+  语言习惯排序；确有需要时在查询里用 `COLLATE`，不要依赖集群默认值。
+- `--data-checksums` —— BOI 的集群未启用。正式税票与 WHT 凭证值得用一点写入
+  开销换取静默磁盘损坏的早期发现。
+- `listen_addresses = 'localhost'` —— 应用与 Caddy 都在同一台机器，没有理由把
+  数据库暴露到网段。
+- `log_connections = on` —— 记录连接来源，审计需要。
+
+`Start-Zwt.ps1` 启动时会按 `.env` 里实际配置的端口核对监听情况，指到 BOI 的
+5434 上会告警。
+
 ## Local development
 
 首次部署，一条命令完成依赖安装、`.env` 生成、数据库迁移和管理员账号创建：
@@ -37,6 +75,7 @@
 
 | 脚本 | 作用 |
 | --- | --- |
+| `Initialize-ZwtPostgres.ps1` | 建立 ZWT 专用的 PostgreSQL 15 集群（需管理员权限，只需跑一次） |
 | `Initialize-ZwtDev.ps1` | 首次部署。可重复执行，已完成的步骤自动跳过 |
 | `Start-Zwt.ps1` | 启动后端与前端（各开一个窗口，日志可见），等健康检查通过后开浏览器 |
 | `Stop-Zwt.ps1` | 按端口停止本项目进程 |

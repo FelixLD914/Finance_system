@@ -163,31 +163,64 @@ function Get-EnvValue {
     return $null
 }
 
+function Get-DatabasePortFromEnv {
+    <#
+        .SYNOPSIS
+        从 .env 的 ZWT_DATABASE_URL 里抽出端口号。取不到返回 $null。
+    #>
+    $url = Get-EnvValue -Key "ZWT_DATABASE_URL"
+    if ([string]::IsNullOrWhiteSpace($url)) { return $null }
+    # postgresql+psycopg://user:pass@host:port/dbname
+    if ($url -match '@[^/:]+:(\d+)/') { return [int]$Matches[1] }
+    return $null
+}
+
 function Show-PostgresStatus {
     <#
         .SYNOPSIS
-        提示 5432 上实际运行的 PostgreSQL 版本。
+        报告 .env 指向的那个端口上到底是哪个 PostgreSQL 实例。
 
         .DESCRIPTION
-        本机同时装了 PG 15 和 PG 18，两者都想用 5432。项目基线是 PG 15，
-        但连上去的其实是当前占用 5432 的那一个 —— 版本不符时数据会写错地方，
-        所以启动前把实际情况打出来。
+        本机有多个 PostgreSQL 实例，端口各不相同：
+          postgresql-x64-18   5432   只有系统库
+          postgresql-x64-15   5434   BOI 的实例
+          postgresql-zwt15    5435   ZWT 专用（由 Initialize-ZwtPostgres.ps1 建立）
+
+        它们端口不冲突，可以共存。真正的风险不是"版本不对"，而是 .env 指到了
+        错误的实例 —— 尤其是指到 BOI 的 5434 上去。所以这里按 .env 里实际配置
+        的端口来判断，而不是假定某个版本才是对的。
     #>
-    $services = Get-CimInstance Win32_Service -Filter "Name LIKE '%postgres%'" -ErrorAction SilentlyContinue
-    if ($null -eq $services) {
+    $services = @(Get-CimInstance Win32_Service -Filter "Name LIKE '%postgres%'" -ErrorAction SilentlyContinue)
+    if ($services.Count -eq 0) {
         Write-Warn "未发现 PostgreSQL 服务。"
         return
     }
-    $running = @($services | Where-Object { $_.State -eq "Running" })
-    if ($running.Count -eq 0) {
-        Write-Err "没有正在运行的 PostgreSQL 服务，后端将无法就绪。"
+    foreach ($svc in $services) {
+        $mark = if ($svc.State -eq "Running") { "运行中" } else { "已停止" }
+        Write-Host "    PostgreSQL 实例: $($svc.Name) [$mark]"
+    }
+
+    $dbPort = Get-DatabasePortFromEnv
+    if ($null -eq $dbPort) {
+        Write-Warn "无法从 .env 解析出数据库端口，跳过实例核对。"
         return
     }
-    foreach ($svc in $running) {
-        Write-Ok "PostgreSQL 运行中: $($svc.Name)"
+
+    $owner = Get-PortOwner -Port $dbPort
+    if ($null -eq $owner) {
+        Write-Err ".env 指向端口 $dbPort，但该端口上没有服务在监听 —— 后端会无法就绪。"
+        return
     }
-    if (@($running | Where-Object { $_.Name -like "*15*" }).Count -eq 0) {
-        Write-Warn "项目基线是 PostgreSQL 15，但当前运行的不是 15。"
-        Write-Warn "确认 .env 的 ZWT_DATABASE_URL 指向的确实是预期的实例。"
+    Write-Ok ".env 指向端口 $dbPort，该端口有服务在监听"
+
+    # 指到 BOI 的实例上是最需要当场拦住的情况：项目边界明确要求
+    # 不读取或写入 BOI 数据库。
+    $boiService = Get-CimInstance Win32_Service -Filter "Name = 'postgresql-x64-15'" -ErrorAction SilentlyContinue
+    if ($null -ne $boiService -and $boiService.State -eq "Running") {
+        $boiPort = 5434
+        if ($dbPort -eq $boiPort) {
+            Write-Warn "注意：端口 $dbPort 是 BOI 实例 (postgresql-x64-15) 的端口。"
+            Write-Warn "项目边界要求 ZWT 不使用 BOI 的数据库实例，请确认这是有意为之。"
+        }
     }
 }
