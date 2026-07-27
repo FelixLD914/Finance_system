@@ -180,14 +180,34 @@ Write-Ok "集群已创建（UTF8 / C locale / 已启用数据页校验和）"
 Write-Step "写入配置"
 
 $confFile = Join-Path $DataDirectory "postgresql.conf"
+# Get-Content 会自动识别并剥掉 BOM，读进来的是纯文本；写回时用
+# Write-TextFileNoBom 保证不再写出 BOM。
 $conf = @(Get-Content $confFile)
+
+# 先删掉本脚本此前追加过的块，再重新追加 —— 否则 -RepairExisting 每跑一次
+# 就多一份重复配置。同时匹配旧版的中文标记，便于从早期版本升级。
+$markers = @(
+    "# --- ZWT dedicated instance (managed by Initialize-ZwtPostgres.ps1) ---",
+    "# --- ZWT 独立实例 ---"
+)
+$cut = -1
+for ($i = 0; $i -lt $conf.Count; $i++) {
+    if ($markers -contains $conf[$i].Trim()) { $cut = $i; break }
+}
+if ($cut -ge 0) {
+    Write-Host "    移除此前追加的配置块（第 $($cut + 1) 行起）"
+    # 连同标记前的空行一起去掉，避免反复运行后堆积空行。
+    while ($cut -gt 0 -and $conf[$cut - 1].Trim() -eq "") { $cut-- }
+    $conf = @($conf[0..([Math]::Max($cut - 1, 0))])
+    if ($cut -eq 0) { $conf = @() }
+}
 
 # 追加到文件末尾即可 —— postgresql.conf 后出现的赋值覆盖先前的同名项，
 # 不需要改动 initdb 生成的原始内容。
 # 全部用 ASCII：这个文件由 PostgreSQL 在确定任何编码之前解析，
 # 不要在里面放非 ASCII 字符（中文说明留在本脚本里）。
 $conf += ""
-$conf += "# --- ZWT dedicated instance (managed by Initialize-ZwtPostgres.ps1) ---"
+$conf += $markers[0]
 $conf += "port = $Port"
 $conf += "listen_addresses = 'localhost'"
 $conf += "log_destination = 'stderr'"

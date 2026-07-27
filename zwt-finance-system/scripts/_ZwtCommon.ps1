@@ -34,7 +34,13 @@ function Write-TextFileNoBom {
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string[]]$Lines
+        # AllowEmptyString 是必需的：Mandatory 的 [string[]] 参数会拒绝数组里
+        # 的空字符串，而配置文件和 .env 都含空行。AllowEmptyCollection 兜住
+        # 整个数组为空的情况。
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$Lines
     )
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllLines($Path, $Lines, $utf8NoBom)
