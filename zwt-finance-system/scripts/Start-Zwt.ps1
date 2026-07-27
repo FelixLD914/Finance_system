@@ -47,7 +47,10 @@ $startFrontend = -not $BackendOnly
 
 Write-Step "预检"
 
-$missing = Test-Prerequisites
+# 必须用 @() 包住：函数返回空数组时 PowerShell 会把它解包成 $null，
+# StrictMode 下 $null.Count 直接抛 PropertyNotFoundStrict。
+# 也就是说"一切就绪"反而是会崩的那条路径。
+$missing = @(Test-Prerequisites)
 if ($missing.Count -gt 0) {
     Write-Err "开发环境尚未初始化："
     foreach ($item in $missing) { Write-Err "  - $item" }
