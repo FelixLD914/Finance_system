@@ -163,6 +163,34 @@ function Get-EnvValue {
     return $null
 }
 
+function Get-ZwtPostgresPort {
+    <#
+        .SYNOPSIS
+        探测 ZWT 专用 PostgreSQL 实例的端口。找不到该实例时返回 $null。
+
+        .DESCRIPTION
+        从服务的 PathName 里取出 -D 指定的数据目录，再读该目录的
+        postgresql.conf。这样即使建集群时用了非默认端口也能正确探到，
+        不必让人手动记住填哪个数字 —— 填错端口会连到 BOI 的实例上去。
+    #>
+    param([string]$ServiceName = "postgresql-zwt15")
+
+    $svc = Get-CimInstance Win32_Service -Filter "Name = '$ServiceName'" -ErrorAction SilentlyContinue
+    if ($null -eq $svc) { return $null }
+    if ($svc.PathName -notmatch '-D\s+"([^"]+)"') { return $null }
+
+    $conf = Join-Path $Matches[1] "postgresql.conf"
+    if (-not (Test-Path $conf)) { return $null }
+
+    # 取最后一条生效的 port 设置：postgresql.conf 后面的赋值覆盖前面的，
+    # 而建集群脚本是把 port 追加到文件末尾的。
+    $port = $null
+    foreach ($line in (Get-Content $conf -Encoding UTF8)) {
+        if ($line -match '^\s*port\s*=\s*(\d+)') { $port = [int]$Matches[1] }
+    }
+    return $port
+}
+
 function Get-DatabasePortFromEnv {
     <#
         .SYNOPSIS

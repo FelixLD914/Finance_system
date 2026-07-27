@@ -27,11 +27,14 @@ ZWT 使用**独立的 PostgreSQL 15 集群**，不与 BOI 共用实例。开发�
 BOI 做一次全库恢复就会波及 ZWT。因此改为独立集群：数据目录、Windows 服务、
 端口、超级用户口令、WAL 与备份全部独立，只共用同版本的程序文件。
 
-首次建立（需要**管理员权限**的 PowerShell）：
+首次建立，在**以管理员身份运行**的 PowerShell 里执行。管理员窗口默认落在
+`C:\Windows\system32`，所以用完整路径（下面按本机路径示例，请按实际仓库位置替换）：
 
 ```powershell
-.\scripts\Initialize-ZwtPostgres.ps1
+D:\AI\gpt_codex\finan_system_DIV_Part\zwt-finance-system\scripts\Initialize-ZwtPostgres.ps1
 ```
+
+只有这一个脚本需要管理员权限（注册 Windows 服务）。其余脚本用普通权限运行。
 
 集群参数及其理由：
 
@@ -50,11 +53,21 @@ BOI 做一次全库恢复就会波及 ZWT。因此改为独立集群：数据目
 
 ## Local development
 
+以下脚本都用**普通权限**运行（不要用管理员窗口 —— `npm install` 以管理员身份
+写 `node_modules` 会留下普通用户改不动的文件）。先切到仓库根目录：
+
+```powershell
+Set-Location D:\AI\gpt_codex\finan_system_DIV_Part\zwt-finance-system
+```
+
 首次部署，一条命令完成依赖安装、`.env` 生成、数据库迁移和管理员账号创建：
 
 ```powershell
 .\scripts\Initialize-ZwtDev.ps1
 ```
+
+数据库端口填 **5435**（`Initialize-ZwtPostgres.ps1` 建的 ZWT 专用实例），
+不是默认提示的 5432。
 
 之后每次启动：
 

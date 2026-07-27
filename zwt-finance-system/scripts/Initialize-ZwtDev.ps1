@@ -27,6 +27,19 @@ Write-Host ""
 Write-Host "ZWT 财务系统 — 开发环境初始化" -ForegroundColor Cyan
 Write-Host ""
 
+# 这个脚本不需要管理员权限。以管理员身份跑会让 npm install 写出的
+# node_modules 归属 Administrators，之后普通用户改不动。
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($isAdmin) {
+    Write-Warn "当前是管理员窗口。本脚本不需要提权，建议改用普通 PowerShell 运行，"
+    Write-Warn "否则 npm install 产生的文件会归 Administrators 所有。"
+    Write-Warn "（只有 Initialize-ZwtPostgres.ps1 需要管理员权限。）"
+    $goOn = Read-Host "    仍要继续？(y/N)"
+    if ($goOn -ne "y") { Write-Host "    已取消。"; exit 0 }
+    Write-Host ""
+}
+
 # --- 1. .env -----------------------------------------------------------------
 
 Write-Step "检查 .env"
@@ -44,8 +57,26 @@ if (Test-Path $script:EnvFile) {
     $dbHost = Read-Host "    数据库主机 [127.0.0.1]"
     if ([string]::IsNullOrWhiteSpace($dbHost)) { $dbHost = "127.0.0.1" }
 
-    $dbPort = Read-Host "    数据库端口 [5432]"
-    if ([string]::IsNullOrWhiteSpace($dbPort)) { $dbPort = "5432" }
+    # 自动探测 ZWT 专用实例的端口。手填端口最容易出的错是填成 5432 或 5434，
+    # 前者是空实例、后者是 BOI 的实例 —— 都不该连。
+    $detectedPort = Get-ZwtPostgresPort
+    if ($null -ne $detectedPort) {
+        Write-Ok "已探测到 ZWT 专用实例 postgresql-zwt15，端口 $detectedPort"
+        $defaultPort = "$detectedPort"
+    } else {
+        Write-Warn "未发现 ZWT 专用实例 postgresql-zwt15。"
+        Write-Warn "若尚未建立，请先以管理员身份运行 Initialize-ZwtPostgres.ps1。"
+        Write-Warn "注意 5432 是空实例、5434 是 BOI 的实例，都不应作为 ZWT 的库。"
+        $defaultPort = "5435"
+    }
+
+    $dbPort = Read-Host "    数据库端口 [$defaultPort]"
+    if ([string]::IsNullOrWhiteSpace($dbPort)) { $dbPort = $defaultPort }
+    if ($dbPort -eq "5434") {
+        Write-Warn "5434 是 BOI 实例的端口。项目边界要求 ZWT 不使用 BOI 的数据库实例。"
+        $confirmBoi = Read-Host "    确定要继续吗？(y/N)"
+        if ($confirmBoi -ne "y") { Write-Host "    已取消。"; exit 0 }
+    }
 
     $dbName = Read-Host "    数据库名 [zwt_finance]"
     if ([string]::IsNullOrWhiteSpace($dbName)) { $dbName = "zwt_finance" }
