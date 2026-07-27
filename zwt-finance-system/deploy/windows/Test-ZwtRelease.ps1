@@ -17,6 +17,7 @@ $requiredFiles = @(
     "frontend\dist\index.html",
     "backend\.venv\Scripts\python.exe",
     "backend\app\assets\templates\WHT-Template.pdf",
+    "backend\app\assets\templates\TAX-INV-Template.pdf",
     "backend\app\assets\fonts\Sarabun-Regular.ttf"
 )
 

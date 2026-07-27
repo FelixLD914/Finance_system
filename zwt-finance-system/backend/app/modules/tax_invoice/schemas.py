@@ -176,11 +176,10 @@ class ExchangeRateFetchRequest(ApiSchema):
 class TaxInvoiceDocumentGenerateRequest(ApiSchema):
     signature_id: uuid.UUID | None = None
     include_signature: bool = False
-    # TAX INV PDF 底版尚未随应用发布，document_service 见到 "pdf" 会直接抛 422。
-    # 默认值必须只含 xlsx，否则不带 formats 的请求百分之百失败。
-    # 底版制好并接入后，再把 "pdf" 加回默认值。
+    # 底版 app/assets/templates/TAX-INV-Template.pdf 已随应用发布，
+    # 两种格式都能出，默认一次生成 xlsx + pdf。
     formats: list[Literal["xlsx", "pdf"]] = Field(
-        default_factory=lambda: ["xlsx"],
+        default_factory=lambda: ["xlsx", "pdf"],
         min_length=1,
         max_length=2,
     )

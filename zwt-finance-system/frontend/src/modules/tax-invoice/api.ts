@@ -126,7 +126,7 @@ export function listTaxInvoiceDocuments(
   );
 }
 
-export function generateTaxInvoiceXlsx(
+export function generateTaxInvoiceDocuments(
   invoiceId: string,
 ): Promise<TaxInvoiceDocument[]> {
   return request<TaxInvoiceDocument[]>(
@@ -136,7 +136,7 @@ export function generateTaxInvoiceXlsx(
       body: JSON.stringify({
         includeSignature: false,
         signatureId: null,
-        formats: ["xlsx"],
+        formats: ["xlsx", "pdf"],
       }),
     },
   );

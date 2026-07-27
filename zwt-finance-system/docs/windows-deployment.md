@@ -51,8 +51,10 @@ if ($ready.status -ne "ready" -or $ready.database -ne "ok") {
 }
 ```
 
-WHT PDF 运行时不依赖 Microsoft Office、Excel COM 或交互式 Windows 登录会话。
-发布包必须包含 `backend\app\assets\templates\WHT-Template.pdf` 和
+WHT 与 TAX INV 的 PDF 运行时都不依赖 Microsoft Office、Excel COM 或交互式
+Windows 登录会话。发布包必须包含
+`backend\app\assets\templates\WHT-Template.pdf`、
+`backend\app\assets\templates\TAX-INV-Template.pdf` 和
 `backend\app\assets\fonts\Sarabun-Regular.ttf`。管理员另行维护经业务批准的
 `ZWT_WHT_TEMPLATE_PATH` Excel 模板；模板变更应作为受控配置变更并先用黄金样例验收。
 
@@ -61,6 +63,12 @@ WHT PDF 运行时不依赖 Microsoft Office、Excel COM 或交互式 Windows 登
 确认 Q14 为报关提交日对应的开票日期、O/P 商品列仍显示汇率目标日与实际匹配汇率，
 且正式编号日期段与 Q14 一致。当前模板最多 18 条商品，超过时系统必须拒绝批准，
 不得截断。
+
+TAX INV 的 PDF 底版是由该 Excel 模板一次性制版得到的静态三联 PDF，坐标表在
+`backend\app\modules\tax_invoice\pdf_layout.py`。**Excel 模板一旦变更，底版和坐标表
+必须一起重新生成**，否则 PDF 会错位：在装有 Excel 的开发机上跑
+`scripts\build_tax_inv_underlay.py`（生产机不需要、也不应安装 Excel）。
+坐标表头部记录了生成时所用模板的 sha256，可用于核对是否已过期。
 
 ## HTTPS 与内部 CA
 

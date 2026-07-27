@@ -36,11 +36,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $sourceFull "backend\requirements.lo
 }
 $requiredSourceAssets = @(
     "backend\app\assets\templates\WHT-Template.pdf",
+    "backend\app\assets\templates\TAX-INV-Template.pdf",
     "backend\app\assets\fonts\Sarabun-Regular.ttf"
 )
 foreach ($relativeAsset in $requiredSourceAssets) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceFull $relativeAsset) -PathType Leaf)) {
-        throw "Required WHT runtime asset is missing: $relativeAsset"
+        throw "Required PDF runtime asset is missing: $relativeAsset"
     }
 }
 
@@ -108,6 +109,11 @@ $manifest = [ordered]@{
     WhtPdfTemplateSha256 = (
         Get-FileHash -Algorithm SHA256 -LiteralPath (
             Join-Path $backendRoot "app\assets\templates\WHT-Template.pdf"
+        )
+    ).Hash
+    TaxInvPdfTemplateSha256 = (
+        Get-FileHash -Algorithm SHA256 -LiteralPath (
+            Join-Path $backendRoot "app\assets\templates\TAX-INV-Template.pdf"
         )
     ).Hash
     SarabunFontSha256 = (

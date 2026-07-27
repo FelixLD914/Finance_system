@@ -8,7 +8,9 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  FileDoneOutlined,
   FileExcelOutlined,
+  FilePdfOutlined,
   FileSearchOutlined,
   InboxOutlined,
   ReloadOutlined,
@@ -46,7 +48,7 @@ import {
   createTaxInvoiceCorrection,
   downloadTaxInvoiceDocument,
   fetchExchangeRates,
-  generateTaxInvoiceXlsx,
+  generateTaxInvoiceDocuments,
   getTaxInvoice,
   importDualFiles,
   importExchangeRates,
@@ -279,12 +281,12 @@ function InvoiceInspector({
           <h3>正式文件</h3>
           <Button
             disabled={!canGenerate}
-            icon={<FileExcelOutlined />}
+            icon={<FileDoneOutlined />}
             loading={busy}
             size="small"
             onClick={onGenerate}
           >
-            生成 Excel
+            生成正式文件
           </Button>
         </div>
         {documents.length ? (
@@ -296,7 +298,11 @@ function InvoiceInspector({
                 type="button"
                 onClick={() => onDownload(document)}
               >
-                <FileExcelOutlined />
+                {document.fileFormat === "pdf" ? (
+                  <FilePdfOutlined />
+                ) : (
+                  <FileExcelOutlined />
+                )}
                 <span>
                   {document.fileName}
                   <small>v{document.version} · {dateTime(document.createdAt)}</small>
@@ -516,14 +522,14 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
     if (!selected) return;
     setBusy(true);
     try {
-      const created = await generateTaxInvoiceXlsx(selected.id);
+      const created = await generateTaxInvoiceDocuments(selected.id);
       setDocuments((current) => [...created, ...current]);
       const detail = await getTaxInvoice(selected.id);
       setSelected(detail);
       setInvoices((current) =>
         current.map((invoice) => (invoice.id === detail.id ? detail : invoice)),
       );
-      message.success("TAX INV Excel 正式文件已生成");
+      message.success("TAX INV 正式文件已生成（Excel + PDF）");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "文件生成失败");
     } finally {

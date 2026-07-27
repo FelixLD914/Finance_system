@@ -5,12 +5,14 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from anyio import to_thread
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.modules.tax_invoice.document_generator import (
     TaxInvoiceDocumentGenerationError,
+    export_pdf_from_template,
     render_tax_invoice_workbook,
     tax_invoice_file_stem,
 )
@@ -65,10 +67,6 @@ class TaxInvoiceDocumentService:
         invoice_id: uuid.UUID,
         payload: TaxInvoiceDocumentGenerateRequest,
     ) -> list[TaxInvoiceDocument]:
-        if "pdf" in payload.formats:
-            raise TaxInvoiceStateError(
-                "TAX INV PDF underlay is not installed yet; generate XLSX only"
-            )
         invoice = await self.session.scalar(
             select(TaxInvoice).where(TaxInvoice.id == invoice_id).with_for_update()
         )
@@ -88,12 +86,18 @@ class TaxInvoiceDocumentService:
             ).all()
         )
         template_path = self.settings.tax_invoice_template_path
+        pdf_template_path = self.settings.tax_invoice_pdf_template_path
+        if "xlsx" in payload.formats and not template_path.is_file():
+            raise TaxInvoiceStateError(f"TAX INV template was not found: {template_path}")
+        if "pdf" in payload.formats and not pdf_template_path.is_file():
+            raise TaxInvoiceStateError(
+                f"TAX INV PDF template was not found: {pdf_template_path}"
+            )
         try:
-            content = render_tax_invoice_workbook(template_path, invoice, items)
             stem = tax_invoice_file_stem(invoice)
         except TaxInvoiceDocumentGenerationError as exc:
             raise TaxInvoiceStateError(str(exc)) from exc
-        template_sha256 = hashlib.sha256(template_path.read_bytes()).hexdigest()
+
         generation_id = uuid.uuid4()
         relative_root = (
             Path("tax_invoice")
@@ -103,57 +107,93 @@ class TaxInvoiceDocumentService:
         )
         output_root = self._storage_path(relative_root.as_posix())
         output_root.mkdir(parents=True, exist_ok=False)
-        output_path = output_root / f"{stem}.xlsx"
-        output_path.write_bytes(content)
 
-        version = (
-            await self.session.scalar(
-                select(func.coalesce(func.max(TaxInvoiceDocument.version), 0)).where(
-                    TaxInvoiceDocument.invoice_id == invoice.id,
-                    TaxInvoiceDocument.file_format == "xlsx",
+        template_hashes: dict[str, str] = {}
+        created_files: list[Path] = []
+        documents: list[TaxInvoiceDocument] = []
+        try:
+            if "xlsx" in payload.formats:
+                content = render_tax_invoice_workbook(template_path, invoice, items)
+                xlsx_path = output_root / f"{stem}.xlsx"
+                xlsx_path.write_bytes(content)
+                template_hashes["xlsx"] = hashlib.sha256(
+                    template_path.read_bytes()
+                ).hexdigest()
+                created_files.append(xlsx_path)
+            if "pdf" in payload.formats:
+                pdf_path = output_root / f"{stem}.pdf"
+                # ReportLab 画三页是纯同步 CPU 活，扔到线程池，别卡住事件循环。
+                await to_thread.run_sync(
+                    export_pdf_from_template,
+                    pdf_template_path,
+                    pdf_path,
+                    invoice,
+                    items,
+                    self.settings.thai_font_path,
+                )
+                template_hashes["pdf"] = hashlib.sha256(
+                    pdf_template_path.read_bytes()
+                ).hexdigest()
+                created_files.append(pdf_path)
+
+            for path in created_files:
+                file_format = path.suffix.removeprefix(".")
+                version = (
+                    await self.session.scalar(
+                        select(func.coalesce(func.max(TaxInvoiceDocument.version), 0)).where(
+                            TaxInvoiceDocument.invoice_id == invoice.id,
+                            TaxInvoiceDocument.file_format == file_format,
+                        )
+                    )
+                    or 0
+                ) + 1
+                document = TaxInvoiceDocument(
+                    invoice_id=invoice.id,
+                    signature_id=None,
+                    file_format=file_format,
+                    version=version,
+                    file_name=path.name,
+                    storage_key=path.relative_to(
+                        self.settings.attachment_root.resolve()
+                    ).as_posix(),
+                    sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                    template_sha256=template_hashes[file_format],
+                    created_by_name=self.actor_name,
+                )
+                self.session.add(document)
+                documents.append(document)
+
+            previous_status = invoice.status
+            if invoice.status == "approved":
+                invoice.status = "issued"
+                invoice.issued_at = datetime.now(UTC)
+                invoice.version += 1
+                invoice.updated_by_name = self.actor_name
+            self.session.add(
+                TaxInvoiceEvent(
+                    invoice_id=invoice.id,
+                    event_type="documents_generated",
+                    from_status=previous_status,
+                    to_status=invoice.status,
+                    actor_name=self.actor_name,
+                    note=", ".join(payload.formats),
                 )
             )
-            or 0
-        ) + 1
-        document = TaxInvoiceDocument(
-            invoice_id=invoice.id,
-            signature_id=None,
-            file_format="xlsx",
-            version=version,
-            file_name=output_path.name,
-            storage_key=output_path.relative_to(
-                self.settings.attachment_root.resolve()
-            ).as_posix(),
-            sha256=hashlib.sha256(content).hexdigest(),
-            template_sha256=template_sha256,
-            created_by_name=self.actor_name,
-        )
-        self.session.add(document)
-        previous_status = invoice.status
-        if invoice.status == "approved":
-            invoice.status = "issued"
-            invoice.issued_at = datetime.now(UTC)
-            invoice.version += 1
-            invoice.updated_by_name = self.actor_name
-        self.session.add(
-            TaxInvoiceEvent(
-                invoice_id=invoice.id,
-                event_type="documents_generated",
-                from_status=previous_status,
-                to_status=invoice.status,
-                actor_name=self.actor_name,
-                note="xlsx",
-            )
-        )
-        try:
             await self.session.commit()
-        except Exception:
+        except Exception as exc:
+            # 必须先 rollback：commit 失败后 session 不可用，
+            # 依赖收尾时的任何语句都会再抛 PendingRollbackError 盖掉真正的原因。
             await self.session.rollback()
-            output_path.unlink(missing_ok=True)
+            for path in output_root.glob("*"):
+                path.unlink(missing_ok=True)
             output_root.rmdir()
+            if isinstance(exc, TaxInvoiceDocumentGenerationError):
+                raise TaxInvoiceStateError(str(exc)) from exc
             raise
-        await self.session.refresh(document)
-        return [document]
+
+        for document in documents:
+            await self.session.refresh(document)
+        return documents
 
     async def document_content(
         self,
