@@ -16,6 +16,30 @@ $script:VenvPython  = Join-Path $script:BackendRoot ".venv\Scripts\python.exe"
 $script:EnvFile     = Join-Path $script:ZwtRoot ".env"
 $script:EnvExample  = Join-Path $script:ZwtRoot ".env.example"
 
+function Write-TextFileNoBom {
+    <#
+        .SYNOPSIS
+        写文本文件，UTF-8 且**不带 BOM**。
+
+        .DESCRIPTION
+        Windows PowerShell 5.1 里 `Set-Content -Encoding UTF8` 写的是
+        **带 BOM** 的 UTF-8（开头 EF BB BF），这会直接破坏两类文件：
+
+          postgresql.conf  PostgreSQL 的配置解析器把 BOM 当作第 1 行的内容，
+                           报 "第 1 行, 行尾附近语法错误" 并拒绝启动。
+          .env             python-dotenv 按 utf-8 读取但不剥 BOM，
+                           第一个键会变成 "﻿ZWT_ENVIRONMENT" 而静默失效。
+
+        两者都不能带 BOM，所以统一走这个函数，不要再用 Set-Content -Encoding UTF8。
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$Lines
+    )
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($Path, $Lines, $utf8NoBom)
+}
+
 function Write-Step {
     param([string]$Message)
     Write-Host "==> $Message" -ForegroundColor Cyan
@@ -161,6 +185,58 @@ function Get-EnvValue {
         }
     }
     return $null
+}
+
+function Show-PostgresStartFailure {
+    <#
+        .SYNOPSIS
+        服务起不来时，把真正的原因打出来。
+
+        .DESCRIPTION
+        Start-Service 只会说 "Failed to start service"，毫无信息量。
+        PostgreSQL 启动失败的真实原因在两个地方：数据目录下的 log（如果进程
+        活到了能开日志收集器的时候），以及 Windows 应用程序事件日志（进程在
+        更早阶段就退出时只有这里有，例如配置文件解析失败）。
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$DataDirectory,
+        [datetime]$Since = (Get-Date).AddMinutes(-5)
+    )
+
+    Write-Host ""
+    Write-Host "    --- PostgreSQL 启动失败详情 ---" -ForegroundColor Yellow
+
+    $logDir = Join-Path $DataDirectory "log"
+    $logged = $false
+    if (Test-Path $logDir) {
+        $latest = @(Get-ChildItem $logDir -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+        if ($latest.Count -gt 0) {
+            Write-Host "    集群日志 $($latest[0].Name):"
+            Get-Content $latest[0].FullName -Tail 15 -ErrorAction SilentlyContinue |
+                ForEach-Object { Write-Host "      $_" }
+            $logged = $true
+        }
+    }
+    if (-not $logged) {
+        Write-Host "    集群日志目录为空 —— 进程在开启日志收集器之前就退出了。"
+    }
+
+    try {
+        $events = @(Get-WinEvent -FilterHashtable @{LogName = "Application"; StartTime = $Since} -ErrorAction Stop |
+            Where-Object { $_.ProviderName -like "*PostgreSQL*" } | Select-Object -First 6)
+        if ($events.Count -gt 0) {
+            Write-Host "    Windows 应用程序日志:"
+            foreach ($e in $events) {
+                foreach ($line in (($e.Message -split "`n") | Where-Object { $_.Trim() -ne "" } | Select-Object -First 2)) {
+                    Write-Host "      $($line.Trim())"
+                }
+            }
+        }
+    } catch {
+        Write-Host "    （读取事件日志失败，可手动查看：事件查看器 > Windows 日志 > 应用程序）"
+    }
+    Write-Host ""
 }
 
 function Get-ZwtPostgresPort {

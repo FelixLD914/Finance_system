@@ -98,7 +98,7 @@ if (Test-Path $script:EnvFile) {
     $encodedPassword = [uri]::EscapeDataString($plainPassword)
     $databaseUrl = "postgresql+psycopg://${encodedUser}:${encodedPassword}@${dbHost}:${dbPort}/${dbName}"
 
-    $lines = Get-Content $script:EnvExample -Encoding UTF8
+    $lines = Get-Content $script:EnvExample
     $output = foreach ($line in $lines) {
         if ($line -match '^\s*ZWT_DATABASE_URL\s*=') {
             "ZWT_DATABASE_URL=$databaseUrl"
@@ -110,10 +110,12 @@ if (Test-Path $script:EnvFile) {
             $line
         }
     }
-    Set-Content -Path $script:EnvFile -Value $output -Encoding UTF8
+    # 必须无 BOM：python-dotenv 按 utf-8 读取但不剥 BOM，带 BOM 会让第一个键
+    # 变成 "﻿ZWT_ENVIRONMENT" 而静默失效。
+    Write-TextFileNoBom -Path $script:EnvFile -Lines $output
     $plainPassword = $null
 
-    Write-Ok "已生成 .env（该文件在 .gitignore 中，不会进入版本库）"
+    Write-Ok "已生成 .env（无 BOM；该文件在 .gitignore 中，不会进入版本库）"
 }
 
 # --- 2. 后端依赖 --------------------------------------------------------------

@@ -30,9 +30,17 @@
 .PARAMETER BinDirectory
     PostgreSQL 15 程序目录。默认 E:\PG15\bin。
 
+.PARAMETER RepairExisting
+    集群已由 initdb 建好、但服务注册或启动失败时使用。跳过 initdb（因此不会
+    重设超级用户口令），只重写配置、修正服务账号与目录权限并重新启动。
+
 .EXAMPLE
     # 在"以管理员身份运行"的 PowerShell 里执行
     .\Initialize-ZwtPostgres.ps1
+
+.EXAMPLE
+    # 上次跑到一半失败，集群已存在时
+    .\Initialize-ZwtPostgres.ps1 -RepairExisting
 #>
 [CmdletBinding()]
 param(
@@ -40,7 +48,8 @@ param(
     [ValidateRange(1024, 65535)]
     [int]$Port = 5435,
     [string]$ServiceName = "postgresql-zwt15",
-    [string]$BinDirectory = "E:\PG15\bin"
+    [string]$BinDirectory = "E:\PG15\bin",
+    [switch]$RepairExisting
 )
 
 Set-StrictMode -Version Latest
@@ -75,16 +84,40 @@ foreach ($exe in @($initdb, $pgCtl, $psql)) {
 }
 Write-Ok "PostgreSQL 15 程序目录: $BinDirectory"
 
-if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-    Write-Err "服务 $ServiceName 已存在。若要重建请先手动注销："
-    Write-Err "  $pgCtl unregister -N $ServiceName"
-    exit 1
-}
+$clusterExists = Test-Path (Join-Path $DataDirectory "PG_VERSION")
+$serviceExists = $null -ne (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)
 
-if ((Test-Path $DataDirectory) -and @(Get-ChildItem $DataDirectory -Force -ErrorAction SilentlyContinue).Count -gt 0) {
-    Write-Err "数据目录已存在且非空: $DataDirectory"
-    Write-Err "initdb 拒绝写入非空目录。请换一个目录或先清空。"
-    exit 1
+if ($RepairExisting) {
+    if (-not $clusterExists) {
+        Write-Err "-RepairExisting 需要 $DataDirectory 下已有集群（找不到 PG_VERSION）。"
+        Write-Err "该目录尚无集群，请去掉 -RepairExisting 正常执行。"
+        exit 1
+    }
+    Write-Ok "集群已存在，进入修复模式（不会重跑 initdb，超级用户口令保持不变）"
+    if ($serviceExists) {
+        Write-Host "    注销既有服务 $ServiceName ..."
+        Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+        & $pgCtl unregister -N $ServiceName
+        if ($LASTEXITCODE -ne 0) { Write-Err "注销服务失败"; exit 1 }
+        Start-Sleep -Seconds 2
+        Write-Ok "已注销"
+    }
+} else {
+    if ($serviceExists) {
+        Write-Err "服务 $ServiceName 已存在。"
+        Write-Err "若上次执行到一半失败，请改用： -RepairExisting"
+        exit 1
+    }
+    if ($clusterExists) {
+        Write-Err "数据目录已有集群: $DataDirectory"
+        Write-Err "若上次执行到一半失败，请改用： -RepairExisting"
+        exit 1
+    }
+    if ((Test-Path $DataDirectory) -and @(Get-ChildItem $DataDirectory -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+        Write-Err "数据目录已存在且非空: $DataDirectory"
+        Write-Err "initdb 拒绝写入非空目录。请换一个目录或先清空。"
+        exit 1
+    }
 }
 
 $portOwner = Get-PortOwner -Port $Port
@@ -100,7 +133,7 @@ foreach ($svc in (Get-CimInstance Win32_Service -Filter "Name LIKE '%postgres%'"
 }
 
 Write-Host ""
-Write-Host "    将要创建：" -ForegroundColor Yellow
+Write-Host "    $(if ($RepairExisting) { '将要修复：' } else { '将要创建：' })" -ForegroundColor Yellow
 Write-Host "      数据目录 : $DataDirectory"
 Write-Host "      端口     : $Port"
 Write-Host "      服务名   : $ServiceName"
@@ -112,6 +145,10 @@ if ($confirm -ne "y") {
 }
 
 # --- initdb ------------------------------------------------------------------
+
+if ($RepairExisting) {
+    Write-Step "跳过 initdb（集群已存在）"
+} else {
 
 Write-Step "创建集群"
 
@@ -136,47 +173,76 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok "集群已创建（UTF8 / C locale / 已启用数据页校验和）"
 
+}   # end if (-not $RepairExisting)
+
 # --- 配置 --------------------------------------------------------------------
 
 Write-Step "写入配置"
 
 $confFile = Join-Path $DataDirectory "postgresql.conf"
-$conf = Get-Content $confFile -Encoding UTF8
-$conf = $conf | ForEach-Object {
-    if ($_ -match '^\s*#?\s*port\s*=')              { "port = $Port" }
-    elseif ($_ -match '^\s*#?\s*listen_addresses\s*=') { "listen_addresses = 'localhost'" }
-    else { $_ }
-}
-# 只监听本机：应用与 Caddy 都在同一台机器上，没有理由把数据库暴露到网段。
+$conf = @(Get-Content $confFile)
+
+# 追加到文件末尾即可 —— postgresql.conf 后出现的赋值覆盖先前的同名项，
+# 不需要改动 initdb 生成的原始内容。
+# 全部用 ASCII：这个文件由 PostgreSQL 在确定任何编码之前解析，
+# 不要在里面放非 ASCII 字符（中文说明留在本脚本里）。
 $conf += ""
-$conf += "# --- ZWT 独立实例 ---"
+$conf += "# --- ZWT dedicated instance (managed by Initialize-ZwtPostgres.ps1) ---"
 $conf += "port = $Port"
 $conf += "listen_addresses = 'localhost'"
 $conf += "log_destination = 'stderr'"
 $conf += "logging_collector = on"
 $conf += "log_directory = 'log'"
-$conf += "log_min_duration_statement = 2000   # 慢查询留痕，便于排查"
-$conf += "log_connections = on                # 记录连接来源，审计需要"
+$conf += "log_min_duration_statement = 2000"
+$conf += "log_connections = on"
 $conf += "log_disconnections = on"
-Set-Content -Path $confFile -Value $conf -Encoding UTF8
+
+# 必须无 BOM。PS 5.1 的 Set-Content -Encoding UTF8 会写 BOM，
+# PostgreSQL 会报 "第 1 行, 行尾附近语法错误" 并拒绝启动。
+Write-TextFileNoBom -Path $confFile -Lines $conf
 Write-Ok "端口 $Port，仅监听 localhost，已开启连接日志"
 
 # --- 注册服务 ----------------------------------------------------------------
 
 Write-Step "注册 Windows 服务"
-& $pgCtl register -N $ServiceName -D "$DataDirectory" -S auto
+
+# 服务账号用 NetworkService，与本机既有的 postgresql-x64-15 / -18 一致。
+# pg_ctl register 不带 -U 时默认 LocalSystem，而 postgres.exe 拒绝以具有
+# 管理员权限的账号运行，服务会起不来。NetworkService 是低权限内置账号，
+# 不需要口令。
+$serviceAccount = "NT AUTHORITY\NetworkService"
+
+# 数据目录由当前管理员账号创建，NetworkService 默认没有权限，必须显式授予。
+Write-Host "    授予 $serviceAccount 对数据目录的权限..."
+& icacls.exe "$DataDirectory" /grant "${serviceAccount}:(OI)(CI)F" /T /Q
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "授予数据目录权限失败"
+    exit 1
+}
+Write-Ok "数据目录权限已授予"
+
+& $pgCtl register -N $ServiceName -D "$DataDirectory" -S auto -U "$serviceAccount"
 if ($LASTEXITCODE -ne 0) {
     Write-Err "注册服务失败"
     exit 1
 }
-Start-Service -Name $ServiceName
+$startedAt = Get-Date
+try {
+    Start-Service -Name $ServiceName -ErrorAction Stop
+} catch {
+    Write-Err "服务启动失败: $($_.Exception.Message)"
+    Show-PostgresStartFailure -DataDirectory $DataDirectory -Since $startedAt
+    exit 1
+}
+
 $deadline = (Get-Date).AddSeconds(30)
 while ((Get-Date) -lt $deadline) {
     if ($null -ne (Get-PortOwner -Port $Port)) { break }
     Start-Sleep -Milliseconds 500
 }
 if ($null -eq (Get-PortOwner -Port $Port)) {
-    Write-Err "服务已注册但未在 30 秒内监听 $Port。请查看 $DataDirectory\log 下的日志。"
+    Write-Err "服务已注册但未在 30 秒内监听 $Port。"
+    Show-PostgresStartFailure -DataDirectory $DataDirectory -Since $startedAt
     exit 1
 }
 Write-Ok "$ServiceName 已启动并监听 $Port"
