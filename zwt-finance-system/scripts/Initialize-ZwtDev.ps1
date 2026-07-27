@@ -183,7 +183,61 @@ if (-not $SkipInstall) {
     }
 }
 
-# --- 3. 数据库迁移 ------------------------------------------------------------
+# --- 3. 运行期目录与模板 ------------------------------------------------------
+
+Write-Step "运行期目录与模板"
+
+# ZWT_ATTACHMENT_ROOT 不存在的话，第一次导入或生成文件就会失败。
+# 这个目录不在仓库里（.gitignore 排除 attachments/），必须部署时建。
+$paths = & $script:VenvPython -c @"
+from app.core.config import get_settings
+s = get_settings()
+print(s.attachment_root)
+print(s.wht_template_path)
+print(s.tax_invoice_template_path)
+"@
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "无法读取配置，请检查 .env"
+    exit 1
+}
+$attachmentRoot, $whtTemplate, $taxTemplate = $paths -split "`r?`n" | Where-Object { $_.Trim() -ne "" }
+
+if (Test-Path $attachmentRoot) {
+    Write-Ok "附件目录已存在: $attachmentRoot"
+} else {
+    New-Item -ItemType Directory -Path $attachmentRoot -Force | Out-Null
+    Write-Ok "已创建附件目录: $attachmentRoot"
+}
+
+# 模板是业务方批准的正式版式，脚本不代为生成，只检查并给出出处。
+$legacyRoot = Join-Path (Split-Path -Parent $script:ZwtRoot) "Sample_previous_code"
+$templateChecks = @(
+    @{ Path = $whtTemplate; Label = "WHT Excel 模板";     Legacy = Join-Path $legacyRoot "WHT\Template.xlsx" },
+    @{ Path = $taxTemplate; Label = "TAX INV Excel 模板"; Legacy = Join-Path $legacyRoot "TAX INV\template.xlsx" }
+)
+foreach ($check in $templateChecks) {
+    if (Test-Path $check.Path) {
+        Write-Ok "$($check.Label)已就位"
+        continue
+    }
+    $dir = Split-Path -Parent $check.Path
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Write-Warn "$($check.Label)缺失: $($check.Path)"
+    if (Test-Path $check.Legacy) {
+        Write-Warn "旧系统里有一份: $($check.Legacy)"
+        $copyIt = Read-Host "    复制过来？(y/N)"
+        if ($copyIt -eq "y") {
+            Copy-Item $check.Legacy $check.Path -Force
+            Write-Ok "已复制。请与业务方确认这是当前批准的版式。"
+        } else {
+            Write-Warn "跳过。缺少模板时该模块的文件生成会失败。"
+        }
+    } else {
+        Write-Warn "请向业务方索取批准的模板并放到上述路径。"
+    }
+}
+
+# --- 4. 数据库迁移 ------------------------------------------------------------
 
 Write-Step "数据库迁移"
 Push-Location $script:BackendRoot
@@ -199,7 +253,7 @@ try {
 }
 Write-Ok "已升级到最新版本"
 
-# --- 4. 管理员账号 ------------------------------------------------------------
+# --- 5. 管理员账号 ------------------------------------------------------------
 
 Write-Step "管理员账号"
 

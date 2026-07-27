@@ -20,7 +20,8 @@ export function App() {
   if (initializing) {
     return (
       <main className="app-bootstrap">
-        <Spin size="large" tip="正在确认登录状态" />
+        {/* antd 6 里 Spin 的 tip 已弃用，改用 description。 */}
+        <Spin size="large" description="正在确认登录状态" />
       </main>
     );
   }
