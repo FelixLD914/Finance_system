@@ -166,7 +166,12 @@ Write-Host ""
 #                   COLLATE 指定，不要靠集群默认值。
 # --data-checksums  BOI 的集群没开（数据页校验和版本 0）。正式税票与 WHT 凭证
 #                   值得用一点写入开销换取静默磁盘损坏的早期发现。
-& $initdb --pgdata="$DataDirectory" --encoding=UTF8 --locale=C --data-checksums --username=postgres --pwprompt
+# --auth-local / --auth-host 必须显式指定为 scram-sha-256。
+# initdb 的默认值是 trust —— 本机任何进程都能免密以任意角色连库，
+# 对存放正式税票的系统不可接受。initdb 只会打一行警告就继续，很容易漏掉。
+& $initdb --pgdata="$DataDirectory" --encoding=UTF8 --locale=C --data-checksums `
+    --auth-local=scram-sha-256 --auth-host=scram-sha-256 `
+    --username=postgres --pwprompt
 if ($LASTEXITCODE -ne 0) {
     Write-Err "initdb 失败"
     exit 1
@@ -221,6 +226,28 @@ $conf += "log_disconnections = on"
 # PostgreSQL 会报 "第 1 行, 行尾附近语法错误" 并拒绝启动。
 Write-TextFileNoBom -Path $confFile -Lines $conf
 Write-Ok "端口 $Port，仅监听 localhost，已开启连接日志"
+
+# pg_hba.conf 里任何 trust 规则都要清掉。修复模式下这一步尤其重要：
+# 早期版本的本脚本没给 initdb 传 --auth-*，建出来的集群是 trust，
+# 本机任何进程都能免密以任意角色连库。
+$hbaFile = Join-Path $DataDirectory "pg_hba.conf"
+$hba = @(Get-Content $hbaFile)
+$trustCount = @($hba | Where-Object {
+    $_.Trim() -ne "" -and -not $_.Trim().StartsWith("#") -and $_ -match '\btrust\s*$'
+}).Count
+if ($trustCount -gt 0) {
+    Write-Warn "pg_hba.conf 中有 $trustCount 条 trust 规则（免密登录），正在改为 scram-sha-256"
+    Copy-Item $hbaFile "$hbaFile.bak-trust" -Force
+    $hba = $hba | ForEach-Object {
+        if ($_.Trim() -ne "" -and -not $_.Trim().StartsWith("#") -and $_ -match '\btrust\s*$') {
+            $_ -replace '\btrust\s*$', 'scram-sha-256'
+        } else { $_ }
+    }
+    Write-TextFileNoBom -Path $hbaFile -Lines $hba
+    Write-Ok "已改为 scram-sha-256（原文件备份为 pg_hba.conf.bak-trust）"
+} else {
+    Write-Ok "pg_hba.conf 无 trust 规则"
+}
 
 # --- 注册服务 ----------------------------------------------------------------
 

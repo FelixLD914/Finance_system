@@ -193,6 +193,66 @@ function Get-EnvValue {
     return $null
 }
 
+function Test-DatabaseUrl {
+    <#
+        .SYNOPSIS
+        用给定的连接串真正连一次数据库。返回 @{ Success; Detail }。
+
+        .DESCRIPTION
+        写 .env 之前先验证，避免把填错的值落盘 —— 否则错误要等到跑迁移时才
+        以 "failed to resolve host" 之类的形式暴露，而且此时 .env 已经是坏的。
+
+        连接串通过环境变量传给子进程，不作为命令行参数：命令行可被同机其他
+        进程从进程列表读到，里面含口令。
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$DatabaseUrl,
+        [Parameter(Mandatory = $true)][string]$PythonExe
+    )
+
+    if (-not (Test-Path $PythonExe)) {
+        return @{ Success = $false; Detail = "找不到 Python: $PythonExe" }
+    }
+
+    $probe = @'
+import asyncio, os, sys
+asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+async def main():
+    engine = create_async_engine(os.environ["ZWT_PROBE_URL"])
+    try:
+        async with engine.connect() as conn:
+            db = await conn.scalar(text("SELECT current_database()"))
+            usr = await conn.scalar(text("SELECT current_user"))
+            ver = await conn.scalar(text("SHOW server_version"))
+        print(f"OK|PostgreSQL {ver}, database={db}, user={usr}")
+    except Exception as exc:
+        first = str(exc).strip().splitlines()[0]
+        print(f"FAIL|{type(exc).__name__}: {first[:200]}")
+        sys.exit(1)
+    finally:
+        await engine.dispose()
+
+asyncio.run(main())
+'@
+
+    $env:ZWT_PROBE_URL = $DatabaseUrl
+    try {
+        $output = $probe | & $PythonExe - 2>&1
+    } finally {
+        Remove-Item Env:\ZWT_PROBE_URL -ErrorAction SilentlyContinue
+    }
+
+    $line = @($output | Where-Object { $_ -match '^(OK|FAIL)\|' } | Select-Object -Last 1)
+    if ($line.Count -eq 0) {
+        return @{ Success = $false; Detail = "探测脚本无输出（Python 环境异常？）" }
+    }
+    $parts = $line[0] -split '\|', 2
+    return @{ Success = ($parts[0] -eq "OK"); Detail = $parts[1] }
+}
+
 function Show-PostgresStartFailure {
     <#
         .SYNOPSIS

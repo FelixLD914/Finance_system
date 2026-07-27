@@ -53,8 +53,11 @@ if (Test-Path $script:EnvFile) {
     Show-PostgresStatus
     Write-Host ""
     Write-Host "    需要 zwt_finance 数据库的连接信息。" -ForegroundColor Yellow
+    Write-Host "    方括号里是默认值 —— 除口令外，全部直接按回车即可。" -ForegroundColor Yellow
+    Write-Host "    这里填的不是 Windows 账号，也不是服务名。" -ForegroundColor Yellow
+    Write-Host ""
 
-    $dbHost = Read-Host "    数据库主机 [127.0.0.1]"
+    $dbHost = Read-Host "    数据库主机（回车用 127.0.0.1）"
     if ([string]::IsNullOrWhiteSpace($dbHost)) { $dbHost = "127.0.0.1" }
 
     # 自动探测 ZWT 专用实例的端口。手填端口最容易出的错是填成 5432 或 5434，
@@ -70,7 +73,7 @@ if (Test-Path $script:EnvFile) {
         $defaultPort = "5435"
     }
 
-    $dbPort = Read-Host "    数据库端口 [$defaultPort]"
+    $dbPort = Read-Host "    数据库端口（回车用 $defaultPort）"
     if ([string]::IsNullOrWhiteSpace($dbPort)) { $dbPort = $defaultPort }
     if ($dbPort -eq "5434") {
         Write-Warn "5434 是 BOI 实例的端口。项目边界要求 ZWT 不使用 BOI 的数据库实例。"
@@ -78,25 +81,50 @@ if (Test-Path $script:EnvFile) {
         if ($confirmBoi -ne "y") { Write-Host "    已取消。"; exit 0 }
     }
 
-    $dbName = Read-Host "    数据库名 [zwt_finance]"
+    $dbName = Read-Host "    数据库名（回车用 zwt_finance）"
     if ([string]::IsNullOrWhiteSpace($dbName)) { $dbName = "zwt_finance" }
 
-    $dbUser = Read-Host "    数据库用户 [zwt_finance_app]"
+    $dbUser = Read-Host "    数据库角色名（回车用 zwt_finance_app）"
     if ([string]::IsNullOrWhiteSpace($dbUser)) { $dbUser = "zwt_finance_app" }
 
-    # -AsSecureString：输入不回显，也不会进入 PowerShell 历史。
-    $securePassword = Read-Host "    数据库口令" -AsSecureString
-    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
-    try {
-        $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    } finally {
-        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    # 连接测试通过后才写 .env。此前是直接写盘，填错的值要等到跑迁移时才以
+    # "failed to resolve host" 之类的报错暴露出来，而且 .env 已经留下坏数据。
+    $databaseUrl = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        # -AsSecureString：输入不回显，也不会进入 PowerShell 历史。
+        $securePassword = Read-Host "    $dbUser 的口令" -AsSecureString
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+        try {
+            $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+
+        # 口令与角色名里的 @ / : / / 会破坏 URL 结构，必须百分号编码。
+        $candidate = "postgresql+psycopg://$([uri]::EscapeDataString($dbUser)):$([uri]::EscapeDataString($plainPassword))@${dbHost}:${dbPort}/${dbName}"
+        $plainPassword = $null
+
+        Write-Host "    正在验证连接..."
+        $probe = Test-DatabaseUrl -DatabaseUrl $candidate -PythonExe $script:VenvPython
+        if ($probe.Success) {
+            Write-Ok "连接成功：$($probe.Detail)"
+            $databaseUrl = $candidate
+            break
+        }
+
+        Write-Err "连接失败：$($probe.Detail)"
+        $candidate = $null
+        if ($attempt -lt 3) {
+            Write-Warn "请确认主机 / 端口 / 库名 / 角色名 / 口令后重试（第 $attempt 次）。"
+            Write-Warn "当前使用：$dbUser@${dbHost}:${dbPort}/${dbName}"
+        }
     }
 
-    # 口令里的 @ / : / / 会破坏 URL 结构，必须百分号编码。
-    $encodedUser = [uri]::EscapeDataString($dbUser)
-    $encodedPassword = [uri]::EscapeDataString($plainPassword)
-    $databaseUrl = "postgresql+psycopg://${encodedUser}:${encodedPassword}@${dbHost}:${dbPort}/${dbName}"
+    if ($null -eq $databaseUrl) {
+        Write-Err "连接始终失败，未写入 .env。"
+        Write-Err "若尚未建立 ZWT 专用实例，请先以管理员身份运行 Initialize-ZwtPostgres.ps1。"
+        exit 1
+    }
 
     $lines = Get-Content $script:EnvExample
     $output = foreach ($line in $lines) {
