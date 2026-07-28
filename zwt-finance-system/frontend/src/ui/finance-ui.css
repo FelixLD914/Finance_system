@@ -523,8 +523,10 @@
   padding: 14px 20px 20px;
 }
 
+/* 末尾两列是「刷新」和「导出台账」。这条规则覆盖 global.css 里的同名选择器
+   （main.tsx 里 finance-ui.css 排最后），列数要跟着筛选栏的按钮数一起改。 */
 .tax-filter-bar {
-  grid-template-columns: 136px 144px minmax(260px, 1fr) auto;
+  grid-template-columns: 136px 144px minmax(220px, 1fr) auto auto;
   gap: 8px;
   padding: 10px;
   background: var(--finance-surface);

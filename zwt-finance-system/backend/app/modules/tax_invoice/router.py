@@ -1,9 +1,19 @@
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +21,7 @@ from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import PrincipalDependency, require_permission
 from app.modules.tax_invoice.document_service import TaxInvoiceDocumentService
+from app.modules.tax_invoice.ledger_export import build_ledger_workbook
 from app.modules.tax_invoice.recognition import (
     TaxInvoiceRecognitionError,
     parse_bot_fx_workbook,
@@ -141,6 +152,42 @@ async def list_invoices(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+# 必须排在 /invoices/{invoice_id} 前面：那条路由的 invoice_id 是 UUID，
+# "export" 会先命中它并以 422 收场，永远走不到这里。
+@router.get("/invoices/export")
+async def export_ledger(
+    service: ServiceDependency,
+    invoice_status: Literal[
+        "draft",
+        "needs_review",
+        "ready",
+        "approved",
+        "issued",
+        "voided",
+    ]
+    | None = Query(default=None, alias="status"),
+    period: str | None = None,
+    query: str | None = None,
+) -> Response:
+    """按台账当前筛选条件导出 Sample 格式 Excel，改完可以原样再导回。"""
+    entries = await service.export_entries(
+        status=invoice_status,
+        period=period,
+        query=query,
+    )
+    content = build_ledger_workbook(entries)
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    return Response(
+        content=content,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="tax-inv-ledger-{stamp}.xlsx"',
+        },
     )
 
 

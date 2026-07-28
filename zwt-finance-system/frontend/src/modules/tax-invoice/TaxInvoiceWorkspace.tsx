@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ApiOutlined,
   CheckCircleOutlined,
@@ -12,8 +12,9 @@ import {
   FileExcelOutlined,
   FilePdfOutlined,
   FileSearchOutlined,
-  InboxOutlined,
+  ImportOutlined,
   ReloadOutlined,
+  TableOutlined,
   SafetyCertificateOutlined,
   UploadOutlined,
   PlusOutlined,
@@ -47,10 +48,13 @@ import { FinanceLifecycleTabs, type FinanceLifecyclePhase } from "../../ui";
 import { ThaiText } from "../../shared/ThaiText";
 // 签名图库是两个模块共用的，接口挂在 WHT 路由下。
 import { listSignatures } from "../wht/api";
+import type { ApiIssue } from "../../shared/http";
 import {
+  TaxInvoiceApiError,
   approveTaxInvoice,
   createTaxInvoiceCorrection,
   downloadTaxInvoiceDocument,
+  exportTaxInvoiceLedger,
   fetchExchangeRates,
   generateTaxInvoiceDocuments,
   getBotApiStatus,
@@ -74,7 +78,42 @@ import type {
   TaxInvoiceStatus,
 } from "./types";
 
-type WorkspaceView = "ledger" | "recognition" | "rates";
+type WorkspaceView = "ledger" | "recognition" | "batch" | "rates";
+
+/**
+ * Sample 表格的表头要求，与后端 parse_sample_workbook 一一对应
+ * （backend/app/modules/tax_invoice/recognition.py）。少一个必填列后端直接
+ * 拒收整份文件，所以把清单摆在页面上，省得每次都靠试错。改后端记得同步这里。
+ */
+const SAMPLE_REQUIRED_COLUMNS = [
+  "CDN",
+  "Customer Name",
+  "Customer Address",
+  "Product Name or Service",
+  "Product Code",
+  "Unit",
+  "Quantity",
+  "FX Date",
+  "FX Rate",
+  "FOB Rev USD",
+  "FOB Rev THB",
+];
+
+const SAMPLE_OPTIONAL_COLUMNS = [
+  "DocumentNo",
+  "C/I No.",
+  "CI/PI Date",
+  "Invoice Date",
+  "Submission Date",
+  "RevRec Period",
+  "HS CODE",
+  "CI Unit Price",
+  "FOB Unit Price USD",
+  "TAX ID",
+  "PO No",
+  "INCOTERMS",
+  "Payment Term",
+];
 
 const statusClasses: Record<TaxInvoiceStatus, string> = {
   draft: "status-draft",
@@ -170,6 +209,70 @@ function dateTime(value: string | null, locale: Locale): string {
 
 function dateLabel(value: string | null): string {
   return value || "—";
+}
+
+type DualSlot = "invoice" | "customs";
+
+/** 一次拖入的一批文件按扩展名分派槽位，认不出的返回 null 由调用方提示。 */
+function classifyDualFile(file: File): DualSlot | null {
+  const name = file.name.toLocaleLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) return "invoice";
+  if (name.endsWith(".pdf")) return "customs";
+  return null;
+}
+
+/** 归位后的一个槽位。填上了就显示文件名和移除按钮，空着显示「待上传」。 */
+function DualFileSlot({
+  file,
+  hint,
+  icon,
+  label,
+  t,
+  onClear,
+}: {
+  file: File | null;
+  hint: string;
+  icon: ReactNode;
+  label: string;
+  t: Translate;
+  onClear: () => void;
+}) {
+  return (
+    <div className={`dual-slot${file ? " is-filled" : ""}`}>
+      {icon}
+      <span className="dual-slot-text">
+        <strong>{label}</strong>
+        {/* 空槽位显示这份文件是拿来干什么的，填上后换成文件名。 */}
+        <span title={file?.name ?? hint}>{file ? file.name : hint}</span>
+      </span>
+      {file ? (
+        <Button
+          aria-label={t("tax.slotRemove", { slot: label })}
+          icon={<CloseOutlined />}
+          size="small"
+          type="text"
+          onClick={onClear}
+        />
+      ) : (
+        <span className="dual-slot-flag">{t("tax.slotPending")}</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 把后端的 reason 码翻成当前语言。认不出的码退回后端给的英文说明，
+ * 好过显示一个原始枚举值——后端加了新原因时界面不至于变成乱码。
+ */
+function conflictText(issue: ApiIssue, t: Translate): string {
+  const keys: Record<string, Parameters<Translate>[0]> = {
+    duplicate_in_file: "tax.issueDuplicateInFile",
+    already_exists: "tax.issueAlreadyExists",
+    duplicate_number_in_file: "tax.issueDuplicateNumberInFile",
+    number_already_exists: "tax.issueNumberAlreadyExists",
+  };
+  const key = keys[issue.reason];
+  return key ? t(key, { key: issue.key }) : issue.detail;
 }
 
 function warningCount(invoice: TaxInvoice): number {
@@ -409,9 +512,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // USD 的 buying transfer，不受这里的浏览选择影响。
   const [currency, setCurrency] = useState("USD");
   const [currencies, setCurrencies] = useState<string[]>([]);
-  // 汇率中心拆成两件事：查台账（只读）和把汇率灌进库（写）。混在一张卡片里，
+  // 汇率中心拆成两件事：把汇率灌进库（写）和查台账（只读）。混在一张卡片里，
   // 想查个汇率的人要盯着"同步/导入"两个写操作按钮，误点代价还不小。
-  const [rateTab, setRateTab] = useState<"query" | "ingest">("query");
+  // 入库在前：台账里的数据都是先同步/导入才有的，查询是它的下游。
+  const [rateTab, setRateTab] = useState<"ingest" | "query">("ingest");
   const [rateRange, setRateRange] = useState({ startDate: "", endDate: "" });
   const [botStatus, setBotStatus] = useState<BotApiStatus | null>(null);
   const [selected, setSelected] = useState<TaxInvoice | null>(null);
@@ -425,6 +529,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [customsFile, setCustomsFile] = useState<File | null>(null);
   const [sampleFile, setSampleFile] = useState<File | null>(null);
+  const [conflicts, setConflicts] = useState<ApiIssue[]>([]);
   const [rateFile, setRateFile] = useState<File | null>(null);
   const [fetchOpen, setFetchOpen] = useState(false);
   const [workflowAction, setWorkflowAction] = useState<
@@ -743,6 +848,39 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
+  /**
+   * 一次投放的整批文件按扩展名归位。同类型多给了几个只认第一个：同一次开票
+   * 只有一份 Export Invoice 和一份报关单，静默取最后一个会让人不知道用了哪份。
+   */
+  const acceptDualFiles = useCallback(
+    (files: File[]) => {
+      const unsupported: string[] = [];
+      const duplicated: string[] = [];
+      const picked: Partial<Record<DualSlot, File>> = {};
+
+      for (const file of files) {
+        const slot = classifyDualFile(file);
+        if (!slot) {
+          unsupported.push(file.name);
+        } else if (picked[slot]) {
+          duplicated.push(file.name);
+        } else {
+          picked[slot] = file;
+        }
+      }
+
+      if (picked.invoice) setInvoiceFile(picked.invoice);
+      if (picked.customs) setCustomsFile(picked.customs);
+      if (unsupported.length) {
+        message.warning(t("tax.unsupportedFiles", { files: unsupported.join("、") }));
+      }
+      if (duplicated.length) {
+        message.warning(t("tax.duplicateIgnored", { files: duplicated.join("、") }));
+      }
+    },
+    [message, t],
+  );
+
   const runDualImport = async () => {
     if (!invoiceFile || !customsFile) {
       message.warning(t("tax.dualFilesRequired"));
@@ -790,7 +928,29 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       await refreshInvoices();
       setView("ledger");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : t("tax.sampleFailed"));
+      // 后端一次退回所有冲突行。塞进 message 会被截断也不能滚动，
+      // 逐行清单必须用弹窗展示，用户才能照着改表。
+      if (error instanceof TaxInvoiceApiError && error.issues.length) {
+        setConflicts(error.issues);
+      } else {
+        message.error(error instanceof Error ? error.message : t("tax.sampleFailed"));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runLedgerExport = async () => {
+    if (!filteredInvoices.length) {
+      message.warning(t("tax.exportEmpty"));
+      return;
+    }
+    setBusy(true);
+    try {
+      await exportTaxInvoiceLedger({ status, period, query });
+      message.success(t("tax.exportDone"));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.exportFailed"));
     } finally {
       setBusy(false);
     }
@@ -886,6 +1046,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           {t("tax.recognition")}
         </button>
         <button
+          className={view === "batch" ? "is-active" : ""}
+          type="button"
+          onClick={() => setView("batch")}
+        >
+          <ImportOutlined />
+          {t("tax.batchNav")}
+        </button>
+        <button
           className={view === "rates" ? "is-active" : ""}
           type="button"
           onClick={() => setView("rates")}
@@ -950,6 +1118,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               >
                 {t("common.refresh")}
               </Button>
+              {/* 导出跟着筛选条件走：看到的是哪一批，导出的就是哪一批。 */}
+              <Tooltip title={t("tax.exportLedgerTip")}>
+                <Button
+                  icon={<DownloadOutlined />}
+                  loading={busy}
+                  onClick={() => void runLedgerExport()}
+                >
+                  {t("tax.exportLedger")}
+                </Button>
+              </Tooltip>
             </div>
             <div className="tax-ledger-summary">
               <div>
@@ -1031,39 +1209,62 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   <p>{t("tax.dualRecognitionHint")}</p>
                 </div>
               </div>
-              <div className="dual-upload-grid">
-                <Upload.Dragger
-                  accept=".xlsx,.xls"
-                  beforeUpload={(file) => {
-                    setInvoiceFile(file);
-                    return false;
-                  }}
-                  fileList={uploadList(invoiceFile)}
-                  maxCount={1}
-                  onRemove={() => {
-                    setInvoiceFile(null);
-                  }}
-                >
-                  <p className="ant-upload-drag-icon"><FileExcelOutlined /></p>
-                  <p className="ant-upload-text">{t("tax.invoiceExcel")}</p>
-                  <p className="ant-upload-hint">{t("tax.invoiceExcelHint")}</p>
-                </Upload.Dragger>
-                <Upload.Dragger
-                  accept=".pdf"
-                  beforeUpload={(file) => {
-                    setCustomsFile(file);
-                    return false;
-                  }}
-                  fileList={uploadList(customsFile)}
-                  maxCount={1}
-                  onRemove={() => {
-                    setCustomsFile(null);
-                  }}
-                >
-                  <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-                  <p className="ant-upload-text">{t("tax.customsPdf")}</p>
-                  <p className="ant-upload-hint">{t("tax.customsPdfHint")}</p>
-                </Upload.Dragger>
+              {/* 一个投放区收两种文件：财务同事手上 Excel 和 PDF 是一起拿到的，
+                  分成两个框逼他们分两次选，多一次来回没有任何收益。 */}
+              <Upload.Dragger
+                accept=".xlsx,.xls,.pdf"
+                className="dual-drop-zone"
+                beforeUpload={(file, batch) => {
+                  // beforeUpload 每个文件调一次；只在整批的第一个上处理，
+                  // 否则「忽略了哪些文件」的提示会按文件数重复弹。
+                  if (file === batch[0]) acceptDualFiles(batch);
+                  return false;
+                }}
+                fileList={[]}
+                multiple
+                showUploadList={false}
+                onDrop={(event) => {
+                  // 点击选文件的分支里认不出的文件会走到 acceptDualFiles 提示；
+                  // 拖拽这条 rc-upload 会先按 accept 滤掉，根本到不了 beforeUpload。
+                  // 拖拽是这个区域的主路径，静默吞掉文件说不过去，单独补一条提示。
+                  const rejected = Array.from(event.dataTransfer.files)
+                    .filter((file) => !classifyDualFile(file))
+                    .map((file) => file.name);
+                  if (rejected.length) {
+                    message.warning(
+                      t("tax.unsupportedFiles", { files: rejected.join("、") }),
+                    );
+                  }
+                }}
+              >
+                <p className="ant-upload-drag-icon dual-drop-icons">
+                  <FileExcelOutlined />
+                  <PlusOutlined />
+                  <FilePdfOutlined />
+                </p>
+                <p className="ant-upload-text">{t("tax.dualDropTitle")}</p>
+                <p className="ant-upload-hint">{t("tax.dualDropHint")}</p>
+                <Button icon={<UploadOutlined />} size="small">
+                  {t("tax.dualPickFiles")}
+                </Button>
+              </Upload.Dragger>
+              <div className="dual-slot-row">
+                <DualFileSlot
+                  file={invoiceFile}
+                  hint={t("tax.invoiceExcelHint")}
+                  icon={<FileExcelOutlined />}
+                  label={t("tax.invoiceExcel")}
+                  t={t}
+                  onClear={() => setInvoiceFile(null)}
+                />
+                <DualFileSlot
+                  file={customsFile}
+                  hint={t("tax.customsPdfHint")}
+                  icon={<FilePdfOutlined />}
+                  label={t("tax.customsPdf")}
+                  t={t}
+                  onClear={() => setCustomsFile(null)}
+                />
               </div>
               <Button
                 block
@@ -1077,48 +1278,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               </Button>
             </section>
 
-            <section className="tax-tool-card">
-              <div className="tool-card-heading">
-                <div className="tool-card-icon ink">
-                  <DatabaseOutlined />
-                </div>
-                <div>
-                  <span>{t("tax.migration")}</span>
-                  <h2>{t("tax.importSample")}</h2>
-                  <p>{t("tax.importSampleHint")}</p>
-                </div>
-              </div>
-              <Alert
-                message={t("tax.sampleWarning")}
-                description={t("tax.sampleWarningBody")}
-                showIcon
-                type="warning"
-              />
-              <Upload
-                accept=".xlsx,.xls"
-                beforeUpload={(file) => {
-                  setSampleFile(file);
-                  return false;
-                }}
-                fileList={uploadList(sampleFile)}
-                maxCount={1}
-                onRemove={() => {
-                  setSampleFile(null);
-                }}
-              >
-                <Button icon={<UploadOutlined />} size="large">
-                  {t("tax.pickSample")}
-                </Button>
-              </Upload>
-              <Button
-                disabled={!sampleFile}
-                loading={busy}
-                size="large"
-                onClick={() => void runSampleImport()}
-              >
-                {t("tax.runSampleImport")}
-              </Button>
-            </section>
           </div>
 
           <section className="tax-quality-strip">
@@ -1147,18 +1306,116 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         </main>
       )}
 
+      {view === "batch" && (
+        <main className="tax-tool-page">
+          <p className="tax-rule-note">
+            <SafetyCertificateOutlined />
+            <span>{t("tax.batchRuleNote")}</span>
+          </p>
+
+          <div className="tax-batch-grid">
+            <section className="tax-tool-card">
+              <div className="tool-card-heading">
+                <div className="tool-card-icon ink">
+                  <ImportOutlined />
+                </div>
+                <div>
+                  <span>{t("tax.migration")}</span>
+                  <h2>{t("tax.importSample")}</h2>
+                  <p>{t("tax.importSampleHint")}</p>
+                </div>
+              </div>
+              <Upload.Dragger
+                accept=".xlsx,.xls"
+                className="sample-drop-zone"
+                beforeUpload={(file) => {
+                  setSampleFile(file);
+                  return false;
+                }}
+                fileList={uploadList(sampleFile)}
+                maxCount={1}
+                onRemove={() => {
+                  setSampleFile(null);
+                }}
+              >
+                <p className="ant-upload-drag-icon">
+                  <FileExcelOutlined />
+                </p>
+                <p className="ant-upload-text">{t("tax.pickSample")}</p>
+                <p className="ant-upload-hint">{t("tax.samplePickHint")}</p>
+              </Upload.Dragger>
+              <Alert
+                message={t("tax.sampleWarning")}
+                description={t("tax.sampleWarningBody")}
+                showIcon
+                type="warning"
+              />
+              <Button
+                block
+                disabled={!sampleFile}
+                icon={<ImportOutlined />}
+                loading={busy}
+                size="large"
+                type="primary"
+                onClick={() => void runSampleImport()}
+              >
+                {t("tax.runSampleImport")}
+              </Button>
+            </section>
+
+            <section className="tax-tool-card tax-column-card">
+              <div className="tool-card-heading">
+                <div className="tool-card-icon copper">
+                  <TableOutlined />
+                </div>
+                <div>
+                  <span>{t("tax.batchColumns")}</span>
+                  <h2>Sample.xlsx</h2>
+                  <p>{t("tax.batchColumnsHint")}</p>
+                </div>
+              </div>
+              {/* 带编号的行会直接以已批准入账并推进编号计数器，这是这张表
+                  唯一能绕过人工复核的口子，值得单独摆一条警告。 */}
+              <Alert
+                message={t("tax.batchNumberWarning")}
+                description={t("tax.batchNumberWarningBody")}
+                showIcon
+                type="warning"
+              />
+              <div className="column-group">
+                <h3>
+                  {t("tax.batchRequired")}
+                  <span>{SAMPLE_REQUIRED_COLUMNS.length}</span>
+                </h3>
+                <div className="column-tags">
+                  {SAMPLE_REQUIRED_COLUMNS.map((name) => (
+                    <code className="is-required" key={name}>
+                      {name}
+                    </code>
+                  ))}
+                </div>
+              </div>
+              <div className="column-group">
+                <h3>
+                  {t("tax.batchOptional")}
+                  <span>{SAMPLE_OPTIONAL_COLUMNS.length}</span>
+                </h3>
+                <div className="column-tags">
+                  {SAMPLE_OPTIONAL_COLUMNS.map((name) => (
+                    <code key={name}>{name}</code>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+      )}
+
       {view === "rates" && (
         <main className="tax-tool-page">
           {/* 查询与入库分开：查台账是只读高频操作，同步/导入是低频写操作，
               混在一张卡里想查个数的人也要面对两个写按钮。 */}
           <nav className="rate-tab-switch" aria-label={t("tax.rates")}>
-            <button
-              className={rateTab === "query" ? "is-active" : ""}
-              type="button"
-              onClick={() => setRateTab("query")}
-            >
-              {t("tax.rateQuery")}
-            </button>
             <button
               className={rateTab === "ingest" ? "is-active" : ""}
               type="button"
@@ -1166,7 +1423,91 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             >
               {t("tax.rateIngest")}
             </button>
+            <button
+              className={rateTab === "query" ? "is-active" : ""}
+              type="button"
+              onClick={() => setRateTab("query")}
+            >
+              {t("tax.rateQuery")}
+            </button>
           </nav>
+
+          {rateTab === "ingest" && (
+            <div className="rate-ingest-grid">
+              {/* 只在缺密钥时提示怎么配；已配置属于基础设施状态，与开票业务
+                  无关，不再常驻一条绿色横幅。 */}
+              {botUnconfigured && (
+                <Alert
+                  className="bot-status-alert"
+                  showIcon
+                  type="warning"
+                  message={t("tax.botNotConfigured")}
+                  description={t("tax.botNotConfiguredBody", {
+                    envVar: botStatus?.envVar ?? "ZWT_BOT_API_KEY",
+                    file: "zwt-finance-system/.env",
+                  })}
+                />
+              )}
+              <section className="tax-tool-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon copper">
+                    <ApiOutlined />
+                  </div>
+                  <div>
+                    <span>{t("tax.rateIngest")}</span>
+                    <h2>{t("tax.syncFromBot")}</h2>
+                    <p>{t("tax.syncFromBotHint")}</p>
+                  </div>
+                </div>
+                <Button
+                  block
+                  disabled={botUnconfigured}
+                  icon={<ApiOutlined />}
+                  size="large"
+                  type="primary"
+                  onClick={() => setFetchOpen(true)}
+                >
+                  {t("tax.syncFromBot")}
+                </Button>
+              </section>
+              <section className="tax-tool-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon ink">
+                    <FileExcelOutlined />
+                  </div>
+                  <div>
+                    <span>{t("tax.rateIngest")}</span>
+                    <h2>{t("tax.pickBotExcel")}</h2>
+                    <p>{t("tax.pickBotExcelHint")}</p>
+                  </div>
+                </div>
+                <Upload
+                  accept=".xlsx,.xls"
+                  beforeUpload={(file) => {
+                    setRateFile(file);
+                    return false;
+                  }}
+                  fileList={uploadList(rateFile)}
+                  maxCount={1}
+                  onRemove={() => {
+                    setRateFile(null);
+                  }}
+                >
+                  <Button icon={<FileExcelOutlined />} size="large">
+                    {t("tax.pickBotExcel")}
+                  </Button>
+                </Upload>
+                <Button
+                  disabled={!rateFile}
+                  loading={busy}
+                  size="large"
+                  onClick={() => void runRateImport()}
+                >
+                  {t("tax.importPicked")}
+                </Button>
+              </section>
+            </div>
+          )}
 
           {rateTab === "query" && (
             <div className="rate-stat-grid">
@@ -1247,82 +1588,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             </div>
           )}
 
-          {rateTab === "ingest" && (
-            <div className="rate-ingest-grid">
-              {/* 只在缺密钥时提示怎么配；已配置属于基础设施状态，与开票业务
-                  无关，不再常驻一条绿色横幅。 */}
-              {botUnconfigured && (
-                <Alert
-                  className="bot-status-alert"
-                  showIcon
-                  type="warning"
-                  message={t("tax.botNotConfigured")}
-                  description={t("tax.botNotConfiguredBody", {
-                    envVar: botStatus?.envVar ?? "ZWT_BOT_API_KEY",
-                    file: "zwt-finance-system/.env",
-                  })}
-                />
-              )}
-              <section className="tax-tool-card">
-                <div className="tool-card-heading">
-                  <div className="tool-card-icon copper">
-                    <ApiOutlined />
-                  </div>
-                  <div>
-                    <span>{t("tax.rateIngest")}</span>
-                    <h2>{t("tax.syncFromBot")}</h2>
-                    <p>{t("tax.syncFromBotHint")}</p>
-                  </div>
-                </div>
-                <Button
-                  block
-                  disabled={botUnconfigured}
-                  icon={<ApiOutlined />}
-                  size="large"
-                  type="primary"
-                  onClick={() => setFetchOpen(true)}
-                >
-                  {t("tax.syncFromBot")}
-                </Button>
-              </section>
-              <section className="tax-tool-card">
-                <div className="tool-card-heading">
-                  <div className="tool-card-icon ink">
-                    <FileExcelOutlined />
-                  </div>
-                  <div>
-                    <span>{t("tax.rateIngest")}</span>
-                    <h2>{t("tax.pickBotExcel")}</h2>
-                    <p>{t("tax.pickBotExcelHint")}</p>
-                  </div>
-                </div>
-                <Upload
-                  accept=".xlsx,.xls"
-                  beforeUpload={(file) => {
-                    setRateFile(file);
-                    return false;
-                  }}
-                  fileList={uploadList(rateFile)}
-                  maxCount={1}
-                  onRemove={() => {
-                    setRateFile(null);
-                  }}
-                >
-                  <Button icon={<FileExcelOutlined />} size="large">
-                    {t("tax.pickBotExcel")}
-                  </Button>
-                </Upload>
-                <Button
-                  disabled={!rateFile}
-                  loading={busy}
-                  size="large"
-                  onClick={() => void runRateImport()}
-                >
-                  {t("tax.importPicked")}
-                </Button>
-              </section>
-            </div>
-          )}
           {rateTab === "query" && (
           <section className="rate-ledger-card">
             <div className="section-title-row">
@@ -1396,6 +1661,29 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           )}
         </main>
       )}
+
+      <Modal
+        className="tax-conflict-modal"
+        footer={null}
+        open={conflicts.length > 0}
+        title={t("tax.conflictTitle", { count: conflicts.length })}
+        width={680}
+        onCancel={() => setConflicts([])}
+      >
+        <Alert message={t("tax.conflictIntro")} showIcon type="error" />
+        <ol className="conflict-list">
+          {conflicts.map((issue, index) => (
+            <li key={`${issue.reason}-${issue.key}-${index}`}>
+              <span className="conflict-row">
+                {issue.rows.length
+                  ? t("tax.conflictRows", { rows: issue.rows.join(", ") })
+                  : t("tax.conflictNoRow")}
+              </span>
+              <span>{conflictText(issue, t)}</span>
+            </li>
+          ))}
+        </ol>
+      </Modal>
 
       <Modal
         cancelText={t("common.cancel")}

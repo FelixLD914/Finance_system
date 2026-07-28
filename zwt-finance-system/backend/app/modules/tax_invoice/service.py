@@ -53,6 +53,11 @@ class TaxInvoiceStateError(TaxInvoiceServiceError):
     status_code = 422
 
 
+# 一次导出最多带走这么多张税票。纯粹是内存护栏：整份台账都摊平成商品行
+# 塞进一个 openpyxl 工作簿，没有上限的话总有一天会把进程撑爆。
+MAX_EXPORT_INVOICES = 2000
+
+
 @dataclass(frozen=True)
 class DailyRate:
     """BOT 一天一个币种的四种报价。只有 buying_transfer 是必有的。"""
@@ -130,6 +135,49 @@ class TaxInvoiceService:
             ).all()
         )
         return invoices, int(total or 0)
+
+    async def export_entries(
+        self,
+        *,
+        status: str | None,
+        period: str | None,
+        query: str | None,
+    ) -> list[tuple[TaxInvoice, list[TaxInvoiceItem]]]:
+        """按台账同一套筛选条件取出税票 + 明细，供导出用。
+
+        不分页：导出的语义就是"把我筛出来的这批全拿走"，分页导出没有意义。
+        但也不能无上限地往内存里塞，超过 MAX_EXPORT_INVOICES 就让用户先收窄
+        筛选条件——报错说清楚怎么办，比慢慢跑到内存耗尽强。
+        """
+        invoices, total = await self.list_invoices(
+            status=status,
+            period=period,
+            query=query,
+            page=1,
+            page_size=MAX_EXPORT_INVOICES,
+        )
+        if total > MAX_EXPORT_INVOICES:
+            raise TaxInvoiceStateError(
+                f"the filter matches {total} invoices; "
+                f"export is capped at {MAX_EXPORT_INVOICES}. "
+                "Narrow it down by period or status first."
+            )
+        if not invoices:
+            return []
+        # 一次把这批税票的明细全捞回来再按 invoice_id 归位，避免每张税票一次查询。
+        rows = list(
+            (
+                await self.session.scalars(
+                    select(TaxInvoiceItem)
+                    .where(TaxInvoiceItem.invoice_id.in_([item.id for item in invoices]))
+                    .order_by(TaxInvoiceItem.invoice_id, TaxInvoiceItem.line_number)
+                )
+            ).all()
+        )
+        grouped: dict[uuid.UUID, list[TaxInvoiceItem]] = {}
+        for row in rows:
+            grouped.setdefault(row.invoice_id, []).append(row)
+        return [(invoice, grouped.get(invoice.id, [])) for invoice in invoices]
 
     async def aggregate(self, invoice: TaxInvoice) -> InvoiceAggregate:
         items = list(
@@ -213,6 +261,94 @@ class TaxInvoiceService:
             source_files=[(file_name, content)],
         )
 
+    async def _assert_importable(self, rows: list[dict[str, Any]]) -> None:
+        """把整份文件的冲突一次查完，全部收进 issues 再抛。
+
+        以前是查到第一条就抛，用户改一行再导一次、再撞下一条，一份几十行的
+        表要往返十几轮。现在一次把问题列全，改一遍就能过。
+
+        仍然是整批拒绝、一条都不入库：这是财务数据，允许部分成功的话，
+        用户拿不到"到底哪几张进去了"的确定答案，对账反而更难。
+        """
+        issues: list[dict[str, object]] = []
+        seen_business_keys: dict[tuple[str, str | None], list[int]] = {}
+        seen_document_numbers: dict[str, list[int]] = {}
+
+        def locate(row: dict[str, Any]) -> list[int]:
+            # 双文件识别那条链路没有源行号，缺了就只报业务键。
+            return list(row.get("source_rows") or [])
+
+        for row in rows:
+            source_rows = locate(row)
+            business_key = (row["ci_no"], row.get("cdn"))
+            label = f"{business_key[0]} / {business_key[1] or '-'}"
+            if business_key in seen_business_keys:
+                issues.append(
+                    {
+                        "rows": source_rows,
+                        "key": label,
+                        "reason": "duplicate_in_file",
+                        "detail": (
+                            f"invoice {label} also appears at row(s) "
+                            f"{seen_business_keys[business_key] or '-'} of this file"
+                        ),
+                    }
+                )
+            else:
+                seen_business_keys[business_key] = source_rows
+                duplicate = await self.session.scalar(
+                    select(TaxInvoice.id).where(
+                        TaxInvoice.ci_no == business_key[0],
+                        TaxInvoice.cdn == business_key[1],
+                        TaxInvoice.status != "voided",
+                    )
+                )
+                if duplicate is not None:
+                    issues.append(
+                        {
+                            "rows": source_rows,
+                            "key": label,
+                            "reason": "already_exists",
+                            "detail": f"invoice {label} already exists in the ledger",
+                        }
+                    )
+
+            document_no = row.get("document_no")
+            if not document_no:
+                continue
+            if document_no in seen_document_numbers:
+                issues.append(
+                    {
+                        "rows": source_rows,
+                        "key": document_no,
+                        "reason": "duplicate_number_in_file",
+                        "detail": (
+                            f"document number {document_no} also appears at row(s) "
+                            f"{seen_document_numbers[document_no] or '-'} of this file"
+                        ),
+                    }
+                )
+                continue
+            seen_document_numbers[document_no] = source_rows
+            existing_document = await self.session.scalar(
+                select(TaxInvoice.id).where(TaxInvoice.document_no == document_no)
+            )
+            if existing_document is not None:
+                issues.append(
+                    {
+                        "rows": source_rows,
+                        "key": document_no,
+                        "reason": "number_already_exists",
+                        "detail": f"document number {document_no} already exists",
+                    }
+                )
+
+        if issues:
+            raise TaxInvoiceConflictError(
+                f"the import was rejected: {len(issues)} conflict(s) found, nothing was imported",
+                issues=issues,
+            )
+
     async def _create_import(
         self,
         *,
@@ -223,42 +359,7 @@ class TaxInvoiceService:
     ) -> TaxInvoiceImportResponse:
         if not rows:
             raise TaxInvoiceStateError("the import file contains no invoice records")
-        seen_business_keys: set[tuple[str, str | None]] = set()
-        seen_document_numbers: set[str] = set()
-        for row in rows:
-            business_key = (row["ci_no"], row.get("cdn"))
-            if business_key in seen_business_keys:
-                raise TaxInvoiceConflictError(
-                    f"invoice {business_key[0]} / {business_key[1] or '-'} "
-                    "appears more than once in the import"
-                )
-            seen_business_keys.add(business_key)
-            duplicate = await self.session.scalar(
-                select(TaxInvoice.id).where(
-                    TaxInvoice.ci_no == business_key[0],
-                    TaxInvoice.cdn == business_key[1],
-                    TaxInvoice.status != "voided",
-                )
-            )
-            if duplicate is not None:
-                raise TaxInvoiceConflictError(
-                    f"invoice {business_key[0]} / {business_key[1] or '-'} already exists"
-                )
-            document_no = row.get("document_no")
-            if not document_no:
-                continue
-            if document_no in seen_document_numbers:
-                raise TaxInvoiceConflictError(
-                    f"document number {document_no} appears more than once in the import"
-                )
-            seen_document_numbers.add(document_no)
-            existing_document = await self.session.scalar(
-                select(TaxInvoice.id).where(TaxInvoice.document_no == document_no)
-            )
-            if existing_document is not None:
-                raise TaxInvoiceConflictError(
-                    f"document number {document_no} already exists"
-                )
+        await self._assert_importable(rows)
 
         batch = TaxInvoiceImportBatch(
             import_mode=import_mode,
@@ -287,6 +388,8 @@ class TaxInvoiceService:
             for source_row in rows:
                 row = dict(source_row)
                 item_rows = list(row.pop("items"))
+                # 只用于定位报错，不是 TaxInvoice 的列，落库前必须摘掉。
+                row.pop("source_rows", None)
                 status = self._review_status(row, len(item_rows))
                 if status == "needs_review":
                     needs_review_count += 1

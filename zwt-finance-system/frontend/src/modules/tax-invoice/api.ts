@@ -28,6 +28,35 @@ export function getTaxInvoice(invoiceId: string): Promise<TaxInvoice> {
   return request<TaxInvoice>(`/v1/tax-invoice/invoices/${invoiceId}`);
 }
 
+/**
+ * 按当前筛选条件导出台账 Excel（Sample 格式，改完能原样再导回）。
+ *
+ * 文件名以后端 Content-Disposition 为准：导出时间戳是后端打的，前端另算一份
+ * 会和文件内容对不上。
+ */
+export async function exportTaxInvoiceLedger(filters: {
+  status?: string;
+  period?: string;
+  query?: string;
+}): Promise<void> {
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== "all") params.set("status", filters.status);
+  if (filters.period && filters.period !== "all") params.set("period", filters.period);
+  if (filters.query?.trim()) params.set("query", filters.query.trim());
+  const suffix = params.toString() ? `?${params}` : "";
+  const response = await apiFetch(`/v1/tax-invoice/invoices/export${suffix}`);
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const fileName =
+    disposition.match(/filename="?([^"]+)"?/)?.[1] ?? "tax-inv-ledger.xlsx";
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = window.document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function approveTaxInvoice(
   invoiceId: string,
   version: number,
