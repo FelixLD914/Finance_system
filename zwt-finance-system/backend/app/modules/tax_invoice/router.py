@@ -335,7 +335,12 @@ async def import_existing_sample(
 @router.post(
     "/import/migration",
     response_model=TaxInvoiceImportResponse,
-    dependencies=[Depends(require_permission("invoice:write"))],
+    # 两个都要：invoice:write 是导入这个动作本身，invoice:migrate 是"允许沿用
+    # 外部编号"这项额外授权。分开挂着，将来收回迁移权不会连带影响日常导入。
+    dependencies=[
+        Depends(require_permission("invoice:write")),
+        Depends(require_permission("invoice:migrate")),
+    ],
 )
 async def import_historical_migration(
     service: ServiceDependency,

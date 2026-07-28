@@ -345,6 +345,8 @@ const resources = {
     "tax.batchOptional": "可选列",
     "tax.batchModeIssue": "批量开具",
     "tax.batchModeMigration": "历史迁移",
+    "tax.batchMigrationNoPermission":
+      "历史迁移仅限系统管理员（invoice:migrate）。它能凭一份表格直接写出已批准税票并指定编号，因此不下放给录入或复核角色。",
     "tax.batchIssueTitle": "Sample 表格批量开具",
     "tax.batchIssueHint": "批量核对完成的新票，编号仍在批准时生成",
     "tax.batchMigrationTitle": "迁移旧系统台账",
@@ -913,6 +915,8 @@ const resources = {
     "tax.batchOptional": "Optional",
     "tax.batchModeIssue": "Batch issuing",
     "tax.batchModeMigration": "Historical migration",
+    "tax.batchMigrationNoPermission":
+      "Historical migration is restricted to administrators (invoice:migrate). It can write approved invoices with caller-supplied numbers straight from a spreadsheet, so it is not delegated to preparer or approver roles.",
     "tax.batchIssueTitle": "Sample spreadsheet batch issuing",
     "tax.batchIssueHint":
       "New batch-reconciled invoices; numbers are still assigned on approval",

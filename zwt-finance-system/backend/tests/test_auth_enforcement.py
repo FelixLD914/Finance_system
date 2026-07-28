@@ -6,8 +6,10 @@ authz 的单元测试只证明"映射表是对的"；这些测试证明"端点�
 
 import re
 import uuid
+from io import BytesIO
 
 import pytest
+from openpyxl import Workbook
 
 from app.main import app
 
@@ -25,6 +27,7 @@ MUTATING_ENDPOINTS = [
         "invoice:generate",
     ),
     ("post", "/api/v1/tax-invoice/exchange-rates/fetch", "invoice:write"),
+    ("post", "/api/v1/tax-invoice/import/migration", "invoice:migrate"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/approve", "wht:approve"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/return-to-draft", "wht:approve"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/generate-documents", "wht:generate"),
@@ -170,3 +173,57 @@ def test_read_endpoints_reject_role_without_read_permission(
     client = client_as(permissions=frozenset())
 
     assert client.get(path).status_code == 403
+
+
+def test_migration_import_needs_more_than_plain_write(client_as) -> None:  # noqa: ANN001
+    """有 invoice:write 但没有 invoice:migrate 时，历史迁移必须 403。
+
+    上面那条参数化测试只给了 read，被拦下的原因是 write 而不是 migrate，
+    证明不了迁移权真的独立生效。这条刻意把 write 给足，只扣掉 migrate——
+    它才是「拆出 invoice:migrate」这件事的实际验收点。
+    """
+    client = client_as(permissions=frozenset({"invoice:read", "invoice:write"}))
+
+    response = client.post(
+        "/api/v1/tax-invoice/import/migration",
+        files={"file": ("legacy.xlsx", b"not-a-real-workbook", "application/vnd.ms-excel")},
+    )
+
+    assert response.status_code == 403, response.text
+    assert "invoice:migrate" in response.text
+
+
+def _empty_workbook() -> bytes:
+    """一份结构合法但没有数据行的 xlsx。
+
+    用真工作簿而不是随便几个字节：非 zip 的内容会在 openpyxl 里抛
+    BadZipFile，那是另一条错误路径，会把这条测试想验证的东西盖掉。
+    """
+    workbook = Workbook()
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    return output.getvalue()
+
+
+def test_plain_batch_import_still_works_with_only_write(client_as) -> None:  # noqa: ANN001
+    """反过来确认没有误伤：常规批量开具仍然只要 invoice:write。
+
+    不能因为收紧迁移权，把日常导入也一起锁死了。这里只验证「没有被权限层
+    拦下」——请求会继续走到解析那一步并因为表里没有数据行而 422，
+    但那已经越过了鉴权。
+    """
+    client = client_as(permissions=frozenset({"invoice:read", "invoice:write"}))
+
+    response = client.post(
+        "/api/v1/tax-invoice/import/sample",
+        files={
+            "file": (
+                "batch.xlsx",
+                _empty_workbook(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+
+    assert response.status_code == 422, response.text
