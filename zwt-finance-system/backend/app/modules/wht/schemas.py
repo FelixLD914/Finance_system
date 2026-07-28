@@ -3,8 +3,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
+
+from app.core.signature_usage import parse_signature_usage
 
 IssuanceType = Literal["normal", "supplement"]
 WhtStatus = Literal["draft", "pending_review", "approved", "issued", "voided"]
@@ -227,13 +229,15 @@ class BatchTransitionResponse(ApiSchema):
     items: list[BatchTransitionItem]
 
 
-SignatureUsage = Literal["wht", "tax_inv", "both"]
+# 一张签名可以同时适用于多个模块，所以对外是集合而不是单值。
+# 存库仍是逗号分隔的字符串，转换在 app.core.signature_usage。
+SignatureUsage = Literal["wht", "tax_inv", "salary_advance"]
 
 
 class SignatureAssetUpdate(ApiSchema):
     status: Literal["active", "inactive"] | None = None
     is_default: bool | None = None
-    usage: SignatureUsage | None = None
+    usage: list[SignatureUsage] | None = Field(default=None, min_length=1)
 
 
 class SignatureAssetResponse(ApiSchema):
@@ -244,12 +248,20 @@ class SignatureAssetResponse(ApiSchema):
     sha256: str
     version: int
     status: Literal["active", "inactive"]
-    usage: SignatureUsage
+    usage: list[SignatureUsage]
     is_default: bool
     created_by_name: str
     updated_by_name: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("usage", mode="before")
+    @classmethod
+    def split_usage(cls, value: object) -> object:
+        """ORM 里 usage 是逗号分隔字符串，对外一律展开成数组。"""
+        if isinstance(value, str):
+            return sorted(parse_signature_usage(value))
+        return value
 
 
 class DocumentGenerateRequest(ApiSchema):

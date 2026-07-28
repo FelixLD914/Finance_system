@@ -852,10 +852,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     <section className="tax-workspace" aria-label={t("nav.taxInvoice")}>
       <header className="workspace-header">
         <div>
-          <span className="workspace-kicker">{t("tax.kicker")}</span>
+          {/* 页头格式与 WHT / 工资预支一致：英文模块码 + <small> 里的功能名。 */}
           <h1>
             <span>TAX INV</span>
-            {t("tax.title")}
+            <small>{t("tax.title")}</small>
           </h1>
           <p>{t("tax.subtitle")}</p>
         </div>

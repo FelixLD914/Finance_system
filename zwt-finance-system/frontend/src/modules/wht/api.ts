@@ -299,7 +299,7 @@ export async function batchTransitionTasks(
 
 export async function listSignatures(
   includeInactive = true,
-  usage?: "wht" | "tax_inv",
+  usage?: SignatureUsage,
 ): Promise<SignatureAsset[]> {
   if (useDemoApi) return clone(demoSignatures);
   const scope = usage ? `&usage=${usage}` : "";
@@ -312,7 +312,7 @@ export async function uploadSignature(
   name: string,
   file: File,
   makeDefault: boolean,
-  usage: SignatureUsage = "wht",
+  usage: SignatureUsage[] = ["wht"],
 ): Promise<SignatureAsset> {
   if (useDemoApi) {
     const timestamp = nowIso();
@@ -343,7 +343,8 @@ export async function uploadSignature(
   const body = new FormData();
   body.append("name", name);
   body.append("makeDefault", String(makeDefault));
-  body.append("usage", usage);
+  // 适用范围是集合：重复同名字段，后端按数组接收。
+  for (const module of usage) body.append("usage", module);
   body.append("file", file);
   return request<SignatureAsset>("/v1/wht/signatures", {
     method: "POST",
@@ -353,7 +354,7 @@ export async function uploadSignature(
 
 export async function updateSignature(
   signatureId: string,
-  input: Partial<Pick<SignatureAsset, "status" | "isDefault">>,
+  input: Partial<Pick<SignatureAsset, "status" | "isDefault" | "usage">>,
 ): Promise<SignatureAsset> {
   if (useDemoApi) {
     if (input.isDefault) {

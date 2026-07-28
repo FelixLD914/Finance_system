@@ -124,8 +124,11 @@ export interface BatchTransitionResult {
   items: BatchTransitionItem[];
 }
 
-/** 一张签名图能盖在哪种单据上。WHT 与 TAX INV 可能是不同的签字人。 */
-export type SignatureUsage = "wht" | "tax_inv" | "both";
+/**
+ * 一张签名图能盖在哪些单据上。各模块的签字人可能不同，所以是集合而不是单选。
+ * 旧的 "both"（WHT + TAX INV）已在 migration 0011 展开成具体模块。
+ */
+export type SignatureUsage = "wht" | "tax_inv" | "salary_advance";
 
 export interface SignatureAsset {
   id: string;
@@ -135,8 +138,8 @@ export interface SignatureAsset {
   sha256: string;
   version: number;
   status: "active" | "inactive";
-  usage: SignatureUsage;
-  /** 默认签名按适用范围各算各的：WHT 和 TAX INV 可以各有一张默认。 */
+  usage: SignatureUsage[];
+  /** 默认签名按适用范围各算各的：各模块可以各有一张默认。 */
   isDefault: boolean;
   createdByName: string;
   updatedByName: string;

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.core.database import SessionFactory
 from app.core.models import SignatureAsset
+from app.core.signature_usage import signature_allows
 from app.modules.salary_advance.document_generator import (
     GenerationSnapshot,
     SalaryAdvanceDocumentError,
@@ -436,18 +437,34 @@ class SalaryAdvanceDocumentService:
             raise SalaryAdvanceStateError(f"记录缺少 {role} 签名代码")
         # 签名代码 = 共享签名库里的名称；同名重传会自动升版本，
         # 这里取最新的 active 版本，与签名库自身的版本语义一致。
-        asset = await self.session.scalar(
-            select(SignatureAsset)
-            .where(
-                func.upper(SignatureAsset.name) == code,
-                SignatureAsset.status == "active",
+        # 适用范围必须包含 salary_advance——只批给 WHT 的签名不能盖到预支单上。
+        candidates = (
+            await self.session.scalars(
+                select(SignatureAsset)
+                .where(
+                    func.upper(SignatureAsset.name) == code,
+                    SignatureAsset.status == "active",
+                )
+                .order_by(SignatureAsset.version.desc())
             )
-            .order_by(SignatureAsset.version.desc())
-            .limit(1)
+        ).all()
+        asset = next(
+            (
+                candidate
+                for candidate in candidates
+                if signature_allows(candidate.usage, "salary_advance")
+            ),
+            None,
         )
         if asset is None:
+            detail = (
+                "，该签名未勾选「工资预支单」适用范围"
+                if candidates
+                else ""
+            )
             raise SalaryAdvanceStateError(
-                f"签名库中没有名为 {code} 的有效签名，请在系统管理 → 签名库维护"
+                f"签名库中没有可用于工资预支的签名 {code}{detail}，"
+                "请在系统管理 → 签名库维护"
             )
         path = self._storage_path(asset.storage_key)
         if not path.is_file():

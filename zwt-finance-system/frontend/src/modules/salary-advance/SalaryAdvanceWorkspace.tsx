@@ -37,9 +37,11 @@ import {
 import type { UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
-import type { Translate } from "../../i18n";
+import type { Translate, TranslationKey } from "../../i18n";
 import type { ModuleKey } from "../registry";
 import {
+  FinanceLifecycleTabs,
+  type FinanceLifecyclePhase,
   FinanceRecordDrawer,
   FinanceStatusBadge,
   type FinanceStatusTone,
@@ -77,18 +79,8 @@ import type {
 
 type WorkspaceView = "ledger" | "maintenance";
 
-const batchLabels: Record<BatchStatus, string> = {
-  validating: "校验中",
-  validation_failed: "校验未通过",
-  ready: "待锁定",
-  locked: "已锁定",
-  generating: "生成中",
-  completed: "已完成",
-  partially_completed: "部分完成",
-  failed: "生成失败",
-};
-
-// 语义色只表达状态，不用来区分业务类别（见 frontend-design-system.md）。
+// 状态文案一律走 i18n 键；语义色只表达状态，不用来区分业务类别
+// （见 frontend-design-system.md）。
 const batchTones: Record<BatchStatus, FinanceStatusTone> = {
   validating: "neutral",
   validation_failed: "danger",
@@ -100,23 +92,12 @@ const batchTones: Record<BatchStatus, FinanceStatusTone> = {
   failed: "danger",
 };
 
-const validationLabels: Record<ValidationStatus, string> = {
-  valid: "通过",
-  warning: "有警告",
-  invalid: "错误",
-};
+const BATCH_STATUSES = Object.keys(batchTones) as BatchStatus[];
 
 const validationTones: Record<ValidationStatus, FinanceStatusTone> = {
   valid: "success",
   warning: "warning",
   invalid: "danger",
-};
-
-const generationLabels: Record<string, string> = {
-  pending: "待生成",
-  generating: "生成中",
-  success: "已生成",
-  failed: "生成失败",
 };
 
 const generationTones: Record<string, FinanceStatusTone> = {
@@ -126,28 +107,48 @@ const generationTones: Record<string, FinanceStatusTone> = {
   failed: "danger",
 };
 
+/**
+ * 批次状态到业务阶段的映射，与 WHT / TAX INV 的台账分层同构：
+ * 还要人动手的归「待处理」，锁定待生成的归「待出具」，已跑完生成的归「历史记录」。
+ */
+const LIFECYCLE_BY_STATUS: Record<BatchStatus, FinanceLifecyclePhase> = {
+  validating: "pending",
+  validation_failed: "pending",
+  ready: "pending",
+  locked: "issuing",
+  generating: "issuing",
+  completed: "history",
+  partially_completed: "history",
+  failed: "history",
+};
+
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   return String(value);
 }
 
-function BatchStatusTag({ status }: { status: BatchStatus }) {
-  return <FinanceStatusBadge label={batchLabels[status]} tone={batchTones[status]} />;
-}
-
-function ValidationTag({ status }: { status: ValidationStatus }) {
+function BatchStatusTag({ status, t }: { status: BatchStatus; t: Translate }) {
   return (
     <FinanceStatusBadge
-      label={validationLabels[status]}
+      label={t(`salary.batchStatus.${status}` as TranslationKey)}
+      tone={batchTones[status]}
+    />
+  );
+}
+
+function ValidationTag({ status, t }: { status: ValidationStatus; t: Translate }) {
+  return (
+    <FinanceStatusBadge
+      label={t(`salary.validationStatus.${status}` as TranslationKey)}
       tone={validationTones[status]}
     />
   );
 }
 
-function GenerationTag({ status }: { status: string }) {
+function GenerationTag({ status, t }: { status: string; t: Translate }) {
   return (
     <FinanceStatusBadge
-      label={generationLabels[status] ?? status}
+      label={t(`salary.generationStatus.${status}` as TranslationKey)}
       tone={generationTones[status] ?? "neutral"}
     />
   );
@@ -157,6 +158,7 @@ interface RecordDrawerProps {
   record: SalaryAdvanceRecord;
   documents: SalaryAdvanceDocument[];
   busy: boolean;
+  t: Translate;
   onClose: () => void;
   onEdit: () => void;
   onPreview: () => void;
@@ -170,6 +172,7 @@ function RecordDrawer({
   record,
   documents,
   busy,
+  t,
   onClose,
   onEdit,
   onPreview,
@@ -180,7 +183,7 @@ function RecordDrawer({
   return (
     <FinanceRecordDrawer
       open
-      status={<ValidationTag status={record.validationStatus} />}
+      status={<ValidationTag status={record.validationStatus} t={t} />}
       title={record.empId}
       footer={
         <div className="inspector-actions">
@@ -190,10 +193,10 @@ function RecordDrawer({
             icon={<EyeOutlined />}
             onClick={onPreview}
           >
-            PDF 预览
+            {t("salary.preview")}
           </Button>
           <Button block disabled={busy} icon={<EditOutlined />} onClick={onEdit}>
-            修正记录
+            {t("salary.editRecord")}
           </Button>
         </div>
       }
@@ -201,14 +204,17 @@ function RecordDrawer({
     >
       <section className="inspector-section">
         <div className="section-title-row">
-          <h3>状态</h3>
+          <h3>{t("salary.status")}</h3>
           <span>
-            源表第 {record.sourceRowNo} 行 · v{record.version}
+            {t("salary.recordMeta", {
+              row: record.sourceRowNo,
+              version: record.version,
+            })}
           </span>
         </div>
         <Space size={6} wrap>
-          <ValidationTag status={record.validationStatus} />
-          <GenerationTag status={record.generationStatus} />
+          <ValidationTag status={record.validationStatus} t={t} />
+          <GenerationTag status={record.generationStatus} t={t} />
         </Space>
       </section>
 
@@ -218,7 +224,10 @@ function RecordDrawer({
             className="salary-issue-alert"
             showIcon
             type={record.validationErrors.length ? "error" : "warning"}
-            message={`${record.validationErrors.length} 个错误，${record.validationWarnings.length} 个警告`}
+            message={t("salary.issueSummary", {
+              errors: record.validationErrors.length,
+              warnings: record.validationWarnings.length,
+            })}
             description={
               <ul>
                 {issues.map((issue) => (
@@ -233,30 +242,32 @@ function RecordDrawer({
       )}
 
       <section className="inspector-section">
-        <h3>员工与申请</h3>
+        <h3>{t("salary.sectionApplicant")}</h3>
         <Descriptions className="task-descriptions" column={1} colon={false}>
-          <Descriptions.Item label="期间">{record.period}</Descriptions.Item>
-          <Descriptions.Item label="姓名">
+          <Descriptions.Item label={t("salary.period")}>
+            {record.period}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("salary.name")}>
             {displayValue(data.applicant_display_name)}
           </Descriptions.Item>
-          <Descriptions.Item label="英文名">
+          <Descriptions.Item label={t("salary.enName")}>
             {displayValue(data.en_name)}
           </Descriptions.Item>
-          <Descriptions.Item label="部门 / 职位">
+          <Descriptions.Item label={t("salary.deptPosition")}>
             {displayValue(data.department)} / {displayValue(data.position)}
           </Descriptions.Item>
-          <Descriptions.Item label="入职日期">
+          <Descriptions.Item label={t("salary.startDate")}>
             {displayValue(data.start_date)}
           </Descriptions.Item>
-          <Descriptions.Item label="预支原因">
+          <Descriptions.Item label={t("salary.reason")}>
             {displayValue(data.reason)}
           </Descriptions.Item>
-          <Descriptions.Item label="预支金额">
+          <Descriptions.Item label={t("salary.advanceAmount")}>
             <span className="money-value">
               {formatFinanceAmount(data.advance_amount as string, "THB")}
             </span>
           </Descriptions.Item>
-          <Descriptions.Item label="月扣金额">
+          <Descriptions.Item label={t("salary.monthlyDeduction")}>
             <span className="money-value">
               {formatFinanceAmount(data.monthly_deduction as string, "THB")}
             </span>
@@ -265,21 +276,23 @@ function RecordDrawer({
       </section>
 
       <section className="inspector-section">
-        <h3>审批与签名快照</h3>
+        <h3>{t("salary.sectionApproval")}</h3>
         <Descriptions className="task-descriptions" column={1} colon={false}>
-          <Descriptions.Item label="审批内容">
+          <Descriptions.Item label={t("salary.approvalStatus")}>
             {displayValue(data.approval_status)}
           </Descriptions.Item>
-          <Descriptions.Item label="财务签名代码">
+          <Descriptions.Item label={t("salary.financeCode")}>
             {displayValue(data.finance_signature_code)}
           </Descriptions.Item>
-          <Descriptions.Item label="总经理签名代码">
+          <Descriptions.Item label={t("salary.mdCode")}>
             {displayValue(data.md_signature_code)}
           </Descriptions.Item>
-          <Descriptions.Item label="申请人签名">
-            {displayValue(data.applicant_signature_mode)}（输出区保持空白）
+          <Descriptions.Item label={t("salary.applicantSignature")}>
+            {t("salary.applicantSignatureHint", {
+              mode: displayValue(data.applicant_signature_mode),
+            })}
           </Descriptions.Item>
-          <Descriptions.Item label="数据指纹">
+          <Descriptions.Item label={t("salary.fingerprint")}>
             <span className="hash-value">{record.dataFingerprint}</span>
           </Descriptions.Item>
         </Descriptions>
@@ -287,8 +300,10 @@ function RecordDrawer({
 
       <section className="inspector-section">
         <div className="section-title-row">
-          <h3>生成文件</h3>
-          <span>{documents.length} 个版本</span>
+          <h3>{t("salary.sectionDocuments")}</h3>
+          <span>
+            {t("salary.documentVersions", { count: documents.length })}
+          </span>
         </div>
         {documents.length ? (
           <div className="document-stack">
@@ -313,7 +328,7 @@ function RecordDrawer({
                   <Space size={4}>
                     {document.xlsxFileName && (
                       <Button
-                        aria-label="下载 XLSX"
+                        aria-label={t("salary.downloadXlsx")}
                         icon={<FileExcelOutlined />}
                         size="small"
                         type="text"
@@ -322,7 +337,7 @@ function RecordDrawer({
                     )}
                     {document.pdfFileName && (
                       <Button
-                        aria-label="下载 PDF"
+                        aria-label={t("salary.downloadPdf")}
                         icon={<FilePdfOutlined />}
                         size="small"
                         type="text"
@@ -335,7 +350,10 @@ function RecordDrawer({
             ))}
           </div>
         ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未生成" />
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("salary.noDocuments")}
+          />
         )}
       </section>
 
@@ -361,6 +379,7 @@ export function SalaryAdvanceWorkspace({
   const [templates, setTemplates] = useState<SalaryAdvanceTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   const [period, setPeriod] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>();
   const [importOpen, setImportOpen] = useState(false);
@@ -450,6 +469,29 @@ export function SalaryAdvanceWorkspace({
     [jobDetail?.documents, selectedRecord],
   );
 
+  // 台账按业务阶段分层，和 WHT / TAX INV 一致：计数永远来自全量批次，
+  // 切换阶段只改可见范围，不改计数。
+  const lifecycleCounts = useMemo(() => {
+    const counts: Record<FinanceLifecyclePhase, number> = {
+      pending: 0,
+      issuing: 0,
+      history: 0,
+      all: batches.length,
+    };
+    for (const batch of batches) counts[LIFECYCLE_BY_STATUS[batch.status]] += 1;
+    return counts;
+  }, [batches]);
+
+  const visibleBatches = useMemo(
+    () =>
+      phase === "all"
+        ? batches
+        : batches.filter(
+            (batch) => LIFECYCLE_BY_STATUS[batch.status] === phase,
+          ),
+    [batches, phase],
+  );
+
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
     try {
@@ -468,13 +510,16 @@ export function SalaryAdvanceWorkspace({
       const values = await importForm.validateFields();
       const file = importFiles[0]?.originFileObj;
       if (!file) {
-        message.error("请选择工资预支 XLSX 文件");
+        message.error(t("salary.fileRequired"));
         return;
       }
       setBusy(true);
       const detail = await importSalaryAdvanceBatch(values.period, file);
       message.success(
-        `导入完成：${detail.batch.totalRows} 行，${detail.batch.invalidRows} 行错误`,
+        t("salary.importDone", {
+          total: detail.batch.totalRows,
+          invalid: detail.batch.invalidRows,
+        }),
       );
       setImportOpen(false);
       setImportFiles([]);
@@ -523,7 +568,7 @@ export function SalaryAdvanceWorkspace({
       );
       setSelectedRecord(next);
       setEditOpen(false);
-      message.success("记录已保存并重新校验");
+      message.success(t("salary.recordSaved"));
       if (selected) await loadBatch(selected.batch.id);
     } catch (error) {
       if (error instanceof Error) message.error(error.message);
@@ -538,7 +583,7 @@ export function SalaryAdvanceWorkspace({
     try {
       const job = await createSalaryAdvanceJob(selected.batch.id);
       setJobDetail(await getSalaryAdvanceJob(job.id));
-      message.success("生成任务已进入后台队列");
+      message.success(t("salary.generateQueued"));
       await loadBatch(selected.batch.id);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -553,7 +598,7 @@ export function SalaryAdvanceWorkspace({
     try {
       const job = await retrySalaryAdvanceJob(jobDetail.job.id);
       setJobDetail(await getSalaryAdvanceJob(job.id));
-      message.success("失败记录已重新进入生成队列");
+      message.success(t("salary.retryQueued"));
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -564,17 +609,16 @@ export function SalaryAdvanceWorkspace({
   const removeBatch = () => {
     if (!selected) return;
     modal.confirm({
-      title: "删除该批次？",
-      content:
-        "删除后批次内所有记录一并移除，操作会留痕。源文件保留在服务器上。" +
-        "已锁定或已生成的批次不能删除。",
-      okText: "确认删除",
+      title: t("salary.deleteBatchTitle"),
+      content: t("salary.deleteBatchBody"),
+      okText: t("salary.deleteBatchOk"),
+      cancelText: t("common.cancel"),
       okButtonProps: { danger: true },
       onOk: async () => {
         setBusy(true);
         try {
           await deleteSalaryAdvanceBatch(selected.batch.id);
-          message.success("批次已删除");
+          message.success(t("salary.batchDeleted"));
           setSelected(null);
           setSelectedRecord(null);
           setJobDetail(null);
@@ -590,18 +634,18 @@ export function SalaryAdvanceWorkspace({
 
   const recordColumns: ColumnsType<SalaryAdvanceRecord> = [
     {
-      title: "行",
+      title: t("salary.sourceRow"),
       dataIndex: "sourceRowNo",
       width: 56,
     },
     {
-      title: "工号",
+      title: t("salary.empId"),
       dataIndex: "empId",
       width: 118,
       render: (value: string) => <strong>{value}</strong>,
     },
     {
-      title: "申请人",
+      title: t("salary.applicant"),
       key: "name",
       width: 180,
       ellipsis: true,
@@ -612,39 +656,40 @@ export function SalaryAdvanceWorkspace({
         ),
     },
     {
-      title: "部门",
+      title: t("salary.department"),
       key: "department",
       width: 150,
       ellipsis: true,
       render: (_, record) => displayValue(record.normalizedData.department),
     },
     {
-      title: "预支金额",
+      title: t("salary.advanceAmount"),
       key: "advance",
       align: "right",
       width: 125,
-      render: (_, record) =>
-        Number(record.normalizedData.advance_amount ?? 0).toLocaleString("zh-CN", {
-          minimumFractionDigits: 2,
-        }),
+      render: (_, record) => (
+        <span className="money-value">
+          {formatFinanceAmount(record.normalizedData.advance_amount as string)}
+        </span>
+      ),
     },
     {
-      title: "校验",
+      title: t("salary.validation"),
       dataIndex: "validationStatus",
       width: 96,
-      render: (value: ValidationStatus) => <ValidationTag status={value} />,
+      render: (value: ValidationStatus) => <ValidationTag status={value} t={t} />,
     },
     {
-      title: "文件",
+      title: t("salary.document"),
       dataIndex: "generationStatus",
       width: 106,
-      render: (value: string) => <GenerationTag status={value} />,
+      render: (value: string) => <GenerationTag status={value} t={t} />,
     },
   ];
 
   const batchColumns: ColumnsType<SalaryAdvanceBatch> = [
     {
-      title: "批次",
+      title: t("salary.batchNo"),
       dataIndex: "batchNo",
       width: 250,
       render: (value: string, batch) => (
@@ -654,15 +699,15 @@ export function SalaryAdvanceWorkspace({
         </div>
       ),
     },
-    { title: "期间", dataIndex: "period", width: 86 },
+    { title: t("salary.period"), dataIndex: "period", width: 86 },
     {
-      title: "状态",
+      title: t("salary.status"),
       dataIndex: "status",
       width: 118,
-      render: (value: BatchStatus) => <BatchStatusTag status={value} />,
+      render: (value: BatchStatus) => <BatchStatusTag status={value} t={t} />,
     },
     {
-      title: "有效 / 错误",
+      title: t("salary.validCount"),
       key: "counts",
       width: 116,
       render: (_, batch) => (
@@ -675,7 +720,7 @@ export function SalaryAdvanceWorkspace({
       ),
     },
     {
-      title: "导入时间",
+      title: t("salary.importedAt"),
       dataIndex: "createdAt",
       width: 168,
       render: formatFinanceDateTime,
@@ -684,10 +729,25 @@ export function SalaryAdvanceWorkspace({
 
   const renderLedger = () => (
     <div className="salary-ledger">
+      <FinanceLifecycleTabs
+        activeKey={phase}
+        ariaLabel={t("lifecycle.aria", { module: t("nav.salaryAdvance") })}
+        counts={lifecycleCounts}
+        labels={{
+          pending: t("lifecycle.pending"),
+          issuing: t("lifecycle.issuing"),
+          history: t("lifecycle.history"),
+          all: t("lifecycle.all"),
+        }}
+        onChange={(nextPhase) => {
+          setPhase(nextPhase);
+          setStatusFilter(undefined);
+        }}
+      />
       <div className="salary-filter-bar">
         <Input
           maxLength={6}
-          placeholder="期间 YYYYMM"
+          placeholder={t("salary.periodPlaceholder")}
           prefix={<FileProtectOutlined />}
           value={period}
           onChange={(event) => setPeriod(event.target.value.replace(/\D/g, ""))}
@@ -695,19 +755,19 @@ export function SalaryAdvanceWorkspace({
         />
         <Select
           allowClear
-          placeholder="全部批次状态"
+          placeholder={t("salary.allBatchStatuses")}
           value={statusFilter}
-          options={Object.entries(batchLabels).map(([value, label]) => ({
+          options={BATCH_STATUSES.map((value) => ({
             value,
-            label,
+            label: t(`salary.batchStatus.${value}` as TranslationKey),
           }))}
           onChange={setStatusFilter}
         />
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void reload()}>
-          查询
+          {t("salary.query")}
         </Button>
         <Button icon={<UploadOutlined />} type="primary" onClick={() => setImportOpen(true)}>
-          导入工资预支表
+          {t("salary.import")}
         </Button>
       </div>
 
@@ -715,13 +775,13 @@ export function SalaryAdvanceWorkspace({
         <div className="salary-section-heading">
           <div>
             <span>IMPORT BATCHES</span>
-            <strong>导入批次</strong>
+            <strong>{t("salary.importBatches")}</strong>
           </div>
-          <small>{batches.length} 个批次</small>
+          <small>{t("salary.batchCount", { count: visibleBatches.length })}</small>
         </div>
         <Table<SalaryAdvanceBatch>
           columns={batchColumns}
-          dataSource={batches}
+          dataSource={visibleBatches}
           loading={loading}
           pagination={{ pageSize: 5, hideOnSinglePage: true }}
           rowClassName={(batch) =>
@@ -749,7 +809,7 @@ export function SalaryAdvanceWorkspace({
                 icon={<DownloadOutlined />}
                 onClick={() => void downloadValidationReport(selected.batch.id)}
               >
-                校验报告
+                {t("salary.validationReport")}
               </Button>
               <Button
                 danger
@@ -762,7 +822,7 @@ export function SalaryAdvanceWorkspace({
                 loading={busy}
                 onClick={removeBatch}
               >
-                删除批次
+                {t("salary.deleteBatch")}
               </Button>
               <Button
                 disabled={!["ready", "validation_failed"].includes(selected.batch.status)}
@@ -771,11 +831,11 @@ export function SalaryAdvanceWorkspace({
                 onClick={() =>
                   void run(
                     () => revalidateSalaryAdvanceBatch(selected.batch.id),
-                    "批次已重新校验",
+                    t("salary.revalidated"),
                   )
                 }
               >
-                重新校验
+                {t("salary.revalidate")}
               </Button>
               <Button
                 disabled={selected.batch.status !== "ready"}
@@ -783,19 +843,19 @@ export function SalaryAdvanceWorkspace({
                 loading={busy}
                 onClick={() =>
                   modal.confirm({
-                    title: "锁定工资预支批次？",
-                    content:
-                      "锁定后记录不可再编辑；正式文件按签名库当前有效版本生成并留存快照。",
-                    okText: "确认锁定",
+                    title: t("salary.lockTitle"),
+                    content: t("salary.lockBody"),
+                    okText: t("salary.lockOk"),
+                    cancelText: t("common.cancel"),
                     onOk: () =>
                       run(
                         () => lockSalaryAdvanceBatch(selected.batch.id),
-                        "批次已锁定",
+                        t("salary.locked"),
                       ),
                   })
                 }
               >
-                锁定
+                {t("salary.lock")}
               </Button>
               <Button
                 disabled={selected.batch.status !== "locked"}
@@ -804,26 +864,26 @@ export function SalaryAdvanceWorkspace({
                 type="primary"
                 onClick={() => void startGeneration()}
               >
-                生成正式文件
+                {t("salary.generate")}
               </Button>
             </Space>
           </div>
 
           <div className="salary-metrics">
             <div>
-              <span>总行数</span>
+              <span>{t("salary.totalRows")}</span>
               <strong>{selected.batch.totalRows}</strong>
             </div>
             <div>
-              <span>校验通过</span>
+              <span>{t("salary.validRows")}</span>
               <strong>{selected.batch.validRows}</strong>
             </div>
             <div>
-              <span>警告</span>
+              <span>{t("salary.warningRows")}</span>
               <strong>{selected.batch.warningRows}</strong>
             </div>
             <div className={selected.batch.invalidRows ? "has-error" : ""}>
-              <span>错误</span>
+              <span>{t("salary.invalidRows")}</span>
               <strong>{selected.batch.invalidRows}</strong>
             </div>
           </div>
@@ -831,8 +891,14 @@ export function SalaryAdvanceWorkspace({
           {jobDetail && (
             <div className="salary-job-strip">
               <div>
-                <span>生成任务 {jobDetail.job.id.slice(0, 8)}</span>
-                <strong>{jobDetail.job.status}</strong>
+                <span>
+                  {t("salary.job", { id: jobDetail.job.id.slice(0, 8) })}
+                </span>
+                <strong>
+                  {t(
+                    `salary.batchStatus.${jobDetail.job.status}` as TranslationKey,
+                  )}
+                </strong>
               </div>
               <Progress
                 percent={
@@ -854,7 +920,7 @@ export function SalaryAdvanceWorkspace({
                     size="small"
                     onClick={() => void retryGeneration()}
                   >
-                    重试失败项
+                    {t("salary.retryFailed")}
                   </Button>
                 )}
                 {jobDetail.job.successCount > 0 && (
@@ -875,7 +941,7 @@ export function SalaryAdvanceWorkspace({
                         void downloadJobArtifact(jobDetail.job.id, "merged-pdf")
                       }
                     >
-                      合并 PDF
+                      {t("salary.mergedPdf")}
                     </Button>
                     <Button
                       size="small"
@@ -908,7 +974,7 @@ export function SalaryAdvanceWorkspace({
         </section>
       ) : (
         <section className="salary-empty-card">
-          <Empty description="导入或选择一个批次开始处理" />
+          <Empty description={t("salary.emptyLedger")} />
         </section>
       )}
     </div>
@@ -920,14 +986,14 @@ export function SalaryAdvanceWorkspace({
         <div className="salary-section-heading">
           <div>
             <span>TEMPLATE VERSION</span>
-            <strong>模板版本</strong>
+            <strong>{t("salary.templateVersion")}</strong>
           </div>
           <Button
             icon={<ReloadOutlined />}
             loading={loading}
             onClick={() => void loadMaintenance()}
           >
-            刷新
+            {t("common.refresh")}
           </Button>
         </div>
         <Table<SalaryAdvanceTemplate>
@@ -937,43 +1003,53 @@ export function SalaryAdvanceWorkspace({
           size="small"
           columns={[
             {
-              title: "版本",
+              title: t("salary.templateVersion"),
               dataIndex: "version",
               width: 110,
               render: (value: string, template) => (
                 <Space>
                   <strong>{value}</strong>
                   {template.active && (
-                    <FinanceStatusBadge label="当前" tone="success" />
+                    <FinanceStatusBadge
+                      label={t("salary.templateCurrent")}
+                      tone="success"
+                    />
                   )}
                 </Space>
               ),
             },
-            { title: "Excel 模板", dataIndex: "fileName", ellipsis: true },
+            {
+              title: t("salary.templateFile"),
+              dataIndex: "fileName",
+              ellipsis: true,
+            },
             {
               // 哈希是审计线索不是日常信息：正式文件的 manifest 里已完整留存，
               // 这里只表明三件套一致，具体值收进 Tooltip。
-              title: "制版校验",
+              title: t("salary.templateIntegrity"),
               key: "integrity",
               width: 150,
               render: (_, template) => (
                 <Tooltip
                   title={
                     <div className="salary-hash-tip">
-                      <div>XLSX：{template.sha256}</div>
-                      <div>PDF 底版：{template.pdfUnderlaySha256}</div>
-                      <div>坐标版本：{template.pdfLayoutVersion}</div>
+                      <div>XLSX: {template.sha256}</div>
+                      <div>PDF: {template.pdfUnderlaySha256}</div>
+                      <div>Layout: {template.pdfLayoutVersion}</div>
                     </div>
                   }
                 >
                   <span>
-                    <FinanceStatusBadge label="三件套一致" tone="info" />
+                    <FinanceStatusBadge
+                      label={t("salary.templateIntegrityOk")}
+                      tone="info"
+                    />
                   </span>
                 </Tooltip>
               ),
             },
             {
-              title: "启用时间",
+              title: t("salary.templateEnabledAt"),
               dataIndex: "createdAt",
               width: 170,
               render: formatFinanceDateTime,
@@ -985,8 +1061,8 @@ export function SalaryAdvanceWorkspace({
       <Alert
         showIcon
         type="info"
-        message="签名维护在「系统管理 → 签名库」"
-        description="记录里的财务/总经理签名代码（如 FIN_XING_LANHUI）直接对应签名库中同名签名的最新有效版本，本模块不单独维护签名。"
+        message={t("salary.signatureNoticeTitle")}
+        description={t("salary.signatureNoticeBody")}
         action={
           onNavigateModule && (
             <Button
@@ -994,7 +1070,7 @@ export function SalaryAdvanceWorkspace({
               type="primary"
               onClick={() => onNavigateModule("administration")}
             >
-              前往签名库
+              {t("salary.gotoSignatures")}
             </Button>
           )
         }
@@ -1004,35 +1080,38 @@ export function SalaryAdvanceWorkspace({
 
   return (
     <section className="salary-workspace" aria-label={t("nav.salaryAdvance")}>
-      {/* 页头排版走共享的 .workspace-header，与 TAX INV 同一套字号和间距。 */}
+      {/* 页头格式与 WHT / TAX INV 一致：英文模块码 + <small> 里的中文功能名，
+          功能名走 i18n 才能跟着语言切换走。 */}
       <header className="workspace-header">
         <div>
-          <span className="workspace-kicker">SALARY ADVANCE</span>
-          <h1>工资预支单</h1>
-          <p>导入、校验、签名快照和正式文件全链路留痕。</p>
+          <h1>
+            <span>SALARY ADVANCE</span>
+            <small>{t("salary.title")}</small>
+          </h1>
+          <p>{t("salary.subtitle")}</p>
         </div>
-        <Tooltip title="正式 PDF 由 ReportLab + pypdf 生成，服务器不需要安装 Office">
+        <Tooltip title={t("salary.noOfficeHint")}>
           <span className="workspace-health-pill">
             <span className="health-dot" />
-            无 Office 生成链路
+            {t("salary.noOfficePill")}
           </span>
         </Tooltip>
       </header>
 
-      <nav className="workspace-subnav" aria-label="工资预支功能">
+      <nav className="workspace-subnav" aria-label={t("salary.navLabel")}>
         <button
           className={view === "ledger" ? "is-active" : ""}
           type="button"
           onClick={() => setView("ledger")}
         >
-          <FileProtectOutlined /> 批次与开具
+          <FileProtectOutlined /> {t("salary.ledger")}
         </button>
         <button
           className={view === "maintenance" ? "is-active" : ""}
           type="button"
           onClick={() => setView("maintenance")}
         >
-          <SettingOutlined /> 模板与签名
+          <SettingOutlined /> {t("salary.maintenance")}
         </button>
       </nav>
 
@@ -1043,6 +1122,7 @@ export function SalaryAdvanceWorkspace({
           busy={busy}
           documents={selectedDocuments}
           record={selectedRecord}
+          t={t}
           onClose={() => setSelectedRecord(null)}
           onDownload={(document, format) =>
             void downloadSalaryAdvanceDocument(
@@ -1057,7 +1137,7 @@ export function SalaryAdvanceWorkspace({
           onPreview={() =>
             void run(
               () => previewSalaryAdvanceRecord(selectedRecord.id),
-              "PDF 预览已打开",
+              t("salary.previewOpened"),
             )
           }
         />
@@ -1067,9 +1147,9 @@ export function SalaryAdvanceWorkspace({
         destroyOnHidden
         forceRender
         open={importOpen}
-        title="导入工资预支数据"
-        okText="上传并校验"
-        cancelText="取消"
+        title={t("salary.importTitle")}
+        okText={t("salary.importOk")}
+        cancelText={t("common.cancel")}
         confirmLoading={busy}
         onCancel={() => setImportOpen(false)}
         onOk={() => void submitImport()}
@@ -1078,20 +1158,20 @@ export function SalaryAdvanceWorkspace({
           className="salary-modal-alert"
           showIcon
           type="info"
-          message="只读取 .xlsx，不执行宏或外部链接"
+          message={t("salary.importSafety")}
         />
         <Form form={importForm} layout="vertical">
           <Form.Item
-            label="工资期间"
+            label={t("salary.importPeriod")}
             name="period"
             rules={[
-              { required: true, message: "请输入期间" },
-              { pattern: /^\d{6}$/, message: "格式为 YYYYMM" },
+              { required: true, message: t("salary.importPeriodRequired") },
+              { pattern: /^\d{6}$/, message: t("salary.importPeriodFormat") },
             ]}
           >
             <Input maxLength={6} placeholder="202607" />
           </Form.Item>
-          <Form.Item label="源数据文件" required>
+          <Form.Item label={t("salary.importFile")} required>
             <Upload
               accept=".xlsx"
               beforeUpload={() => false}
@@ -1099,7 +1179,7 @@ export function SalaryAdvanceWorkspace({
               maxCount={1}
               onChange={({ fileList }) => setImportFiles(fileList)}
             >
-              <Button icon={<UploadOutlined />}>选择 XLSX</Button>
+              <Button icon={<UploadOutlined />}>{t("salary.selectXlsx")}</Button>
             </Upload>
           </Form.Item>
         </Form>
@@ -1110,54 +1190,86 @@ export function SalaryAdvanceWorkspace({
         destroyOnHidden
         forceRender
         open={editOpen}
-        title={`修正记录 · ${selectedRecord?.empId ?? ""}`}
-        okText="保存并校验"
-        cancelText="取消"
+        title={t("salary.editTitle", { empId: selectedRecord?.empId ?? "" })}
+        okText={t("salary.editOk")}
+        cancelText={t("common.cancel")}
         confirmLoading={busy}
         width={760}
         onCancel={() => setEditOpen(false)}
         onOk={() => void submitEdit()}
       >
         <Form className="salary-edit-grid" form={editForm} layout="vertical">
-          <Form.Item label="名" name="first_name" rules={[{ required: true }]}>
+          <Form.Item
+            label={t("salary.firstName")}
+            name="first_name"
+            rules={[{ required: true }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item label="姓" name="surname" rules={[{ required: true }]}>
+          <Form.Item
+            label={t("salary.surname")}
+            name="surname"
+            rules={[{ required: true }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item label="中文名" name="chinese_name">
+          <Form.Item label={t("salary.chineseName")} name="chinese_name">
             <Input />
           </Form.Item>
-          <Form.Item label="部门" name="department" rules={[{ required: true }]}>
+          <Form.Item
+            label={t("salary.department")}
+            name="department"
+            rules={[{ required: true }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item label="职位" name="position" rules={[{ required: true }]}>
+          <Form.Item
+            label={t("salary.position")}
+            name="position"
+            rules={[{ required: true }]}
+          >
             <Input />
           </Form.Item>
-          <Form.Item label="入职日期" name="start_date" rules={[{ required: true }]}>
-            <Input placeholder="YYYY-MM-DD" />
+          <Form.Item
+            label={t("salary.startDate")}
+            name="start_date"
+            rules={[{ required: true }]}
+          >
+            <Input placeholder={t("salary.datePlaceholder")} />
           </Form.Item>
-          <Form.Item className="salary-edit-wide" label="预支原因" name="reason">
+          <Form.Item
+            className="salary-edit-wide"
+            label={t("salary.reason")}
+            name="reason"
+          >
             <Input.TextArea rows={2} />
           </Form.Item>
           <Form.Item
-            label="预支金额"
+            label={t("salary.advanceAmount")}
             name="advance_amount"
             rules={[{ required: true }]}
           >
             <InputNumber min={0.01} precision={2} />
           </Form.Item>
           <Form.Item
-            label="月扣金额"
+            label={t("salary.monthlyDeduction")}
             name="monthly_deduction"
             rules={[{ required: true }]}
           >
             <InputNumber min={0.01} precision={2} />
           </Form.Item>
-          <Form.Item label="申请日期" name="request_date" rules={[{ required: true }]}>
-            <Input placeholder="YYYY-MM-DD" />
+          <Form.Item
+            label={t("salary.requestDate")}
+            name="request_date"
+            rules={[{ required: true }]}
+          >
+            <Input placeholder={t("salary.datePlaceholder")} />
           </Form.Item>
-          <Form.Item label="审批内容" name="approval_status" rules={[{ required: true }]}>
+          <Form.Item
+            label={t("salary.approvalStatus")}
+            name="approval_status"
+            rules={[{ required: true }]}
+          >
             <Select
               options={[
                 { value: "Approve", label: "Approve" },
@@ -1166,14 +1278,14 @@ export function SalaryAdvanceWorkspace({
             />
           </Form.Item>
           <Form.Item
-            label="财务签名代码"
+            label={t("salary.financeCode")}
             name="finance_signature_code"
             rules={[{ required: true }]}
           >
             <Input />
           </Form.Item>
           <Form.Item
-            label="总经理签名代码"
+            label={t("salary.mdCode")}
             name="md_signature_code"
             rules={[{ required: true }]}
           >
@@ -1181,7 +1293,7 @@ export function SalaryAdvanceWorkspace({
           </Form.Item>
           <Form.Item
             className="salary-edit-wide"
-            label="财务意见"
+            label={t("salary.financeComment")}
             name="finance_comment"
           >
             <Input.TextArea rows={2} />

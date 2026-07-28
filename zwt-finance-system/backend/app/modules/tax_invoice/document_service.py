@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.models import SignatureAsset
+from app.core.signature_usage import signature_allows
 from app.modules.tax_invoice.document_generator import (
     TaxInvoiceDocumentGenerationError,
     export_pdf_from_template,
@@ -124,7 +125,7 @@ class TaxInvoiceDocumentService:
                 raise TaxInvoiceNotFoundError("signature image was not found")
             if signature.status != "active":
                 raise TaxInvoiceStateError("the selected signature is inactive")
-            if signature.usage not in {"tax_inv", "both"}:
+            if not signature_allows(signature.usage, "tax_inv"):
                 raise TaxInvoiceStateError(
                     "the selected signature is not approved for tax invoices"
                 )

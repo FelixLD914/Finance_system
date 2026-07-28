@@ -940,6 +940,15 @@ select {
   letter-spacing: inherit;
 }
 
+/* 标题结构固定为「英文模块码 + <small> 功能名」，与 .page-heading 保持一致：
+   模块码是识别用的锚点，功能名跟着语言切换走，所以字号退一档。 */
+.workspace-header h1 small {
+  font-family: var(--font-ui);
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 .workspace-header p {
   margin: 0;
   color: var(--muted);

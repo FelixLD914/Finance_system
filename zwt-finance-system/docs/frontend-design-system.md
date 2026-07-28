@@ -17,6 +17,7 @@
 | --- | --- | --- | --- |
 | WHT | `draft`, `pending_review` | `approved` | `issued`, `voided` |
 | TAX INV | `draft`, `needs_review`, `ready` | `approved` | `issued`, `voided` |
+| 工资预支 | `validating`, `validation_failed`, `ready` | `locked`, `generating` | `completed`, `partially_completed`, `failed` |
 
 历史文件导入是业务操作，不等于“历史记录”视图。前者是数据进入系统的方式，后者是
 已出具或作废记录的生命周期归档。
@@ -26,12 +27,16 @@
 新增页面**先在这里找**，找不到再往模块 CSS 里加。任何模块都不得自己重定义
 标题字号、卡片圆角、状态色和金额/日期格式。
 
+**页面标题格式是硬约定**：`<h1><span>英文模块码</span><small>{t(功能名)}</small></h1>`。
+模块码固定不翻译（WHT / TAX INV / SALARY ADVANCE），是跨语言的识别锚点；功能名
+必须走 i18n，否则切到英文会留下中文残页。标题上方不加 kicker 小标。
+
 | 件 | 用途 | 落地情况 |
 | --- | --- | --- |
-| `.workspace-header` + `.workspace-kicker` | 模块页头：10px 字距标识 + 26px 无衬线标题 + 13px 说明 | TAX INV、工资预支 |
+| `.workspace-header` | 模块页头：26px 模块码 + 0.72em 功能名 + 13px 说明 | TAX INV、工资预支 |
 | `.workspace-subnav` | 模块内视图切换（胶囊按钮） | TAX INV、工资预支 |
 | `.workspace-health-pill` | 常驻背景信息压成胶囊，不占卡片 | TAX INV（`.tax-health-pill`）、工资预支 |
-| `FinanceLifecycleTabs` | 固定阶段顺序与计数，模块只提供状态映射 | WHT、TAX INV |
+| `FinanceLifecycleTabs` | 固定阶段顺序与计数，模块只提供状态映射 | WHT、TAX INV、工资预支 |
 | `FinanceStatusBadge` | 语义状态色；业务类别不得借用成功/警告/危险色 | 工资预支 |
 | `FinanceRecordDrawer` | 440px 覆盖式详情、统一标题/状态/页脚动作 | 工资预支 |
 | `formatFinanceAmount` / `formatFinanceDateTime` | 金额与日期显示的唯一入口 | 工资预支 |
@@ -64,6 +69,7 @@
 | 工资预支批次与开具 | 工资预支单 / 批次与开具 | 导入→校验→锁定→生成的单链路；未锁定批次可删除重来 |
 | 工资预支模板版本 | 工资预支单 / 模板与签名 | 只显示版本与「三件套一致」，制版哈希收进 Tooltip |
 | 工资预支签名 | 系统管理 / 签名库 | 签名代码＝签名库名称，取最新有效版本；本模块只跳转不维护 |
+| 签名适用范围 | 系统管理 / 签名库 | 一张签名可同时勾选 WHT / TAX INV / 工资预支；存量签名可随时改范围 |
 
 后续新增功能沿用同样的落位方式：页面结构、组件、密度和颜色以本文件为准；不得恢复
 分栏挤压台账、大号衬线标题或卡片拼贴。

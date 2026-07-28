@@ -6,11 +6,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from anyio import to_thread
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.models import SignatureAsset
+from app.core.signature_usage import (
+    format_signature_usage,
+    signature_allows,
+    signature_usages_overlap,
+)
 from app.modules.wht.document_generator import (
     DocumentGenerationError,
     document_file_stem,
@@ -38,12 +43,7 @@ class WhtDocumentService:
         statement = select(SignatureAsset)
         if not include_inactive:
             statement = statement.where(SignatureAsset.status == "active")
-        if usage:
-            # 请求 wht 时，标为 both 的也算数——both 表示两种单据都能盖。
-            statement = statement.where(
-                SignatureAsset.usage.in_([usage, "both"])
-            )
-        return list(
+        signatures = list(
             (
                 await self.session.scalars(
                     statement.order_by(
@@ -54,6 +54,14 @@ class WhtDocumentService:
                 )
             ).all()
         )
+        if usage:
+            # 适用范围存成逗号串，成员判定放 Python（见 signature_usage 模块注释）。
+            signatures = [
+                signature
+                for signature in signatures
+                if signature_allows(signature.usage, usage)
+            ]
+        return signatures
 
     async def create_signature(
         self,
@@ -87,13 +95,9 @@ class WhtDocumentService:
         stored_path.write_bytes(content)
 
         if make_default:
-            # 只清掉适用范围有交集的那些默认：WHT 的默认签名和 TAX INV 的默认签名
-            # 可以是两个人，把全表清成 false 会顺手废掉另一种单据的默认。
-            await self.session.execute(
-                update(SignatureAsset)
-                .where(SignatureAsset.usage.in_(_conflicting_usages(usage)))
-                .values(is_default=False)
-            )
+            # 只清掉适用范围有交集的那些默认：各模块的默认签名可以是不同的人，
+            # 把全表清成 false 会顺手废掉别的单据的默认。
+            await self._clear_defaults_overlapping(usage)
         signature = SignatureAsset(
             id=signature_id,
             usage=usage,
@@ -133,17 +137,13 @@ class WhtDocumentService:
             if payload.status == "inactive":
                 signature.is_default = False
         if payload.usage is not None:
-            signature.usage = payload.usage
+            signature.usage = format_signature_usage(payload.usage)
         if payload.is_default is True:
             if signature.status != "active":
                 raise WhtStateError("an inactive signature cannot be the default")
-            await self.session.execute(
-                update(SignatureAsset)
-                .where(
-                    SignatureAsset.id != signature.id,
-                    SignatureAsset.usage.in_(_conflicting_usages(signature.usage)),
-                )
-                .values(is_default=False)
+            await self._clear_defaults_overlapping(
+                signature.usage,
+                exclude_id=signature.id,
             )
             signature.is_default = True
         elif payload.is_default is False:
@@ -195,7 +195,7 @@ class WhtDocumentService:
                 raise WhtStateError("the selected signature is inactive")
             # 适用范围是 tax_inv 的图不能盖在 WHT 凭证上。前端已经按范围过滤，
             # 这里再挡一次：签名决定单据上出现谁的名字，不能只靠界面把关。
-            if signature.usage not in {"wht", "both"}:
+            if not signature_allows(signature.usage, "wht"):
                 raise WhtStateError(
                     "the selected signature is not approved for WHT certificates"
                 )
@@ -334,13 +334,26 @@ class WhtDocumentService:
             raise WhtNotFoundError("signature image was not found")
         return signature
 
+    async def _clear_defaults_overlapping(
+        self,
+        usage: str,
+        *,
+        exclude_id: uuid.UUID | None = None,
+    ) -> None:
+        """把适用范围与 usage 有交集的默认签名取消掉。
 
-def _conflicting_usages(usage: str) -> list[str]:
-    """与给定适用范围有交集的所有范围。
+        范围是集合，交集判断在 Python 做——签名资产只有几十行，
+        而对逗号串做 SQL LIKE 迟早会在加新模块时踩中子串。
+        """
+        candidates = (
+            await self.session.scalars(
+                select(SignatureAsset).where(SignatureAsset.is_default.is_(True))
+            )
+        ).all()
+        for candidate in candidates:
+            if candidate.id == exclude_id:
+                continue
+            if signature_usages_overlap(candidate.usage, usage):
+                candidate.is_default = False
 
-    both 同时覆盖两种单据，因此它和任何范围都冲突；wht 只和 wht / both 冲突。
-    设默认签名时只清掉这些，才不会把另一种单据的默认一起废掉。
-    """
-    if usage == "both":
-        return ["wht", "tax_inv", "both"]
-    return [usage, "both"]
+

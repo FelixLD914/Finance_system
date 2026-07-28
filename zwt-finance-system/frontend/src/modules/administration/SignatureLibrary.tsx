@@ -4,16 +4,18 @@ import {
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
+  TagsOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
   App as AntApp,
   Button,
+  Checkbox,
   Form,
   Input,
   Modal,
-  Radio,
+  Space,
   Switch,
   Table,
   Tag,
@@ -24,11 +26,17 @@ import type { UploadFile } from "antd/es/upload/interface";
 
 import type { Translate } from "../../i18n";
 import { listSignatures, updateSignature, uploadSignature } from "../wht/api";
-import type { SignatureAsset } from "../wht/types";
+import type { SignatureAsset, SignatureUsage } from "../wht/types";
 
 interface SignatureLibraryProps {
   t: Translate;
 }
+
+const usageColors: Record<SignatureUsage, string> = {
+  wht: "cyan",
+  tax_inv: "blue",
+  salary_advance: "purple",
+};
 
 export function SignatureLibrary({ t }: SignatureLibraryProps) {
   const { message } = AntApp.useApp();
@@ -37,8 +45,16 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [scopeTarget, setScopeTarget] = useState<SignatureAsset | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [form] = Form.useForm();
+  const [scopeForm] = Form.useForm();
+
+  const usageOptions = [
+    { value: "wht", label: t("wht.usage.wht") },
+    { value: "tax_inv", label: t("wht.usage.tax_inv") },
+    { value: "salary_advance", label: t("wht.usage.salary_advance") },
+  ];
 
   const reload = async () => {
     setLoading(true);
@@ -83,6 +99,22 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     }
   };
 
+  const submitScope = async () => {
+    if (!scopeTarget) return;
+    try {
+      const values = await scopeForm.validateFields();
+      setPending(true);
+      await updateSignature(scopeTarget.id, { usage: values.usage });
+      message.success(t("common.saved"));
+      setScopeTarget(null);
+      await reload();
+    } catch (scopeError) {
+      if (scopeError instanceof Error) message.error(scopeError.message);
+    } finally {
+      setPending(false);
+    }
+  };
+
   const mutate = async (
     signature: SignatureAsset,
     input: Partial<Pick<SignatureAsset, "status" | "isDefault">>,
@@ -115,11 +147,16 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     {
       title: t("wht.signatureUsage"),
       dataIndex: "usage",
-      width: 150,
+      width: 260,
+      // 适用范围是集合：每个模块一枚标签，比拼成一句话更容易扫。
       render: (usage: SignatureAsset["usage"]) => (
-        <Tag color={usage === "both" ? "purple" : usage === "tax_inv" ? "blue" : "cyan"}>
-          {t(`wht.usage.${usage}` as Parameters<typeof t>[0])}
-        </Tag>
+        <Space size={4} wrap>
+          {usage.map((module) => (
+            <Tag color={usageColors[module]} key={module}>
+              {t(`wht.usage.${module}` as Parameters<typeof t>[0])}
+            </Tag>
+          ))}
+        </Space>
       ),
     },
     {
@@ -148,9 +185,20 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     {
       title: t("common.edit"),
       key: "actions",
-      width: 230,
+      width: 330,
       render: (_, signature) => (
         <div className="table-row-actions">
+          <Button
+            disabled={pending}
+            icon={<TagsOutlined />}
+            size="small"
+            onClick={() => {
+              scopeForm.setFieldsValue({ usage: signature.usage });
+              setScopeTarget(signature);
+            }}
+          >
+            {t("wht.signatureUsage")}
+          </Button>
           {!signature.isDefault && signature.status === "active" && (
             <Button
               disabled={pending}
@@ -235,7 +283,7 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ makeDefault: false, usage: "wht" }}
+          initialValues={{ makeDefault: false, usage: ["wht"] }}
         >
           <Form.Item
             name="name"
@@ -250,14 +298,8 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
             extra={t("wht.signatureUsageHint")}
             rules={[{ required: true }]}
           >
-            <Radio.Group
-              options={[
-                { value: "wht", label: t("wht.usage.wht") },
-                { value: "tax_inv", label: t("wht.usage.tax_inv") },
-                { value: "both", label: t("wht.usage.both") },
-              ]}
-              optionType="button"
-            />
+            {/* 一张签名可以同时适用于多个模块，所以是多选而不是单选。 */}
+            <Checkbox.Group options={usageOptions} />
           </Form.Item>
           <Form.Item label={t("wht.signatureFile")} required>
             <Upload
@@ -272,6 +314,29 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
           </Form.Item>
           <Form.Item name="makeDefault" label={t("wht.defaultSignature")} valuePropName="checked">
             <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 存量签名要能补勾新模块，否则新模块永远拿不到已批准的签名。 */}
+      <Modal
+        destroyOnHidden
+        open={scopeTarget !== null}
+        title={`${t("wht.signatureUsage")} · ${scopeTarget?.name ?? ""}`}
+        okText={t("common.save")}
+        cancelText={t("common.cancel")}
+        confirmLoading={pending}
+        onCancel={() => setScopeTarget(null)}
+        onOk={() => void submitScope()}
+      >
+        <p className="modal-intro">{t("wht.signatureUsageHint")}</p>
+        <Form form={scopeForm} layout="vertical">
+          <Form.Item
+            name="usage"
+            label={t("wht.signatureUsage")}
+            rules={[{ required: true, message: t("wht.signatureUsageRequired") }]}
+          >
+            <Checkbox.Group options={usageOptions} />
           </Form.Item>
         </Form>
       </Modal>

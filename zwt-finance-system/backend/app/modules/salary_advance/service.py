@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import ServiceError
 from app.core.models import SignatureAsset
+from app.core.signature_usage import signature_allows
 from app.modules.salary_advance import pdf_layout
 from app.modules.salary_advance.document_generator import CURRENT_RECORD_FIELDS
 from app.modules.salary_advance.importer import (
@@ -427,17 +428,20 @@ class SalaryAdvanceService:
         )
 
     async def active_signature_codes(self) -> set[str]:
-        # 签名代码就是共享签名库（core.signature_assets）里的名称。
-        # 维护入口统一在系统管理 → 签名库，本模块只做只读解析。
+        # 签名代码就是共享签名库（core.signature_assets）里的名称，
+        # 且适用范围必须勾了工资预支。维护入口统一在系统管理 → 签名库，
+        # 本模块只做只读解析。
+        rows = (
+            await self.session.execute(
+                select(SignatureAsset.name, SignatureAsset.usage).where(
+                    SignatureAsset.status == "active"
+                )
+            )
+        ).all()
         return {
             str(name).strip().upper()
-            for name in (
-                await self.session.scalars(
-                    select(SignatureAsset.name).where(
-                        SignatureAsset.status == "active"
-                    )
-                )
-            ).all()
+            for name, usage in rows
+            if signature_allows(usage, "salary_advance")
         }
 
     async def delete_batch(self, batch_id: uuid.UUID) -> None:

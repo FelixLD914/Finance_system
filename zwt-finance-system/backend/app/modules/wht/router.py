@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import PrincipalDependency, require_permission
+from app.core.signature_usage import format_signature_usage
 from app.modules.wht.batch_import import (
     BatchWorkbookError,
     build_template_workbook,
@@ -31,6 +32,7 @@ from app.modules.wht.schemas import (
     PayeeUpdate,
     SignatureAssetResponse,
     SignatureAssetUpdate,
+    SignatureUsage,
     WhtDocumentResponse,
     WhtNumberPreview,
     WhtTaskCreate,
@@ -400,9 +402,9 @@ async def import_payees(
 async def list_signatures(
     service: WhtDocumentServiceDependency,
     include_inactive: bool = Query(default=False, alias="includeInactive"),
-    usage: Literal["wht", "tax_inv"] | None = Query(default=None),
+    usage: Literal["wht", "tax_inv", "salary_advance"] | None = Query(default=None),
 ) -> list[SignatureAssetResponse]:
-    """usage 过滤会带上标为 both 的签名；不传则返回整个图库。"""
+    """usage 过滤返回适用范围包含该模块的签名；不传则返回整个图库。"""
     signatures = await service.list_signatures(include_inactive, usage)
     return [SignatureAssetResponse.model_validate(signature) for signature in signatures]
 
@@ -417,7 +419,8 @@ async def create_signature(
     service: WhtDocumentServiceDependency,
     name: Annotated[str, Form(min_length=1, max_length=160)],
     make_default: Annotated[bool, Form(alias="makeDefault")] = False,
-    usage: Annotated[Literal["wht", "tax_inv", "both"], Form()] = "wht",
+    # multipart 里重复同名字段即数组：usage=wht&usage=salary_advance。
+    usage: Annotated[list[SignatureUsage], Form()] = ["wht"],  # noqa: B006
     file: Annotated[UploadFile, File(description="Approved PNG or JPEG signature image")] = ...,
 ) -> SignatureAssetResponse:
     maximum = min(get_settings().max_file_mib, 5) * 1024 * 1024
@@ -427,12 +430,19 @@ async def create_signature(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="signature image must not exceed 5 MiB",
         )
+    try:
+        stored_usage = format_signature_usage(usage)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="signature usage must name at least one module",
+        ) from exc
     signature = await service.create_signature(
         name=name,
         original_file_name=file.filename or "signature",
         content=content,
         make_default=make_default,
-        usage=usage,
+        usage=stored_usage,
     )
     return SignatureAssetResponse.model_validate(signature)
 

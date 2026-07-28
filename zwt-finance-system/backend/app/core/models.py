@@ -93,9 +93,10 @@ class SignatureAsset(Base):
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    # 这张签名能盖在哪种单据上：wht / tax_inv / both。WHT 与 TAX INV 在旧工具里
-    # 用的是不同的人，所以适用范围必须显式记录。
-    usage: Mapped[str] = mapped_column(String(20), nullable=False, default="wht")
+    # 这张签名能盖在哪些单据上：wht / tax_inv / salary_advance 的逗号分隔集合。
+    # 各模块在旧工具里用的是不同的人，所以适用范围必须显式记录。
+    # 解析与序列化一律走 app.core.signature_usage，别在别处 split 这个串。
+    usage: Mapped[str] = mapped_column(String(60), nullable=False, default="wht")
     # 默认签名是"按适用范围"的：WHT 的默认和 TAX INV 的默认可以是两张不同的图。
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
