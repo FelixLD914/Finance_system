@@ -6,6 +6,7 @@
 > 当前系统基线：`138ca43`
 > 来源仓库：`FelixLD914/Salary-Advance-Form`
 > 来源基线：`8bfdf3b73532ce35db590913e32969f0af08ead3`
+> 服务器约束：生产服务器不安装或调用 Microsoft Office / LibreOffice
 
 ## 1. 结论
 
@@ -23,6 +24,22 @@
 - WHT、TAX INV 现有表、接口、模板和文件不迁移、不重命名、不改变默认行为。
 - 原软件中的真实员工数据和真实签名图片不进入 Git，也不复制到测试夹具。
 - 新模块可以通过功能开关关闭；上线失败时不影响 WHT 和 TAX INV。
+
+### 1.1 已确认的 PDF 方案
+
+生产 PDF 沿用当前 WHT/TAX INV 的实现，不依赖服务器 Office：
+
+```text
+同一个不可变 GenerationSnapshot
+    ├── 已批准 XLSX 模板 + openpyxl ───────────────→ XLSX
+    └── 配套静态 PDF 底版 + 自动生成坐标
+                              + ReportLab/pypdf ───→ PDF
+```
+
+XLSX 与 PDF 不在运行时互相转换，但必须读取同一个不可变数据快照，并绑定同一个模板
+版本。静态 PDF 底版和坐标表只能在开发/制版机器上由已批准的 XLSX 模板自动生成，
+不能在生产代码中手工维护第二套表单。每次启用模板时同时锁定 XLSX 哈希、PDF 底版
+哈希和坐标版本，再通过字段一致性、页数和视觉黄金样例保证两种输出无损一致。
 
 ## 2. “无损并入”的验收定义
 
@@ -49,10 +66,12 @@
 
 ### 2.2 文档结果无损
 
-- Excel 模板仍是唯一表单源。
+- Excel 模板仍是唯一业务版式源；PDF 底版和坐标表由它自动制版产生。
 - 系统写入 `当前记录!B2:B27`，不按导入列序盲写。
 - `当前记录` 必须保留并隐藏；`表单模板` 是唯一可见工作表。
-- PDF 必须由本次生成的同一份 XLSX 转换，不能改成另一套独立排版逻辑。
+- XLSX 与 PDF 必须读取同一个不可变 `GenerationSnapshot`。
+- 每份输出必须记录配套的 XLSX 模板哈希、PDF 底版哈希和坐标版本。
+- PDF 动态字段、勾选框和签名必须与 XLSX 的规范化字段逐项一致。
 - PDF 必须可打开、非空、正好一页。
 - 财务和总经理签名等比缩放且只能进入各自锚点。
 - 申请人签名区域不能出现图片、占位符、内部版本号或调试文字。
@@ -90,7 +109,7 @@
 | 权限 | 来源 Web API 未接入当前认证 | viewer/operator/approver/admin | 新增细粒度权限并锁定测试 |
 | 文件 | 旧项目保存绝对路径 | 附件根目录 + storage key | 只保存相对 storage key |
 | 签名 | 独立签名表，带代码/角色/范围 | `core.signature_assets` 已做不可变版本，但无工资模块授权元数据 | 新建模块绑定表引用 core 资产 |
-| PDF | 最新桌面版使用 Excel COM | WinSW 低权限服务；WHT/TAX INV 不依赖 Office COM | 保留 XLSX→PDF 合同，先完成实际服务器转换验证 |
+| PDF | 最新桌面版使用 Excel COM | WHT/TAX INV 使用静态底版 + ReportLab/pypdf | 沿用现有无 Office 运行方案，底版和坐标由 XLSX 自动制版 |
 | 任务 | 后台线程，进程中断恢复能力有限 | 当前无通用任务队列 | 使用数据库持久化任务 + 单并发执行器 |
 | 发布 | 独立脚本/单文件 EXE | 单仓库 Windows release | 合并到现有 build/switch/test/backup |
 
@@ -111,7 +130,13 @@
 不采用。桌面版的 SQLite、输出目录和操作者身份无法自然进入服务端审计；服务器也
 不能依赖交互式桌面会话。
 
-### 4.4 直接 cherry-pick 来源仓库历史
+### 4.4 服务器运行 Office COM 或 LibreOffice
+
+不采用。生产服务器明确不能使用 Office，且当前 WHT/TAX INV 已有成熟的无 Office
+生成链路。工资模块不引入 Excel COM、LibreOffice headless、`pywin32` 或交互式
+桌面会话依赖。
+
+### 4.5 直接 cherry-pick 来源仓库历史
 
 不采用。来源项目的目录布局、同步 ORM、端口、启动方式和二进制/敏感资产边界与
 当前仓库不同。应保留来源 commit 和文件哈希作为溯源信息，按模块边界重写并用黄金
@@ -170,6 +195,9 @@ ZWT_ATTACHMENT_ROOT/
 - `file_name`
 - `storage_key`
 - `sha256`
+- `pdf_underlay_storage_key`
+- `pdf_underlay_sha256`
+- `pdf_layout_version`
 - `mapping_json`
 - `signature_anchors_json`
 - `visible_sheet`
@@ -178,6 +206,7 @@ ZWT_ATTACHMENT_ROOT/
 - `created_at`
 
 唯一约束：`(template_code, version)`。上传新文件必须创建新版本，不能原地覆盖。
+一个版本只有在 XLSX、配套 PDF 底版和坐标表三者的哈希/版本校验都通过后才能启用。
 
 ### 6.2 `salary_advance.import_batches`
 
@@ -265,6 +294,8 @@ ZWT_ATTACHMENT_ROOT/
 - `pdf_sha256`
 - `template_id`
 - `template_sha256`
+- `pdf_underlay_sha256`
+- `pdf_layout_version`
 - `signature_versions`
 - `data_fingerprint`
 - `status`
@@ -358,8 +389,21 @@ WHT `task_events` 保持相同风格，并额外保存 `object_type`、`object_i
 
 `backend/app/assets/templates/Salary-Advance-Template.xlsx`
 
-发布初始化时把它复制到附件根目录，登记为模板 `1.0.0`。之后的模板更新只能通过
-管理接口创建新版本。构建脚本应像现有 PDF 底版一样校验该资产存在并记录哈希。
+配套制版资产同时进入：
+
+```text
+backend/app/assets/templates/Salary-Advance-Template.pdf
+backend/app/modules/salary_advance/pdf_layout.py
+```
+
+其中 PDF 是不含动态员工数据和真实签名的静态底版，`pdf_layout.py` 是动态字段、
+勾选框和签名锚点的坐标表。二者必须由
+`scripts/build_salary_advance_underlay.py` 在装有 Excel 的受控制版机器上从已批准的
+XLSX 自动生成，做法与现有 TAX INV 制版脚本一致。
+
+发布初始化时把 XLSX 和 PDF 复制到附件根目录，登记为模板 `1.0.0`。之后的模板更新
+只能通过管理接口创建新版本。构建脚本必须校验三个制版资产存在，并记录 XLSX SHA-256、
+PDF SHA-256 和坐标版本。
 
 ### 10.2 XLSX 生成
 
@@ -378,22 +422,29 @@ WHT `task_events` 保持相同风格，并额外保存 `object_type`、`object_i
 纯生成函数只接受不可变输入快照并返回 bytes/临时文件，不访问数据库。服务层负责
 事务、附件落盘、哈希和审计。
 
-### 10.3 PDF 转换硬门
+### 10.3 PDF 生成
 
-来源最新桌面版调用 Excel COM。当前生产 API 由低权限 WinSW 服务账号运行，Office
-COM 在无交互服务会话中存在稳定性和残留进程风险，不能未经验证直接搬入。
+生产运行时严格沿用现有 WHT/TAX INV 方案：
 
-推荐按以下顺序做一次部署环境 spike：
+1. 从数据库加载已锁定记录、模板版本和签名版本，形成不可变
+   `GenerationSnapshot`。
+2. 使用 ReportLab 按 `pdf_layout.py` 绘制动态文本、日期、金额、勾选框和签名。
+3. 使用 pypdf 把动态层合并到 `Salary-Advance-Template.pdf` 静态底版。
+4. 校验输出为一页 A4、非空、可读取，并计算 SHA-256 后归档。
 
-1. 在目标 Windows Server 上用原 XLSX 测试原生 LibreOffice headless，使用每次任务
-   独立的用户 profile。
-2. 连续转换 1、10、100 份，验证公式、中文/泰文字体、Logo、签名、页数和残留进程。
-3. 服务重启、超时和强制终止后再次运行，确认不会锁死后续任务。
-4. 与 Microsoft Excel 实际导出的黄金 PDF 做文本、页数和视觉差异检查。
+静态底版包含 Logo、固定标签、边框和不会随记录变化的说明；动态层只包含从
+`GenerationSnapshot` 读取的字段及本次锁定的签名。申请人签名区域始终保持空白。
 
-只有 spike 通过，才把转换器接入后台执行器。若目标服务器无法稳定运行
-LibreOffice，则必须重新确认部署账号和 Excel COM 方案；不得退化为独立的
-ReportLab/static-underlay PDF，因为那会破坏“PDF 来自同一 XLSX”的业务不变量。
+`scripts/build_salary_advance_underlay.py` 只在开发/制版机器上运行，职责是：
+
+- 从已批准 XLSX 导出清洁的一页静态 PDF 底版。
+- 测量命名区域或基准单元格，自动生成 `pdf_layout.py`。
+- 把源 XLSX SHA-256 写入坐标文件，并输出底版 SHA-256。
+- 拒绝底版中残留动态样例数据或真实签名。
+
+生产发布包不包含该脚本的 Office 运行依赖。API 和 WinSW 服务不得导入或调用
+`pywin32`、Excel COM 或 LibreOffice；服务器没有交互式 Office 会话也能生成全部
+XLSX/PDF。
 
 ### 10.4 任务执行
 
@@ -401,7 +452,7 @@ ReportLab/static-underlay PDF，因为那会破坏“PDF 来自同一 XLSX”的
 
 - API 事务创建 `queued` job 后立即返回。
 - 应用内执行器用数据库锁领取任务。
-- Excel/PDF 转换放到线程或子进程，不阻塞事件循环。
+- XLSX/PDF 渲染放到线程执行，不阻塞事件循环。
 - 单记录提交结果，批次失败不回滚已成功文件。
 - 进程启动时扫描超时的 `generating` 任务并恢复为可重试状态。
 - 失败重试只领取失败记录。
@@ -473,7 +524,8 @@ python -m app.cli salary-advance-verify-migration --manifest <审计清单>
 - 中英泰长文本和金额边界值。
 
 每个样例检查 XLSX SHA 之外的结构属性和 PDF 的页数、文本、尺寸、非空白，以及必要
-的视觉差异。不能把真实工资表和真实签名作为 CI 夹具。
+的视觉差异。还要逐项比对 XLSX 与 PDF 中的动态字段、勾选状态和签名版本。不能把
+真实工资表和真实签名作为 CI 夹具。
 
 ### 13.3 全量回归
 
@@ -520,11 +572,13 @@ npm.cmd run build
 
 ### 阶段 D：生成与归档
 
-- 完成目标服务器 PDF 转换 spike。
+- 完成静态 PDF 底版和坐标自动生成脚本。
+- 实现 ReportLab 动态层和 pypdf 合并，生产端不调用 Office/LibreOffice。
 - 实现单份预览、批量生成、持久任务、重试和哈希。
 - 实现 ZIP、合并 PDF 和 manifest。
 
-退出条件：1/10/100 份稳定性和黄金 PDF 验收通过。
+退出条件：在未安装 Office/LibreOffice 的目标服务器上通过 1/10/100 份稳定性、
+XLSX/PDF 字段一致性和黄金 PDF 验收。
 
 ### 阶段 E：统一前端
 
@@ -553,11 +607,21 @@ npm.cmd run build
 - 应用回滚后保留工资模块 schema 和附件，禁止为“干净”而自动 drop 数据。
 - 只有确认不再需要数据时，另走人工备份和销毁审批。
 
-## 16. 实施前必须确认的唯一硬依赖
+## 16. 已锁定的服务器运行方案
 
-目标服务器必须选择并实际验证一种能够在 WinSW 运行环境中稳定完成
-“本次生成 XLSX → 一页 PDF”的转换器。推荐先验证 Windows 原生
-LibreOffice headless；未通过 1/10/100 份、重启、超时和残留进程测试前，不进入
-正式生成阶段。
+生产服务器只允许以下生成链路：
 
-这个硬门不影响先完成 schema、权限、导入校验、模板和统一前端，但会阻止生产发布。
+- openpyxl 使用已批准的 XLSX 模板生成可编辑工作簿。
+- ReportLab 使用自动生成的坐标表绘制 PDF 动态层。
+- pypdf 把动态层合并到配套静态 PDF 底版。
+
+生产依赖不得包含 `pywin32`、Excel COM 或 LibreOffice。正式启用模板前有五个硬门：
+
+1. 坐标表声明的源 XLSX SHA-256 与已批准模板一致。
+2. 数据库模板版本记录的 PDF SHA-256 与发布底版一致。
+3. 坐标表由受控脚本生成，不能手工复制旧坐标后绕过哈希检查。
+4. 虚构黄金样例通过 XLSX/PDF 字段、勾选、签名、一页 A4 和视觉回归。
+5. 未安装 Office/LibreOffice 的目标服务器通过连续 1、10、100 份生成、服务重启和
+   失败重试验证。
+
+任一硬门失败时，该模板版本不能启用，但不影响现有 WHT/TAX INV 模块。
