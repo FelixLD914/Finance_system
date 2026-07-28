@@ -209,32 +209,71 @@ if (Test-Path $attachmentRoot) {
     Write-Ok "已创建附件目录: $attachmentRoot"
 }
 
+# TAX INV 的 PDF 底版是从 xlsx 模板制版量出来的，坐标表 pdf_layout.py 头部记着
+# 当时那份模板的 sha256。两者一旦对不上，同一张单子的 xlsx 和 PDF 会印出不同的
+# 数字，而且全程不报错——所以模板不能只查"在不在"，还要查"是不是那一份"。
+# 期望值从坐标表里读，制版脚本重跑时会自动更新，不用在这里维护第二份。
+# 只匹配 ASCII 部分，避免 Select-String 读 UTF-8 中文时的编码问题。
+$taxExpectedSha = $null
+$pdfLayout = Join-Path $script:BackendRoot "app\modules\tax_invoice\pdf_layout.py"
+if (Test-Path $pdfLayout) {
+    $shaHit = Select-String -Path $pdfLayout -Pattern 'sha256:\s*([0-9a-f]{64})' | Select-Object -First 1
+    if ($shaHit) { $taxExpectedSha = $shaHit.Matches[0].Groups[1].Value }
+}
+if (-not $taxExpectedSha) {
+    Write-Warn "读不到 pdf_layout.py 里的模板校验和，跳过 TAX INV 模板校验: $pdfLayout"
+}
+
 # 模板是业务方批准的正式版式，脚本不代为生成，只检查并给出出处。
 $legacyRoot = Join-Path (Split-Path -Parent $script:ZwtRoot) "Sample_previous_code"
 $templateChecks = @(
-    @{ Path = $whtTemplate; Label = "WHT Excel 模板";     Legacy = Join-Path $legacyRoot "WHT\Template.xlsx" },
-    @{ Path = $taxTemplate; Label = "TAX INV Excel 模板"; Legacy = Join-Path $legacyRoot "TAX INV\template.xlsx" }
+    @{ Path = $whtTemplate; Label = "WHT Excel 模板";     Legacy = Join-Path $legacyRoot "WHT\Template.xlsx";     ExpectedSha = $null },
+    @{ Path = $taxTemplate; Label = "TAX INV Excel 模板"; Legacy = Join-Path $legacyRoot "TAX INV\template.xlsx"; ExpectedSha = $taxExpectedSha }
 )
+$templateMismatch = $false
 foreach ($check in $templateChecks) {
-    if (Test-Path $check.Path) {
+    if (-not (Test-Path $check.Path)) {
+        $dir = Split-Path -Parent $check.Path
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        Write-Warn "$($check.Label)缺失: $($check.Path)"
+        if (Test-Path $check.Legacy) {
+            Write-Warn "旧系统里有一份: $($check.Legacy)"
+            $copyIt = Read-Host "    复制过来？(y/N)"
+            if ($copyIt -eq "y") {
+                Copy-Item $check.Legacy $check.Path -Force
+                Write-Ok "已复制。请与业务方确认这是当前批准的版式。"
+            } else {
+                Write-Warn "跳过。缺少模板时该模块的文件生成会失败。"
+            }
+        } else {
+            Write-Warn "请向业务方索取批准的模板并放到上述路径。"
+        }
+    }
+    # 刚复制过来的也要验：旧系统那份同样可能是过期版式。
+    if (-not (Test-Path $check.Path)) { continue }
+    if (-not $check.ExpectedSha) {
         Write-Ok "$($check.Label)已就位"
         continue
     }
-    $dir = Split-Path -Parent $check.Path
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    Write-Warn "$($check.Label)缺失: $($check.Path)"
-    if (Test-Path $check.Legacy) {
-        Write-Warn "旧系统里有一份: $($check.Legacy)"
-        $copyIt = Read-Host "    复制过来？(y/N)"
-        if ($copyIt -eq "y") {
-            Copy-Item $check.Legacy $check.Path -Force
-            Write-Ok "已复制。请与业务方确认这是当前批准的版式。"
-        } else {
-            Write-Warn "跳过。缺少模板时该模块的文件生成会失败。"
-        }
-    } else {
-        Write-Warn "请向业务方索取批准的模板并放到上述路径。"
+    $actualSha = (Get-FileHash -Path $check.Path -Algorithm SHA256).Hash.ToLower()
+    if ($actualSha -eq $check.ExpectedSha) {
+        Write-Ok "$($check.Label)已就位，校验和与 PDF 底版一致"
+        continue
     }
+    $templateMismatch = $true
+    Write-Err "$($check.Label)与 PDF 底版对不上: $($check.Path)"
+    Write-Err "    期望 $($check.ExpectedSha)"
+    Write-Err "    实际 $actualSha"
+    Write-Err "  这份模板会让 xlsx 和 PDF 印出不同的数字，且不会报错。"
+    Write-Err "  修复：从已知正确的一份复制过来（归一化脚本改出来的字节不可复现，"
+    Write-Err "        校验和不会正好相等，所以只能复制而不是重跑脚本）："
+    Write-Err "    Copy-Item `"$($check.Legacy)`" `"$($check.Path)`" -Force"
+    Write-Err "  若这份模板确实是业务新批准的版式，则应重新制版让底版跟上："
+    Write-Err "    cd backend; .\.venv\Scripts\python.exe ..\scripts\build_tax_inv_underlay.py"
+}
+if ($templateMismatch) {
+    Write-Err "模板校验未通过，初始化中止。"
+    exit 1
 }
 
 # --- 4. 数据库迁移 ------------------------------------------------------------
