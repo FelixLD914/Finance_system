@@ -25,6 +25,8 @@ def test_default_role_cannot_approve_or_void() -> None:
     assert not role_has(DEFAULT_ROLE, "invoice:void")
     assert not role_has(DEFAULT_ROLE, "invoice:correct")
     assert not role_has(DEFAULT_ROLE, "wht:approve")
+    assert role_has(DEFAULT_ROLE, "salary_advance:write")
+    assert not role_has(DEFAULT_ROLE, "salary_advance:generate")
 
 
 def test_viewer_has_no_write_permission_at_all() -> None:
@@ -88,6 +90,7 @@ def test_confirmed_wht_and_tax_invoice_share_approvers() -> None:
     """
     assert _roles_with("wht:approve") == _roles_with("invoice:approve")
     assert _roles_with("wht:generate") == _roles_with("invoice:generate")
+    assert _roles_with("salary_advance:generate") == _roles_with("invoice:generate")
 
 
 def test_confirmed_signature_management_is_admin_only() -> None:
@@ -98,6 +101,7 @@ def test_confirmed_signature_management_is_admin_only() -> None:
     """
     assert _roles_with("signature:manage") == {"admin"}
     assert not role_has("approver", "signature:manage")
+    assert _roles_with("salary_advance:template_manage") == {"admin"}
 
 
 def test_principal_require_raises_for_missing_permission() -> None:

@@ -30,6 +30,36 @@ MUTATING_ENDPOINTS = [
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/generate-documents", "wht:generate"),
     ("patch", f"/api/v1/wht/tasks/{FAKE_ID}", "wht:write"),
     ("patch", f"/api/v1/wht/signatures/{FAKE_ID}", "signature:manage"),
+    (
+        "post",
+        f"/api/v1/salary-advance/batches/{FAKE_ID}/revalidate",
+        "salary_advance:write",
+    ),
+    (
+        "patch",
+        f"/api/v1/salary-advance/records/{FAKE_ID}",
+        "salary_advance:write",
+    ),
+    (
+        "post",
+        f"/api/v1/salary-advance/batches/{FAKE_ID}/lock",
+        "salary_advance:generate",
+    ),
+    (
+        "post",
+        f"/api/v1/salary-advance/batches/{FAKE_ID}/generation-jobs",
+        "salary_advance:generate",
+    ),
+    (
+        "post",
+        f"/api/v1/salary-advance/records/{FAKE_ID}/preview",
+        "salary_advance:generate",
+    ),
+    (
+        "post",
+        "/api/v1/salary-advance/signature-bindings",
+        "salary_advance:template_manage",
+    ),
 ]
 
 READ_ENDPOINTS = [
@@ -39,6 +69,9 @@ READ_ENDPOINTS = [
     "/api/v1/wht/payees",
     "/api/v1/wht/signatures",
     "/api/v1/wht/number-preview?period=2026-06",
+    "/api/v1/salary-advance/batches",
+    "/api/v1/salary-advance/templates",
+    "/api/v1/salary-advance/signature-bindings",
 ]
 
 
@@ -118,7 +151,11 @@ def test_mutating_endpoints_reject_role_without_permission(
 
     权限集合刻意只给 read，确保被拦下的原因是权限而不是别的。
     """
-    client = client_as(permissions=frozenset({"invoice:read", "wht:read"}))
+    client = client_as(
+        permissions=frozenset(
+            {"invoice:read", "wht:read", "salary_advance:read"}
+        )
+    )
 
     response = getattr(client, method)(path, json={})
 

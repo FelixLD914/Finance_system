@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import engine
 from app.modules.auth.router import router as auth_router
+from app.modules.salary_advance.router import router as salary_advance_router
 from app.modules.tax_invoice.router import router as tax_invoice_router
 from app.modules.wht.router import router as wht_router
 
@@ -37,3 +38,4 @@ async def readiness() -> dict[str, str]:
 api_router.include_router(auth_router)
 api_router.include_router(wht_router)
 api_router.include_router(tax_invoice_router)
+api_router.include_router(salary_advance_router)

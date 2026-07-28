@@ -1,0 +1,145 @@
+export type BatchStatus =
+  | "validating"
+  | "validation_failed"
+  | "ready"
+  | "locked"
+  | "generating"
+  | "completed"
+  | "partially_completed"
+  | "failed";
+
+export type ValidationStatus = "valid" | "warning" | "invalid";
+export type GenerationStatus = "pending" | "generating" | "success" | "failed";
+
+export interface ValidationIssue {
+  field: string;
+  code: string;
+  message: string;
+}
+
+export interface SalaryAdvanceBatch {
+  id: string;
+  batchNo: string;
+  period: string;
+  sourceFileName: string;
+  sourceSha256: string;
+  status: BatchStatus;
+  totalRows: number;
+  validRows: number;
+  warningRows: number;
+  invalidRows: number;
+  createdByName: string;
+  lockedByName: string | null;
+  createdAt: string;
+  lockedAt: string | null;
+}
+
+export interface SalaryAdvanceRecord {
+  id: string;
+  batchId: string;
+  sourceRowNo: number;
+  period: string;
+  empId: string;
+  rawData: Record<string, unknown>;
+  normalizedData: Record<string, unknown>;
+  dataFingerprint: string;
+  validationStatus: ValidationStatus;
+  validationErrors: ValidationIssue[];
+  validationWarnings: ValidationIssue[];
+  generationStatus: GenerationStatus;
+  version: number;
+  updatedAt: string;
+}
+
+export interface SalaryAdvanceBatchDetail {
+  batch: SalaryAdvanceBatch;
+  records: SalaryAdvanceRecord[];
+}
+
+export interface SalaryAdvanceTemplate {
+  id: string;
+  templateCode: string;
+  version: string;
+  fileName: string;
+  sha256: string;
+  pdfUnderlaySha256: string;
+  pdfLayoutVersion: string;
+  visibleSheet: string;
+  active: boolean;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface SignatureBinding {
+  id: string;
+  signatureCode: string;
+  signatureAssetId: string;
+  assetName: string;
+  assetVersion: number;
+  assetSha256: string;
+  role: "finance" | "md";
+  version: number;
+  scopeType: "company" | "period" | "employee" | "custom";
+  scopeValue: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+  active: boolean;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface SignatureBindingInput {
+  signatureCode: string;
+  signatureAssetId: string;
+  role: "finance" | "md";
+  scopeType: "company" | "period" | "employee" | "custom";
+  scopeValue?: string | null;
+  validFrom?: string | null;
+  validTo?: string | null;
+}
+
+export interface SalaryAdvanceDocument {
+  id: string;
+  jobId: string;
+  recordId: string;
+  generationVersion: number;
+  xlsxFileName: string | null;
+  pdfFileName: string | null;
+  xlsxSha256: string | null;
+  pdfSha256: string | null;
+  templateSha256: string;
+  pdfUnderlaySha256: string;
+  pdfLayoutVersion: string;
+  signatureVersions: Record<string, unknown>;
+  dataFingerprint: string;
+  status: "success" | "failed";
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export type JobStatus =
+  | "queued"
+  | "generating"
+  | "completed"
+  | "partially_completed"
+  | "failed";
+
+export interface SalaryAdvanceJob {
+  id: string;
+  batchId: string;
+  templateId: string;
+  status: JobStatus;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  requestedByName: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorSummary: string | null;
+}
+
+export interface SalaryAdvanceJobDetail {
+  job: SalaryAdvanceJob;
+  documents: SalaryAdvanceDocument[];
+}

@@ -6,6 +6,7 @@ import {
   HomeOutlined,
   LinkOutlined,
   SettingOutlined,
+  WalletOutlined,
 } from "@ant-design/icons";
 
 import type { TranslationKey } from "../i18n";
@@ -14,6 +15,7 @@ export type ModuleKey =
   | "home"
   | "wht"
   | "tax-invoice"
+  | "salary-advance"
   | "shared-data"
   | "related-links"
   | "administration";
@@ -33,6 +35,12 @@ export const financeModules: FinanceModule[] = [
     labelKey: "nav.taxInvoice",
     icon: <FileTextOutlined />,
     enabled: true,
+  },
+  {
+    key: "salary-advance",
+    labelKey: "nav.salaryAdvance",
+    icon: <WalletOutlined />,
+    enabled: import.meta.env.VITE_SALARY_ADVANCE_ENABLED !== "false",
   },
   {
     key: "shared-data",

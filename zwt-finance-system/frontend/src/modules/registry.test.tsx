@@ -9,6 +9,7 @@ describe("finance module registry", () => {
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys).toContain("wht");
     expect(keys).toContain("tax-invoice");
+    expect(keys).toContain("salary-advance");
     expect(keys).toContain("related-links");
   });
 });

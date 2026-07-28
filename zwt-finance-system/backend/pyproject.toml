@@ -36,7 +36,7 @@ dev = [
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["assets/fonts/*.ttf", "assets/templates/*.pdf"]
+app = ["assets/fonts/*.ttf", "assets/templates/*.pdf", "assets/templates/*.xlsx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

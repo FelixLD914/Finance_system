@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     tax_invoice_pdf_template_path: Path = (
         Path(__file__).parents[1] / "assets" / "templates" / "TAX-INV-Template.pdf"
     )
+    salary_advance_enabled: bool = True
+    salary_advance_template_path: Path = (
+        Path(__file__).parents[1] / "assets" / "templates" / "Salary-Advance-Template.xlsx"
+    )
+    salary_advance_pdf_template_path: Path = (
+        Path(__file__).parents[1] / "assets" / "templates" / "Salary-Advance-Template.pdf"
+    )
     thai_font_path: Path = (
         Path(__file__).parents[1] / "assets" / "fonts" / "Sarabun-Regular.ttf"
     )
