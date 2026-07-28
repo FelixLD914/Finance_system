@@ -1,0 +1,85 @@
+name: CI
+
+# main 是发布源（见根 README 的 Production boundary），所以 main 上的每个提交都
+# 必须已经是绿的。发布流程在生产机维护窗口内跑测试，窗口上限 2 小时；能在这里
+# 30 秒发现的问题，不应该占用那 2 小时。
+#
+# 只跑 windows-latest：产品只在 Windows Server 上运行，且已知有多处 Windows 专属
+# 行为（Proactor/Selector 事件循环、anyio portal、BOM、路径分隔符）。在 Linux 上
+# 跑会把这些问题全部掩盖掉。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest + ruff)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: zwt-finance-system/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: zwt-finance-system/backend/requirements.lock
+
+      # 装 requirements.lock 而不是 pyproject 的版本范围：这份 lock 就是
+      # Build-ZwtRelease.ps1 装到生产机上的那一份，CI 要验证的正是它。
+      - name: Install production dependency set
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+
+      # 测试工具不进 requirements.lock（那份 lock 会被 Build-ZwtRelease 取 SHA-256
+      # 并随发布包走），版本范围与 pyproject 的 dev extra 保持一致。
+      - name: Install test tooling
+        run: python -m pip install "pytest>=8.3,<10" "pytest-cov>=6,<8" "ruff>=0.9,<1"
+
+      - name: Lint
+        run: python -m ruff check .
+
+      # 必须是 `python -m pytest` 而不是 `pytest`：CI 不安装 app 包，靠 -m 把当前
+      # 目录放进 sys.path 才能 import app。改成 `pytest` 会全体 ImportError。
+      - name: Test
+        run: python -m pytest
+
+  frontend:
+    name: Frontend (vitest + build)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: zwt-finance-system/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # 生产机按 windows-deployment.md 使用 Node >= 22.12.0，CI 跟着这条线走，
+      # 不用开发机上更新的 Node，以免"CI 绿、服务器构建失败"。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: zwt-finance-system/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm run test
+
+      # npm run build 是 `tsc -b && vite build`，类型检查包含在内。
+      - name: Build
+        run: npm run build

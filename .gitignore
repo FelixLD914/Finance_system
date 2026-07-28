@@ -9,8 +9,6 @@
 **/.vite/
 **/coverage/
 **/.npm-cache/
-**/output/playwright/*
-!**/output/playwright/.gitkeep
 *.tsbuildinfo
 
 # Python

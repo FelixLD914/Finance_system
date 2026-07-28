@@ -234,4 +234,5 @@ TAX INV 已接入旧系统 `Sample.xlsx` 历史导入、Export Invoice Excel + �
 - 密钥、BOT API 凭证、数据库密码和私钥不得提交到 Git。
 
 详见 [架构说明](docs/architecture.md) 和
-[Windows 发布说明](docs/windows-deployment.md)。
+[Windows 发布说明](docs/windows-deployment.md)。动手改代码前先读
+[工程约定](AGENTS.md)，那里汇总了已锁定的业务规则和不可越过的边界。
