@@ -228,13 +228,21 @@ def _numbered_row(
     return row
 
 
-def _check(rows: list[dict]) -> None:
+def _check(rows: list[dict], *, allow_existing_numbers: bool = True) -> None:
     """同步地跑一遍 _assert_importable。
 
     测试栈里没装 pytest-asyncio / anyio 插件（CI 也只装 pytest+cov+ruff），
     直接写 async def 测试会被静默跳过。这里自己起一个事件循环，不引入新依赖。
+
+    默认按历史迁移（允许带编号）来测，因为编号相关的分支都在那条路上；
+    常规批量开票那条单独用 allow_existing_numbers=False 测。
     """
-    asyncio.run(_service()._assert_importable(rows))
+    asyncio.run(
+        _service()._assert_importable(
+            rows,
+            allow_existing_numbers=allow_existing_numbers,
+        )
+    )
 
 
 def test_all_conflicts_are_reported_in_one_pass() -> None:
@@ -334,3 +342,71 @@ def test_an_incomplete_row_without_a_number_is_allowed_through() -> None:
     """没有编号就没绕过任何东西，它会落成 needs_review 等人工补。
     在导入这一步拦它等于把「先导进来再慢慢补」这条正常路堵死。"""
     _check([_row("CI-1", "CDN-1", [2])])
+
+
+def test_normal_batch_import_rejects_any_supplied_number() -> None:
+    """常规批量开具不接受文件里的编号。
+
+    「编号在批准时由数据库事务生成」这条规则的实际执行点就在这里；界面上那句
+    「请留空」只是提示，拦不住一张手工改过的表。
+    """
+    rows = [_numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01")]
+
+    with pytest.raises(TaxInvoiceConflictError) as excinfo:
+        _check(rows, allow_existing_numbers=False)
+
+    issue = excinfo.value.issues[0]
+    assert issue["reason"] == "number_not_allowed"
+    assert issue["rows"] == [2]
+    assert issue["key"] == "ZWT-IV20260605-01"
+
+
+def test_normal_batch_import_accepts_rows_without_numbers() -> None:
+    """留空编号才是常规批量开具的正常形态。"""
+    _check(
+        [_row("CI-1", "CDN-1", [2]), _row("CI-2", "CDN-2", [3])],
+        allow_existing_numbers=False,
+    )
+
+
+def test_a_rejected_number_is_not_also_reported_as_incomplete() -> None:
+    """编号本身就不该出现时，不必再抱怨这行缺哪些字段——那是噪音，
+    会让用户以为补齐字段就能过。"""
+    rows = [
+        _numbered_row(
+            "CI-1",
+            "CDN-1",
+            [2],
+            "ZWT-IV20260605-01",
+            customer_address=None,
+        )
+    ]
+
+    with pytest.raises(TaxInvoiceConflictError) as excinfo:
+        _check(rows, allow_existing_numbers=False)
+
+    assert [issue["reason"] for issue in excinfo.value.issues] == ["number_not_allowed"]
+
+
+def test_migration_and_sample_use_different_import_modes() -> None:
+    """两条路必须在审计里分得开，否则事后看不出这一批是迁移还是开票。"""
+    from app.modules.tax_invoice import service as service_module
+
+    recorded: list[dict] = []
+
+    async def _capture(self, **kwargs: object) -> None:  # noqa: ANN001
+        recorded.append(kwargs)
+
+    original = service_module.TaxInvoiceService._create_import
+    service_module.TaxInvoiceService._create_import = _capture
+    try:
+        svc = _service()
+        asyncio.run(svc.import_sample(rows=[], file_name="a.xlsx", content=b""))
+        asyncio.run(svc.import_migration(rows=[], file_name="a.xlsx", content=b""))
+    finally:
+        service_module.TaxInvoiceService._create_import = original
+
+    assert recorded[0]["import_mode"] == "sample"
+    assert recorded[0]["allow_existing_numbers"] is False
+    assert recorded[1]["import_mode"] == "migration"
+    assert recorded[1]["allow_existing_numbers"] is True

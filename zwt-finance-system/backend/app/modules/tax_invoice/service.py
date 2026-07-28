@@ -314,14 +314,41 @@ class TaxInvoiceService:
         file_name: str,
         content: bytes,
     ) -> TaxInvoiceImportResponse:
+        """常规批量开具：编号只能由批准时的事务生成，文件里带编号一律退回。"""
         return await self._create_import(
             rows=rows,
             import_mode="sample",
             source_names=[file_name],
             source_files=[(file_name, content)],
+            allow_existing_numbers=False,
         )
 
-    async def _assert_importable(self, rows: list[dict[str, Any]]) -> None:
+    async def import_migration(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        file_name: str,
+        content: bytes,
+    ) -> TaxInvoiceImportResponse:
+        """历史迁移：旧系统已经正式开出的票，必须沿用原编号搬进来。
+
+        这是全系统唯一允许外部指定税票编号的入口，因此单独一个方法、单独一个
+        端点——好让权限、审计和校验都能只针对它收紧，而不牵连日常批量开票。
+        """
+        return await self._create_import(
+            rows=rows,
+            import_mode="migration",
+            source_names=[file_name],
+            source_files=[(file_name, content)],
+            allow_existing_numbers=True,
+        )
+
+    async def _assert_importable(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        allow_existing_numbers: bool = False,
+    ) -> None:
         """把整份文件的冲突一次查完，全部收进 issues 再抛。
 
         以前是查到第一条就抛，用户改一行再导一次、再撞下一条，一份几十行的
@@ -375,6 +402,24 @@ class TaxInvoiceService:
 
             document_no = row.get("document_no")
             if not document_no:
+                continue
+
+            # 只有历史迁移能带编号。常规批量开票带了就直接退回——这是全系统
+            # 「编号由批准时的数据库事务生成」这条规则的实际执行点，界面上的
+            # 提示只是提示，拦不住手工改过的表。
+            if not allow_existing_numbers:
+                issues.append(
+                    {
+                        "rows": source_rows,
+                        "key": document_no,
+                        "reason": "number_not_allowed",
+                        "detail": (
+                            f"document number {document_no} was supplied by the file; "
+                            "numbers are assigned on approval. Clear the DocumentNo "
+                            "column, or use the historical migration import instead."
+                        ),
+                    }
+                )
                 continue
 
             # 带编号的行会绕过人工复核直接落成 approved，所以这里必须先过一遍
@@ -446,10 +491,14 @@ class TaxInvoiceService:
         import_mode: str,
         source_names: list[str],
         source_files: list[tuple[str, bytes]],
+        allow_existing_numbers: bool = False,
     ) -> TaxInvoiceImportResponse:
         if not rows:
             raise TaxInvoiceStateError("the import file contains no invoice records")
-        await self._assert_importable(rows)
+        await self._assert_importable(
+            rows,
+            allow_existing_numbers=allow_existing_numbers,
+        )
 
         batch = TaxInvoiceImportBatch(
             import_mode=import_mode,

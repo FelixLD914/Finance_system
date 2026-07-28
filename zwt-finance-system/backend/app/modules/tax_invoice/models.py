@@ -27,7 +27,7 @@ class TaxInvoiceImportBatch(Base):
     __tablename__ = "import_batches"
     __table_args__ = (
         CheckConstraint(
-            "import_mode IN ('dual', 'sample')",
+            "import_mode IN ('dual', 'sample', 'migration')",
             name="import_mode_allowed",
         ),
         CheckConstraint(

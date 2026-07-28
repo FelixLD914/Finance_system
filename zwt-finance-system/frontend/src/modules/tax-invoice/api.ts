@@ -115,10 +115,21 @@ export function importDualFiles(
   });
 }
 
+/** 常规批量开具：编号仍由批准时的事务生成，文件里带编号会被整批退回。 */
 export function importSample(file: File): Promise<TaxInvoiceImportResult> {
   const form = new FormData();
   form.append("file", file);
   return request<TaxInvoiceImportResult>("/v1/tax-invoice/import/sample", {
+    method: "POST",
+    body: form,
+  });
+}
+
+/** 历史迁移：全系统唯一允许沿用旧系统已开出编号的入口。 */
+export function importMigration(file: File): Promise<TaxInvoiceImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<TaxInvoiceImportResult>("/v1/tax-invoice/import/migration", {
     method: "POST",
     body: form,
   });
