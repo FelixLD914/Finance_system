@@ -25,15 +25,25 @@ Permission = Literal[
     # 所以这里不设 wht:void —— 不留没有端点对应的死权限点。
     "wht:approve",
     "wht:generate",
+    "salary_advance:read",
+    "salary_advance:write",
+    "salary_advance:generate",
+    "salary_advance:template_manage",
     "signature:manage",
     "user:manage",
 ]
 
 ALL_PERMISSIONS: frozenset[str] = frozenset(get_args(Permission))
 
-_READ_ONLY: frozenset[str] = frozenset({"invoice:read", "wht:read"})
+_READ_ONLY: frozenset[str] = frozenset(
+    {"invoice:read", "wht:read", "salary_advance:read"}
+)
 
-_PREPARE: frozenset[str] = _READ_ONLY | {"invoice:write", "wht:write"}
+_PREPARE: frozenset[str] = _READ_ONLY | {
+    "invoice:write",
+    "wht:write",
+    "salary_advance:write",
+}
 
 _APPROVE: frozenset[str] = frozenset(
     {
@@ -43,6 +53,7 @@ _APPROVE: frozenset[str] = frozenset(
         "invoice:generate",
         "wht:approve",
         "wht:generate",
+        "salary_advance:generate",
     }
 )
 

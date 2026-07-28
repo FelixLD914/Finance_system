@@ -6,6 +6,7 @@ from sqlalchemy import engine_from_config, pool
 from app.core import models as core_models  # noqa: F401
 from app.core.config import get_settings
 from app.core.database import Base
+from app.modules.salary_advance import models as salary_advance_models  # noqa: F401
 from app.modules.tax_invoice import models as tax_invoice_models  # noqa: F401
 from app.modules.wht import models as wht_models  # noqa: F401
 

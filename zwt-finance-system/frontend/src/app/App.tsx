@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { LoginScreen } from "../auth/LoginScreen";
 import { useI18n } from "../i18n";
 import type { ModuleKey } from "../modules/registry";
+import { SalaryAdvanceWorkspace } from "../modules/salary-advance/SalaryAdvanceWorkspace";
 import { TaxInvoiceWorkspace } from "../modules/tax-invoice/TaxInvoiceWorkspace";
 import { WhtWorkspace } from "../modules/wht/WhtWorkspace";
 import { AppShell } from "./AppShell";
@@ -44,6 +45,8 @@ export function App() {
         <WhtWorkspace t={t} />
       ) : activeModule === "tax-invoice" ? (
         <TaxInvoiceWorkspace t={t} />
+      ) : activeModule === "salary-advance" ? (
+        <SalaryAdvanceWorkspace t={t} />
       ) : (
         <section className="module-placeholder">
           <Empty
