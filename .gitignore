@@ -46,7 +46,10 @@
 # Playwright 等工具写出的截图与临时产物。Build-ZwtRelease.ps1 的 robocopy
 # 也用 /XD output 把它排除在发布包外，两处口径一致。
 **/output/
-/.superpowers/
+# agent 会话工作产物（brainstorm HTML、live config 等），结论已沉淀进
+# DESIGN.md / PRODUCT.md / docs/，原始产物不入库。
+**/.superpowers/
+/.impeccable/
 .DS_Store
 Thumbs.db
 
