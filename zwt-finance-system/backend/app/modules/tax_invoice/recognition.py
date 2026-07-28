@@ -541,8 +541,10 @@ def parse_sample_workbook(content: bytes, file_name: str) -> list[dict[str, Any]
         position = index.get(name)
         return row[position] if position is not None and position < len(row) else None
 
-    groups: dict[str, list[list[object]]] = {}
-    for row in rows[1:]:
+    # 行号按 Excel 的 1-based 算并跳过表头，报错时能直接说"第 N 行"。
+    # 分组会把多行合成一张税票，源行号丢了就只能报业务键，对着表格找不着人。
+    groups: dict[str, list[tuple[int, list[object]]]] = {}
+    for excel_row, row in enumerate(rows[1:], start=2):
         if not any(_safe_text(value) for value in row):
             continue
         key = (
@@ -551,11 +553,15 @@ def parse_sample_workbook(content: bytes, file_name: str) -> list[dict[str, Any]
             or _safe_text(cell(row, "C/I No."))
         )
         if not key:
-            raise TaxInvoiceRecognitionError("sample row has no DocumentNo, CDN or C/I No.")
-        groups.setdefault(key, []).append(row)
+            raise TaxInvoiceRecognitionError(
+                f"sample row {excel_row} has no DocumentNo, CDN or C/I No."
+            )
+        groups.setdefault(key, []).append((excel_row, row))
 
     invoices: list[dict[str, Any]] = []
-    for group_rows in groups.values():
+    for group in groups.values():
+        source_rows = [excel_row for excel_row, _ in group]
+        group_rows = [row for _, row in group]
         first = group_rows[0]
         exchange_target_date = _parse_date(cell(first, "FX Date"))
         explicit_invoice_date = _parse_date(
@@ -586,10 +592,11 @@ def parse_sample_workbook(content: bytes, file_name: str) -> list[dict[str, Any]
         document_no = _safe_text(cell(first, "DocumentNo"))
         if document_no and not re.fullmatch(r"ZWT-IV\d{8}-\d{2,}", document_no):
             raise TaxInvoiceRecognitionError(
-                f"invalid existing DocumentNo: {document_no}"
+                f"row {source_rows[0]}: invalid existing DocumentNo: {document_no}"
             )
         invoices.append(
             {
+                "source_rows": source_rows,
                 "document_no": document_no or None,
                 "ci_no": _safe_text(cell(first, "C/I No.")) or "LEGACY-NO-CI",
                 "cdn": _safe_text(cell(first, "CDN")) or None,

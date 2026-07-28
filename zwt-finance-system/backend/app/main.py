@@ -36,10 +36,12 @@ def create_app() -> FastAPI:
         _: Request,
         exc: ServiceError,
     ) -> JSONResponse:
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"detail": str(exc)},
-        )
+        content: dict[str, object] = {"detail": str(exc)}
+        # 只有真的带了逐条问题才加这个键，没带的响应体保持原样。
+        issues = getattr(exc, "issues", None)
+        if issues:
+            content["issues"] = issues
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     application.include_router(api_router, prefix=settings.api_prefix)
     return application

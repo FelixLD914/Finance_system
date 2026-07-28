@@ -1019,9 +1019,10 @@ select {
   padding: 18px 24px 24px;
 }
 
+/* 末尾两列是「刷新」和「导出台账」两个按钮，各占一格，别让导出掉到第二行。 */
 .tax-filter-bar {
   display: grid;
-  grid-template-columns: 150px 150px minmax(260px, 1fr) auto;
+  grid-template-columns: 150px 150px minmax(220px, 1fr) auto auto;
   gap: 10px;
   padding: 14px;
   background: rgba(255, 253, 249, 0.9);
@@ -1235,12 +1236,89 @@ select {
   color: var(--camel);
 }
 
+/* Sample 批量导入搬去独立页后，识别开票是这一页唯一的事，独占整幅。 */
 .tax-import-grid {
-  display: grid;
   max-width: 1320px;
   margin: 0 auto 18px;
-  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.8fr);
+}
+
+/* 批量导入页：左边投放 + 导入，右边表头要求。表头清单是照着后端
+   parse_sample_workbook 抄的，缺一列整份文件都进不来，得给足篇幅。 */
+.tax-batch-grid {
+  display: grid;
+  max-width: 1320px;
+  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
+  align-items: start;
+}
+
+.sample-drop-zone .ant-upload-drag {
+  min-height: 168px;
+  background: #fcfaf7;
+  border-color: #dcd2c7;
+}
+
+.sample-drop-zone .ant-upload-drag-icon .anticon {
+  color: var(--camel) !important;
+  font-size: 28px !important;
+}
+
+.sample-drop-zone .ant-upload-text {
+  font-size: 13px !important;
+  font-weight: 700;
+}
+
+.sample-drop-zone .ant-upload-hint {
+  font-size: 10px !important;
+}
+
+.tax-column-card {
+  gap: 14px;
+}
+
+.column-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  color: #4a4038;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.column-group h3 span {
+  padding: 1px 6px;
+  color: var(--muted);
+  background: #efe9e1;
+  border-radius: 20px;
+  font-size: 9.5px;
+}
+
+.column-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 表头名是要照抄进 Excel 的字面量，用等宽字体，别让人分不清 O 和 0。 */
+.column-tags code {
+  padding: 3px 8px;
+  color: #5c5148;
+  background: #faf7f2;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  font-size: 10.5px;
+}
+
+.column-tags code.is-required {
+  color: #6d4a2c;
+  background: #f6ede1;
+  border-color: #ddc9ad;
+  font-weight: 600;
 }
 
 .tax-tool-card {
@@ -1297,38 +1375,135 @@ select {
   font-size: 10px;
 }
 
-.dual-upload-grid {
+/* 单一投放区：Excel 和 PDF 一次拖进来，按扩展名归位到下面两个槽位。 */
+.dual-drop-zone .ant-upload-drag {
+  min-height: 186px;
+  background: #fcfaf7;
+  border-color: #dcd2c7;
+}
+
+.dual-drop-zone .ant-upload-drag-icon {
+  margin-bottom: 10px !important;
+}
+
+.dual-drop-icons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.dual-drop-zone .ant-upload-drag-icon .anticon {
+  color: var(--camel) !important;
+  font-size: 28px !important;
+}
+
+/* 两个文件图标之间的加号是连接符，压小一档才不会跟它们抢。 */
+.dual-drop-icons .anticon-plus {
+  color: #bda98f !important;
+  font-size: 14px !important;
+}
+
+.dual-drop-zone .ant-upload-text {
+  font-size: 13px !important;
+  font-weight: 700;
+}
+
+.dual-drop-zone .ant-upload-hint {
+  max-width: 460px;
+  margin: 0 auto !important;
+  font-size: 10px !important;
+  line-height: 1.65 !important;
+}
+
+.dual-drop-zone .ant-btn {
+  margin-top: 12px;
+}
+
+.dual-slot-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
-.dual-upload-grid .ant-upload-wrapper,
-.dual-upload-grid .ant-upload-drag {
-  min-height: 168px;
+.dual-slot {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fdfbf8;
+  border: 1px solid var(--line);
+  border-radius: 9px;
 }
 
-.dual-upload-grid .ant-upload-drag {
-  background: #fcfaf7;
-  border-color: #dcd2c7;
+.dual-slot.is-filled {
+  background: #f6efe5;
+  border-color: #cdb99f;
 }
 
-.dual-upload-grid .ant-upload-drag-icon {
-  margin-bottom: 8px !important;
+.dual-slot > .anticon {
+  color: #a0855f;
+  font-size: 16px;
 }
 
-.dual-upload-grid .ant-upload-drag-icon .anticon {
-  color: var(--camel) !important;
-  font-size: 27px !important;
+.dual-slot-text {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
 }
 
-.dual-upload-grid .ant-upload-text {
-  font-size: 12px !important;
+.dual-slot-text strong {
+  color: #3a322b;
+  font-size: 11px;
+}
+
+/* 文件名可能很长，槽位是定宽的，超出直接省略号。 */
+.dual-slot-text span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dual-slot-flag {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dual-slot .ant-btn {
+  margin-left: auto;
+  color: #9a8b7c;
+}
+
+/* 批量导入的冲突清单。行数可能几十条，给个上限自己滚，别把弹窗顶穿。 */
+.tax-conflict-modal .conflict-list {
+  max-height: 46vh;
+  margin: 14px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.tax-conflict-modal .conflict-list li {
+  display: grid;
+  align-items: baseline;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+  gap: 4px 12px;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  font-size: 12px;
+}
+
+.tax-conflict-modal .conflict-row {
+  color: #8a5a33;
+  font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  font-size: 11px;
   font-weight: 700;
-}
-
-.dual-upload-grid .ant-upload-hint {
-  font-size: 10px !important;
 }
 
 .tax-quality-strip {

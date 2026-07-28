@@ -15,12 +15,29 @@ const CSRF_COOKIE_NAME = "zwt_csrf";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+/**
+ * 结构化的单条问题。后端把它放在响应体顶层的 issues 里（与 detail 平级），
+ * 保留 reason 码而不是只给一句话，前端才能按当前语言自己组织文案。
+ */
+export interface ApiIssue {
+  /** 源文件里的行号（Excel 1-based）。没有行号信息时为空数组。 */
+  rows: number[];
+  /** 出问题的业务键，例如 "CI-1 / CDN-1" 或税票编号。 */
+  key: string;
+  /** 机器可读的原因码，例如 duplicate_in_file。 */
+  reason: string;
+  /** 后端给的英文说明，前端没有对应文案时兜底显示。 */
+  detail: string;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
     /** 逐条明细。批量导入会一次退回所有出错行，界面要能全部列出来。 */
     readonly details: string[] = [],
+    /** 同上，但保留结构，用于按行定位与本地化。 */
+    readonly issues: ApiIssue[] = [],
   ) {
     super(message);
     this.name = "ApiError";
@@ -80,7 +97,10 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
 type ErrorDetail = string | { message?: string; errors?: string[] };
 
 async function toError(response: Response): Promise<ApiError> {
-  const body = (await response.json().catch(() => null)) as { detail?: ErrorDetail } | null;
+  const body = (await response.json().catch(() => null)) as {
+    detail?: ErrorDetail;
+    issues?: ApiIssue[];
+  } | null;
   const raw = body?.detail;
   // FastAPI 的 detail 可以是字符串，也可以是对象；批量导入用的是后者
   // （{message, errors}）。不分开处理会得到一句 "[object Object]"。
@@ -91,7 +111,8 @@ async function toError(response: Response): Promise<ApiError> {
     onUnauthorized?.();
     return new UnauthorizedError(message);
   }
-  return new ApiError(message, response.status, details);
+  // issues 与 detail 平级：ServiceError 带上逐条问题时，main.py 会把它一起发出来。
+  return new ApiError(message, response.status, details, body?.issues ?? []);
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
