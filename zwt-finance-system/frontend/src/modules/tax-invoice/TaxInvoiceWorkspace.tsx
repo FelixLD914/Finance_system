@@ -409,6 +409,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // USD 的 buying transfer，不受这里的浏览选择影响。
   const [currency, setCurrency] = useState("USD");
   const [currencies, setCurrencies] = useState<string[]>([]);
+  // 汇率中心拆成两件事：查台账（只读）和把汇率灌进库（写）。混在一张卡片里，
+  // 想查个汇率的人要盯着"同步/导入"两个写操作按钮，误点代价还不小。
+  const [rateTab, setRateTab] = useState<"query" | "ingest">("query");
+  const [rateRange, setRateRange] = useState({ startDate: "", endDate: "" });
   const [botStatus, setBotStatus] = useState<BotApiStatus | null>(null);
   const [selected, setSelected] = useState<TaxInvoice | null>(null);
   const [documents, setDocuments] = useState<TaxInvoiceDocument[]>([]);
@@ -449,12 +453,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const refreshRates = useCallback(
     async (nextCurrency = currency) => {
       try {
-        setRates(await listExchangeRates(nextCurrency));
+        setRates(
+          await listExchangeRates(
+            nextCurrency,
+            rateRange.startDate || undefined,
+            rateRange.endDate || undefined,
+          ),
+        );
       } catch (error) {
         message.error(error instanceof Error ? error.message : t("tax.rateLoadFailed"));
       }
     },
-    [currency, message, t],
+    [currency, message, rateRange.endDate, rateRange.startDate, t],
   );
 
   useEffect(() => {
@@ -1139,100 +1149,181 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
 
       {view === "rates" && (
         <main className="tax-tool-page">
-          {/* 进页面就自检：密钥没配好时直接把配置方法写在这里，
-              而不是等用户点了同步再弹一句 "key is not configured"。 */}
-          {botStatus && (
-            <Alert
-              className="bot-status-alert"
-              showIcon
-              type={botStatus.configured ? "success" : "warning"}
-              message={
-                botStatus.configured
-                  ? t("tax.botConfigured")
-                  : t("tax.botNotConfigured")
-              }
-              description={
-                botStatus.configured
-                  ? t("tax.botConfiguredBody", {
-                      header: botStatus.authHeader,
-                      hint: botStatus.keyHint ?? "—",
-                      endpoint: botStatus.endpoint,
-                    })
-                  : t("tax.botNotConfiguredBody", {
-                      envVar: botStatus.envVar,
-                      file: "zwt-finance-system/.env",
-                    })
-              }
-            />
-          )}
-          <div className="rate-stat-grid">
-            <section>
-              <Statistic
-                title={t("tax.rateRecords", { currency })}
-                value={rates.length}
-                suffix={t("tax.days")}
-              />
-              <Progress
-                percent={Math.min(100, Math.round((rates.length / 366) * 100))}
-                showInfo={false}
-                strokeColor="#a87349"
-              />
-              <small>{t("tax.rateListLimit")}</small>
-            </section>
-            <section>
-              <Statistic
-                precision={4}
-                title={t("tax.latestBuyingTransfer")}
-                value={Number(rates[0]?.buyingTransfer ?? 0)}
-              />
-              <small>
-                {rates[0]?.rateDate ?? t("tax.notImported")} · {rates[0]?.source ?? "—"}
-              </small>
-            </section>
-            <section className="rate-actions-card">
-              <label className="rate-currency-field">
-                <span>{t("tax.currency")}</span>
-                <Select
-                  options={CURRENCY_CHOICES.map((code) => ({
-                    value: code,
-                    label: currencies.includes(code) ? code : `${code} · ${t("tax.noData")}`,
-                  }))}
-                  showSearch
-                  value={currency}
-                  onChange={setCurrency}
+          {/* 查询与入库分开：查台账是只读高频操作，同步/导入是低频写操作，
+              混在一张卡里想查个数的人也要面对两个写按钮。 */}
+          <nav className="rate-tab-switch" aria-label={t("tax.rates")}>
+            <button
+              className={rateTab === "query" ? "is-active" : ""}
+              type="button"
+              onClick={() => setRateTab("query")}
+            >
+              {t("tax.rateQuery")}
+            </button>
+            <button
+              className={rateTab === "ingest" ? "is-active" : ""}
+              type="button"
+              onClick={() => setRateTab("ingest")}
+            >
+              {t("tax.rateIngest")}
+            </button>
+          </nav>
+
+          {rateTab === "query" && (
+            <div className="rate-stat-grid">
+              <section>
+                <Statistic
+                  title={t("tax.rateRecords", { currency })}
+                  value={rates.length}
+                  suffix={t("tax.days")}
                 />
-              </label>
-              <Button
-                disabled={botUnconfigured}
-                icon={<ApiOutlined />}
-                type="primary"
-                onClick={() => setFetchOpen(true)}
-              >
-                {t("tax.syncFromBot")}
-              </Button>
-              <Upload
-                accept=".xlsx,.xls"
-                beforeUpload={(file) => {
-                  setRateFile(file);
-                  return false;
-                }}
-                fileList={uploadList(rateFile)}
-                maxCount={1}
-                onRemove={() => {
-                  setRateFile(null);
-                }}
-              >
-                <Button icon={<FileExcelOutlined />}>{t("tax.pickBotExcel")}</Button>
-              </Upload>
-              <Button
-                disabled={!rateFile}
-                loading={busy}
-                onClick={() => void runRateImport()}
-              >
-                {t("tax.importPicked")}
-              </Button>
-            </section>
-          </div>
+                <Progress
+                  percent={Math.min(100, Math.round((rates.length / 366) * 100))}
+                  showInfo={false}
+                  strokeColor="#a87349"
+                />
+                <small>{t("tax.rateListLimit")}</small>
+              </section>
+              <section>
+                <Statistic
+                  precision={4}
+                  title={t("tax.latestBuyingTransfer")}
+                  value={Number(rates[0]?.buyingTransfer ?? 0)}
+                />
+                <small>
+                  {rates[0]?.rateDate ?? t("tax.notImported")} · {rates[0]?.source ?? "—"}
+                </small>
+              </section>
+              <section className="rate-query-card">
+                <label className="rate-currency-field">
+                  <span>{t("tax.currency")}</span>
+                  <Select
+                    options={CURRENCY_CHOICES.map((code) => ({
+                      value: code,
+                      label: currencies.includes(code)
+                        ? code
+                        : `${code} · ${t("tax.noData")}`,
+                    }))}
+                    showSearch
+                    value={currency}
+                    onChange={setCurrency}
+                  />
+                </label>
+                <label className="rate-currency-field">
+                  <span>{t("tax.startDate")}</span>
+                  <Input
+                    type="date"
+                    value={rateRange.startDate}
+                    onChange={(event) =>
+                      setRateRange((current) => ({
+                        ...current,
+                        startDate: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="rate-currency-field">
+                  <span>{t("tax.endDate")}</span>
+                  <Input
+                    type="date"
+                    value={rateRange.endDate}
+                    onChange={(event) =>
+                      setRateRange((current) => ({
+                        ...current,
+                        endDate: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                {(rateRange.startDate || rateRange.endDate) && (
+                  <Button
+                    size="small"
+                    type="text"
+                    onClick={() => setRateRange({ startDate: "", endDate: "" })}
+                  >
+                    {t("tax.clearRange")}
+                  </Button>
+                )}
+              </section>
+            </div>
+          )}
+
+          {rateTab === "ingest" && (
+            <div className="rate-ingest-grid">
+              {/* 只在缺密钥时提示怎么配；已配置属于基础设施状态，与开票业务
+                  无关，不再常驻一条绿色横幅。 */}
+              {botUnconfigured && (
+                <Alert
+                  className="bot-status-alert"
+                  showIcon
+                  type="warning"
+                  message={t("tax.botNotConfigured")}
+                  description={t("tax.botNotConfiguredBody", {
+                    envVar: botStatus?.envVar ?? "ZWT_BOT_API_KEY",
+                    file: "zwt-finance-system/.env",
+                  })}
+                />
+              )}
+              <section className="tax-tool-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon copper">
+                    <ApiOutlined />
+                  </div>
+                  <div>
+                    <span>{t("tax.rateIngest")}</span>
+                    <h2>{t("tax.syncFromBot")}</h2>
+                    <p>{t("tax.syncFromBotHint")}</p>
+                  </div>
+                </div>
+                <Button
+                  block
+                  disabled={botUnconfigured}
+                  icon={<ApiOutlined />}
+                  size="large"
+                  type="primary"
+                  onClick={() => setFetchOpen(true)}
+                >
+                  {t("tax.syncFromBot")}
+                </Button>
+              </section>
+              <section className="tax-tool-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon ink">
+                    <FileExcelOutlined />
+                  </div>
+                  <div>
+                    <span>{t("tax.rateIngest")}</span>
+                    <h2>{t("tax.pickBotExcel")}</h2>
+                    <p>{t("tax.pickBotExcelHint")}</p>
+                  </div>
+                </div>
+                <Upload
+                  accept=".xlsx,.xls"
+                  beforeUpload={(file) => {
+                    setRateFile(file);
+                    return false;
+                  }}
+                  fileList={uploadList(rateFile)}
+                  maxCount={1}
+                  onRemove={() => {
+                    setRateFile(null);
+                  }}
+                >
+                  <Button icon={<FileExcelOutlined />} size="large">
+                    {t("tax.pickBotExcel")}
+                  </Button>
+                </Upload>
+                <Button
+                  disabled={!rateFile}
+                  loading={busy}
+                  size="large"
+                  onClick={() => void runRateImport()}
+                >
+                  {t("tax.importPicked")}
+                </Button>
+              </section>
+            </div>
+          )}
+          {rateTab === "query" && (
           <section className="rate-ledger-card">
             <div className="section-title-row">
               <div>
@@ -1302,6 +1393,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               <Empty description={t("tax.noRates")} />
             )}
           </section>
+          )}
         </main>
       )}
 
