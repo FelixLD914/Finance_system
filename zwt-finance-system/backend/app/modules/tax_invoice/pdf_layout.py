@@ -3,7 +3,7 @@
 由 scripts/build_tax_inv_underlay.py 从 TAX-INV-Template.pdf 的制版过程中量出，
 和同目录下的底版一一对应。模板 xlsx 一旦改动，底版和这张表必须一起重新生成。
 
-源模板 sha256: 5ca73b1f3c987f31d7987564e3eef509e70709fc236dbf7fc4b1fd2e8ac5bf6a
+源模板 sha256: b3642c712dc59cbee63fd483ac25863436a0c6b052a534e221958b3ea9643605
 
 坐标单位是 PDF 点，原点在页面左下角——正好是 ReportLab 的坐标系。
 baseline 是文字基线的 y，直接喂给 drawString 即可。三联在同一张工作表的
@@ -97,34 +97,34 @@ ITEM_ANCHORS: dict[str, tuple[TextAnchor, ...]] = {
         TextAnchor(261.90, 'center', 7.07, 32.56),
     ),
     'quantity': (
-        TextAnchor(335.62, 'right', 7.07, None),
-        TextAnchor(324.14, 'right', 7.07, None),
-        TextAnchor(323.79, 'right', 7.07, None),
+        TextAnchor(335.66, 'right', 7.07, None),
+        TextAnchor(325.81, 'right', 7.07, None),
+        TextAnchor(325.58, 'right', 7.07, None),
     ),
     'fob_unit_price_usd': (
         TextAnchor(377.90, 'right', 7.07, None),
+        TextAnchor(372.37, 'right', 7.07, None),
         TextAnchor(370.58, 'right', 7.07, None),
-        TextAnchor(368.78, 'right', 7.07, None),
     ),
     'fob_revenue_usd': (
         TextAnchor(430.74, 'right', 7.07, None),
-        TextAnchor(419.42, 'right', 7.07, None),
-        TextAnchor(421.69, 'right', 7.07, None),
+        TextAnchor(421.14, 'right', 7.07, None),
+        TextAnchor(423.41, 'right', 7.07, None),
     ),
     'fx_date': (
         TextAnchor(456.01, 'center', 7.07, None),
-        TextAnchor(445.45, 'center', 7.07, None),
+        TextAnchor(447.46, 'center', 7.07, None),
         TextAnchor(448.33, 'center', 7.07, None),
     ),
     'exchange_rate': (
         TextAnchor(510.22, 'right', 7.07, None),
-        TextAnchor(497.97, 'right', 7.07, None),
-        TextAnchor(498.83, 'right', 7.07, None),
+        TextAnchor(499.54, 'right', 7.07, None),
+        TextAnchor(500.62, 'right', 7.07, None),
     ),
     'fob_revenue_thb': (
         TextAnchor(577.01, 'right', 7.07, None),
-        TextAnchor(569.58, 'right', 7.07, None),
-        TextAnchor(575.70, 'right', 7.07, None),
+        TextAnchor(571.25, 'right', 7.07, None),
+        TextAnchor(577.39, 'right', 7.07, None),
     ),
 }
 

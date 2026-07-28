@@ -161,6 +161,17 @@ def _probe_amount(base: int, line: int, variant: int) -> Decimal:
     return Decimal(integer_part) + Decimal("0.25") * (line % 3)
 
 
+def _probe_quantity(line: int, variant: int) -> Decimal:
+    """数量列的探针值，必须是整数。
+
+    数量按业务口径是 "#,##0"，小数会被四舍五入掉，不能再靠 _probe_amount
+    的 0.25 尾数来区分行——102.5 和 103 都会渲染成 "103"，同一页上出现两个
+    相同文本，制版就没法判断哪个是第 2 行、哪个是第 3 行。
+    两份探针仍然差一位整数位（101.. / 1001..），判对齐依赖的长度差还在。
+    """
+    return Decimal(100 + line if variant == 0 else 1000 + line)
+
+
 def _probe_items(variant: int) -> list[TaxInvoiceItem]:
     pad = variant + 1
     return [
@@ -169,7 +180,7 @@ def _probe_items(variant: int) -> list[TaxInvoiceItem]:
             product_name=f"PN{line}" + "X" * (line % 4 + pad),
             product_code=f"PC{line}" + "Y" * ((line + 1) % 4 + pad),
             unit=f"U{line}" + "Z" * ((line + 2) % 3),
-            quantity=_probe_amount(1000, line, variant),
+            quantity=_probe_quantity(line, variant),
             fob_unit_price_usd=_probe_amount(2000, line, variant),
             fob_revenue_usd=_probe_amount(3000, line, variant),
             fob_revenue_thb=_probe_amount(4000, line, variant),

@@ -5,10 +5,15 @@ from pathlib import Path
 
 import pytest
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment
 from pypdf import PdfReader
 
 from app.modules.tax_invoice import pdf_layout
 from app.modules.tax_invoice.document_generator import (
+    COPY_COLUMN_OFFSETS,
+    DATA_COLUMNS,
+    DATA_START_ROW,
+    ITEM_NUMBER_FORMATS,
     MAX_ITEMS,
     TaxInvoiceDocumentGenerationError,
     export_pdf_from_template,
@@ -85,6 +90,96 @@ def test_workbook_uses_customs_submission_date_for_invoice_date(tmp_path):
     assert worksheet["B24"].value in (None, "")
 
 
+def _template_with_broken_copy_formats(tmp_path):
+    """复刻模板原有的缺陷：两联 COPY 沿用会计格式，数量列只到整数位。
+
+    真模板已经修好了（scripts/normalize_tax_inv_number_formats.py），但它是
+    runtime 文件、不在仓库里，重新部署可能又拿到旧版本。这里刻意造一份"坏"
+    模板，验证 renderer 自己就能把三联拉齐，不依赖模板的状态。
+    """
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Invoice"
+    for coordinate in ("D13", "D14", "D16", "D17", "D19", "Q13", "Q14"):
+        worksheet[coordinate] = coordinate
+    for row in range(DATA_START_ROW, DATA_START_ROW + MAX_ITEMS):
+        for column in DATA_COLUMNS:
+            worksheet.cell(row=row, column=column).alignment = Alignment(horizontal="right")
+        for copy_offset in COPY_COLUMN_OFFSETS[1:]:
+            # 数量列：整数位会计格式，1101.25 会印成 "1,101"
+            worksheet.cell(row=row, column=9 + copy_offset).number_format = (
+                '_ * #,##0_ ;_ * \\-#,##0_ ;_ * "-"_ ;_ @_ '
+            )
+            # FOB Rev USD：三位小数，比正本多一位
+            worksheet.cell(row=row, column=13 + copy_offset).number_format = (
+                '_-* #,##0.000_-;\\-* #,##0.000_-;_-* "-"??_-;_-@_-'
+            )
+            # 汇率列声明左对齐：会计格式的 "* " 填充本来把它压成右对齐，
+            # 一旦换成普通格式就会露出来，所以 renderer 得连对齐一起拉平。
+            worksheet.cell(row=row, column=16 + copy_offset).alignment = Alignment(
+                horizontal="left"
+            )
+    path = tmp_path / "broken-template.xlsx"
+    workbook.save(path)
+    return path
+
+
+def test_all_three_copies_share_one_set_of_item_formats(tmp_path):
+    """三联的数字格式必须逐格一致——副联和正本是同一份税务单据。
+
+    模板里两联 COPY 是 "=B23" 这类镜像公式，公式只搬值不搬格式，所以
+    renderer 必须对三联各写一遍。
+    """
+    items = [_item(number) for number in range(1, 4)]
+    content = render_tax_invoice_workbook(
+        _template_with_broken_copy_formats(tmp_path), _invoice(), items
+    )
+    worksheet = load_workbook(BytesIO(content), data_only=False).active
+
+    for index in range(len(items)):
+        row = DATA_START_ROW + index
+        for column, number_format in ITEM_NUMBER_FORMATS.items():
+            formats = {
+                worksheet.cell(row=row, column=column + copy_offset).number_format
+                for copy_offset in COPY_COLUMN_OFFSETS
+            }
+            assert formats == {number_format}, (
+                f"第 {row} 行第 {column} 列三联格式不一致：{formats}"
+            )
+        # 对齐同理：普通格式不像会计格式那样能把数字顶到右边，三联的水平
+        # 对齐一旦不同，副联的数字就会横向错位。
+        for column in DATA_COLUMNS:
+            alignments = {
+                worksheet.cell(row=row, column=column + copy_offset).alignment.horizontal
+                for copy_offset in COPY_COLUMN_OFFSETS
+            }
+            assert len(alignments) == 1, (
+                f"第 {row} 行第 {column} 列三联对齐不一致：{alignments}"
+            )
+
+
+def test_quantity_stays_in_lockstep_between_xlsx_and_pdf(tmp_path):
+    """xlsx 的单元格格式和 PDF 的字符串必须同源。
+
+    两条链路各自决定怎么显示数量：xlsx 交给 Excel 按 number_format 渲染，
+    PDF 由 format_quantity 直接拼字符串。任一边单独改了，同一张单子的两份
+    交付物就会印出不同的数——而且只在有小数的数据上暴露，抽查很难发现。
+    """
+    item = _item()
+    item.quantity = Decimal("4820.5")
+    content = render_tax_invoice_workbook(
+        _template_with_broken_copy_formats(tmp_path), _invoice(), [item]
+    )
+    worksheet = load_workbook(BytesIO(content), data_only=False).active
+
+    for copy_offset in COPY_COLUMN_OFFSETS:
+        cell = worksheet.cell(row=DATA_START_ROW, column=9 + copy_offset)
+        assert cell.number_format == ITEM_NUMBER_FORMATS[9] == "#,##0"
+    # Excel 对 "#,##0" 是四舍五入，4820.5 显示成 "4,821"（实测值）；
+    # PDF 侧必须给出同一个字符串。
+    assert format_quantity(item.quantity) == "4,821"
+
+
 def test_workbook_rejects_more_than_eighteen_items(tmp_path):
     items = [_item(index) for index in range(1, 20)]
     try:
@@ -105,11 +200,17 @@ def test_file_stem_uses_invoice_date_and_document_number():
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
-        # Excel 的 "#,##0.####" 会把整数显示成 "1,001."，末尾那个点真的会印出来。
-        ("1001", "1,001."),
-        ("2.5", "2.5"),
-        ("0", "0."),
-        ("1234.5678", "1,234.5678"),
+        # 产品按个计，数量不带小数，只要千分位分隔符。
+        ("1001", "1,001"),
+        ("1200", "1,200"),
+        ("15", "15"),
+        ("0", "0"),
+        # 真混进小数时 Excel 的 "#,##0" 是四舍五入而不是截断，
+        # 下面四个期望值都是在装了 Excel 的机器上读回来的实际显示结果。
+        ("2.5", "3"),
+        ("0.5", "1"),
+        ("4820.5", "4,821"),
+        ("1234.5678", "1,235"),
     ],
 )
 def test_quantity_format_matches_excel(value: str, expected: str) -> None:
@@ -134,7 +235,7 @@ def test_pdf_totals_repeat_the_line_sum_and_thai_text() -> None:
     _, lines, totals = pdf_field_values(_invoice(), items)
 
     assert len(lines) == 2
-    assert lines[0]["quantity"] == "2."
+    assert lines[0]["quantity"] == "2"
     assert lines[0]["exchange_rate"] == "32.4567"
     assert lines[0]["fx_date"] == "08/06/2026"
     # 折扣与 VAT 恒为 0，所以合计/折后/总计三格是同一个数。

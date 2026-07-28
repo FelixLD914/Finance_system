@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import copy
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
@@ -40,6 +41,28 @@ ITEM_COLUMN_FIELDS: tuple[tuple[str, int], ...] = (
     ("fob_revenue_thb", 18),
 )
 DATA_COLUMNS = tuple(column for _, column in ITEM_COLUMN_FIELDS)
+
+# 明细列的数字格式，键是第一联的列号。三联必须逐字符一致：税务副联和正本
+# 是同一份单据，数量列少一位小数就成了两份不同的文件。
+#
+# 模板自带的格式做不到这一点——两联 COPY 沿用了会计格式，其中数量列是整数位
+# （1101.25 印成 "1,101"，4820.5 甚至进位成 "4,821"），FOB Rev USD 的 31~40 行
+# 是三位小数。所以这里对三联都显式覆盖一遍，不依赖模板的状态。
+# 模板本身已由 scripts/normalize_tax_inv_item_styles.py 一并修正，
+# 这里的覆盖是防止模板被重新部署回旧版本时又退化。
+#
+# 按业务口径分三类：数量按个计、不带小数，只要千分位；单价与汇率四位小数；
+# 金额两位小数。数量用 "#,##0" 而不是 "#,##0.####"，后者格式里的小数点是
+# 字面量，Excel 会把 1200 印成 "1,200."，末尾那个点真的会印出来。
+ITEM_NUMBER_FORMATS: dict[int, str] = {
+    2: "0",  # 序号
+    9: "#,##0",  # 数量
+    11: "#,##0.0000",  # 单价
+    13: "#,##0.00",  # 金额 USD
+    15: "@",  # 汇率日期，写的是字符串
+    16: "#,##0.0000",  # 汇率
+    18: "#,##0.00",  # 金额 THB
+}
 
 # 表头字段在三联中的单元格。第二、三联不是整齐的列偏移
 # （作者把 DocumentNo. 挪到了 AJ/BB），所以逐个列出而不是算偏移。
@@ -97,14 +120,13 @@ def format_rate(value: Decimal | None) -> str:
 
 
 def format_quantity(value: Decimal | None) -> str:
-    """还原 "#,##0.####"。
+    """还原数量列的 "#,##0"。
 
-    这个格式里的小数点是字面量：Excel 把整数 1001 显示成 "1,001."，
-    末尾那个点确实会印出来。PDF 要跟 xlsx 一模一样，就得照抄这个怪癖。
+    产品按个计，数量不带小数，只要千分位分隔符。真出现了小数，Excel 的
+    "#,##0" 会四舍五入（4820.5 -> "4,821"），这里用同样的 ROUND_HALF_UP
+    跟上，保证 PDF 和 xlsx 印出来是同一个数。
     """
-    if value is None:
-        return ""
-    return f"{_quantize(value, 4):,.4f}".rstrip("0")
+    return "" if value is None else f"{_quantize(value, 0):,.0f}"
 
 
 def render_tax_invoice_workbook(
@@ -158,13 +180,20 @@ def render_tax_invoice_workbook(
         }
         for column, value in values.items():
             worksheet.cell(row=row_number, column=column).value = value
-        worksheet.cell(row=row_number, column=2).number_format = "0"
-        worksheet.cell(row=row_number, column=9).number_format = "#,##0.####"
-        worksheet.cell(row=row_number, column=11).number_format = "#,##0.0000"
-        worksheet.cell(row=row_number, column=13).number_format = "#,##0.00"
-        worksheet.cell(row=row_number, column=15).number_format = "@"
-        worksheet.cell(row=row_number, column=16).number_format = "#,##0.0000"
-        worksheet.cell(row=row_number, column=18).number_format = "#,##0.00"
+        # 值只写第一联，两联 COPY 靠 "=B23" 这类公式取；但公式不带样式，
+        # 所以格式必须三联各写一遍。
+        for column, number_format in ITEM_NUMBER_FORMATS.items():
+            for copy_offset in COPY_COLUMN_OFFSETS:
+                cell = worksheet.cell(row=row_number, column=column + copy_offset)
+                cell.number_format = number_format
+        # 对齐得跟着格式一起统一。模板给副联留的会计格式靠 "* " 重复填充把
+        # 数字顶到右边，把单元格自己声明的水平对齐压住了；换成普通格式之后
+        # 那个声明就生效了，而三联的声明并不一致（COPY#1 的汇率列是 left）。
+        for column in DATA_COLUMNS:
+            wanted = worksheet.cell(row=row_number, column=column).alignment
+            for copy_offset in COPY_COLUMN_OFFSETS[1:]:
+                cell = worksheet.cell(row=row_number, column=column + copy_offset)
+                cell.alignment = copy(wanted)
 
     try:
         workbook.calculation.fullCalcOnLoad = True
