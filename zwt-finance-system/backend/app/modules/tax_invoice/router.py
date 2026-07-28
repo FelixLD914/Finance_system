@@ -329,6 +329,30 @@ async def import_existing_sample(
     return await service.import_sample(rows=rows, file_name=file_name, content=content)
 
 
+# 与 /import/sample 读同一种表格，区别只在编号口径：这里允许沿用旧系统已经
+# 开出的 DocumentNo，那边一律拒绝。做成独立端点而不是一个 mode 参数，是为了
+# 让权限能只收紧这一条——这是全系统唯一能由外部指定税票编号的入口。
+@router.post(
+    "/import/migration",
+    response_model=TaxInvoiceImportResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def import_historical_migration(
+    service: ServiceDependency,
+    file: Annotated[UploadFile, File(description="Legacy TAX INV ledger .xlsx")],
+) -> TaxInvoiceImportResponse:
+    content, file_name = await _read_upload(file, (".xlsx", ".xls"))
+    try:
+        rows = parse_sample_workbook(content, file_name)
+    except TaxInvoiceRecognitionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await service.import_migration(
+        rows=rows,
+        file_name=file_name,
+        content=content,
+    )
+
+
 @router.get("/exchange-rates", response_model=list[ExchangeRateResponse])
 async def list_exchange_rates(
     service: ServiceDependency,

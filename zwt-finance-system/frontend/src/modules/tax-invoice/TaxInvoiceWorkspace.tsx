@@ -61,6 +61,7 @@ import {
   getTaxInvoice,
   importDualFiles,
   importExchangeRates,
+  importMigration,
   importSample,
   listExchangeRates,
   listRateCurrencies,
@@ -99,8 +100,10 @@ const SAMPLE_REQUIRED_COLUMNS = [
   "FOB Rev THB",
 ];
 
+/** 只有历史迁移能带这一列，常规批量开具填了会被整批退回。 */
+const MIGRATION_ONLY_COLUMNS = ["DocumentNo"];
+
 const SAMPLE_OPTIONAL_COLUMNS = [
-  "DocumentNo",
   "C/I No.",
   "CI/PI Date",
   "Invoice Date",
@@ -283,6 +286,7 @@ function conflictText(issue: ApiIssue, t: Translate): string {
     duplicate_number_in_file: "tax.issueDuplicateNumberInFile",
     number_already_exists: "tax.issueNumberAlreadyExists",
     incomplete_for_number: "tax.issueIncompleteForNumber",
+    number_not_allowed: "tax.issueNumberNotAllowed",
   };
   const key = keys[issue.reason];
   if (!key) return issue.detail;
@@ -552,6 +556,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [customsFile, setCustomsFile] = useState<File | null>(null);
   const [sampleFile, setSampleFile] = useState<File | null>(null);
+  // 批量导入拆成两种模式：常规开票（编号必须留空）和历史迁移（沿用旧编号）。
+  // 默认停在开票——迁移是一次性的，日常用的是前者。
+  const [batchMode, setBatchMode] = useState<"issue" | "migration">("issue");
   const [conflicts, setConflicts] = useState<ApiIssue[]>([]);
   const [rateFile, setRateFile] = useState<File | null>(null);
   const [fetchOpen, setFetchOpen] = useState(false);
@@ -652,6 +659,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
   }, [invoices, period, phase, query, status]);
+
+  // DocumentNo 只在历史迁移那一栏出现：开票模式下它是禁列，摆在「可选列」里
+  // 只会让人以为填了也行。
+  const optionalColumns = useMemo(
+    () =>
+      batchMode === "migration"
+        ? [...MIGRATION_ONLY_COLUMNS, ...SAMPLE_OPTIONAL_COLUMNS]
+        : SAMPLE_OPTIONAL_COLUMNS,
+    [batchMode],
+  );
 
   const lifecycleCounts = useMemo(
     () => ({
@@ -940,7 +957,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
     setBusy(true);
     try {
-      const result = await importSample(sampleFile);
+      const result =
+        batchMode === "migration"
+          ? await importMigration(sampleFile)
+          : await importSample(sampleFile);
       message.success(
         t("tax.sampleDone", {
           invoices: result.invoiceCount,
@@ -1336,6 +1356,25 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             <span>{t("tax.batchRuleNote")}</span>
           </p>
 
+          {/* 两种模式的编号口径正好相反，必须先让人选定再上传，不能靠一句
+              提示分辨——选错了后端会整批退回，但那已经浪费一次往返。 */}
+          <nav className="rate-tab-switch" aria-label={t("tax.batchNav")}>
+            <button
+              className={batchMode === "issue" ? "is-active" : ""}
+              type="button"
+              onClick={() => setBatchMode("issue")}
+            >
+              {t("tax.batchModeIssue")}
+            </button>
+            <button
+              className={batchMode === "migration" ? "is-active" : ""}
+              type="button"
+              onClick={() => setBatchMode("migration")}
+            >
+              {t("tax.batchModeMigration")}
+            </button>
+          </nav>
+
           <div className="tax-batch-grid">
             <section className="tax-tool-card">
               <div className="tool-card-heading">
@@ -1344,8 +1383,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <div>
                   <span>{t("tax.migration")}</span>
-                  <h2>{t("tax.importSample")}</h2>
-                  <p>{t("tax.importSampleHint")}</p>
+                  <h2>
+                    {batchMode === "migration"
+                      ? t("tax.batchMigrationTitle")
+                      : t("tax.batchIssueTitle")}
+                  </h2>
+                  <p>
+                    {batchMode === "migration"
+                      ? t("tax.batchMigrationHint")
+                      : t("tax.batchIssueHint")}
+                  </p>
                 </div>
               </div>
               <Upload.Dragger
@@ -1397,13 +1444,21 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   <p>{t("tax.batchColumnsHint")}</p>
                 </div>
               </div>
-              {/* 带编号的行会直接以已批准入账并推进编号计数器，这是这张表
-                  唯一能绕过人工复核的口子，值得单独摆一条警告。 */}
+              {/* 两种模式对 DocumentNo 的态度相反：开票一律拒绝，迁移是全系统
+                  唯一能指定编号的入口。这条差异必须写在最显眼的位置。 */}
               <Alert
-                message={t("tax.batchNumberWarning")}
-                description={t("tax.batchNumberWarningBody")}
+                message={
+                  batchMode === "migration"
+                    ? t("tax.batchMigrationScope")
+                    : t("tax.batchNumberForbidden")
+                }
+                description={
+                  batchMode === "migration"
+                    ? t("tax.batchMigrationScopeBody")
+                    : t("tax.batchNumberForbiddenBody")
+                }
                 showIcon
-                type="warning"
+                type={batchMode === "migration" ? "warning" : "info"}
               />
               <div className="column-group">
                 <h3>
@@ -1421,11 +1476,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               <div className="column-group">
                 <h3>
                   {t("tax.batchOptional")}
-                  <span>{SAMPLE_OPTIONAL_COLUMNS.length}</span>
+                  <span>{optionalColumns.length}</span>
                 </h3>
                 <div className="column-tags">
-                  {SAMPLE_OPTIONAL_COLUMNS.map((name) => (
-                    <code key={name}>{name}</code>
+                  {optionalColumns.map((name) => (
+                    <code
+                      className={
+                        MIGRATION_ONLY_COLUMNS.includes(name) ? "is-migration" : ""
+                      }
+                      key={name}
+                    >
+                      {name}
+                    </code>
                   ))}
                 </div>
               </div>
