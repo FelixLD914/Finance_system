@@ -260,6 +260,18 @@ function DualFileSlot({
   );
 }
 
+/** 后端 check_approval_readiness 返回的字段码 → 界面上该字段的名字。 */
+const BLOCKER_LABELS: Record<string, Parameters<Translate>[0]> = {
+  invoiceDate: "tax.blocker.invoiceDate",
+  exchangeTargetDate: "tax.blocker.exchangeTargetDate",
+  exchangeRate: "tax.blocker.exchangeRate",
+  customerName: "tax.blocker.customerName",
+  customerAddress: "tax.blocker.customerAddress",
+  CDN: "tax.blocker.CDN",
+  items: "tax.blocker.items",
+  itemLimit: "tax.blocker.itemLimit",
+};
+
 /**
  * 把后端的 reason 码翻成当前语言。认不出的码退回后端给的英文说明，
  * 好过显示一个原始枚举值——后端加了新原因时界面不至于变成乱码。
@@ -270,9 +282,20 @@ function conflictText(issue: ApiIssue, t: Translate): string {
     already_exists: "tax.issueAlreadyExists",
     duplicate_number_in_file: "tax.issueDuplicateNumberInFile",
     number_already_exists: "tax.issueNumberAlreadyExists",
+    incomplete_for_number: "tax.issueIncompleteForNumber",
   };
   const key = keys[issue.reason];
-  return key ? t(key, { key: issue.key }) : issue.detail;
+  if (!key) return issue.detail;
+  // 字段码翻成界面上那个字段的名字：财务同事认「客户地址」，不认
+  // customerAddress。用白名单而不是拼 key，后端加了新码也只是原样显示，
+  // 不会拿一个不存在的 key 去查表拿到 undefined。
+  const fields = (issue.fields ?? [])
+    .map((code) => {
+      const label = BLOCKER_LABELS[code];
+      return label ? t(label) : code;
+    })
+    .join("、");
+  return t(key, { key: issue.key, fields });
 }
 
 function warningCount(invoice: TaxInvoice): number {

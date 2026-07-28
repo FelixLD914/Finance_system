@@ -196,7 +196,36 @@ def _service() -> TaxInvoiceService:
 
 
 def _row(ci_no: str, cdn: str | None, source_rows: list[int], **extra: object) -> dict:
+    """一行没有编号的普通导入行——完整性由之后的人工批准把关。"""
     return {"ci_no": ci_no, "cdn": cdn, "source_rows": source_rows, **extra}
+
+
+def _numbered_row(
+    ci_no: str,
+    cdn: str | None,
+    source_rows: list[int],
+    document_no: str,
+    **overrides: object,
+) -> dict:
+    """一行带编号的导入行，默认填满到「够格直接批准」。
+
+    带编号 = 绕过复核直接 approved，所以默认必须是完整的；
+    要测不完整的情况就用 overrides 把某个字段打成 None。
+    """
+    row: dict = {
+        "ci_no": ci_no,
+        "cdn": cdn,
+        "source_rows": source_rows,
+        "document_no": document_no,
+        "invoice_date": date(2026, 6, 5),
+        "exchange_target_date": date(2026, 6, 4),
+        "exchange_rate": Decimal("36.1234"),
+        "customer_name": "TEST CUSTOMER",
+        "customer_address": "BANGKOK",
+        "items": [{"line_number": 1}],
+    }
+    row.update(overrides)
+    return row
 
 
 def _check(rows: list[dict]) -> None:
@@ -225,13 +254,13 @@ def test_all_conflicts_are_reported_in_one_pass() -> None:
     assert [issue["rows"] for issue in issues] == [[3], [5]]
     assert {issue["reason"] for issue in issues} == {"duplicate_in_file"}
     # 摘要里要带上总数，前端不展开也能看出规模。
-    assert "2 conflict" in str(excinfo.value)
+    assert "2 problem" in str(excinfo.value)
 
 
 def test_duplicate_document_numbers_inside_one_file_are_reported() -> None:
     rows = [
-        _row("CI-1", "CDN-1", [2], document_no="ZWT-IV20260605-01"),
-        _row("CI-2", "CDN-2", [3], document_no="ZWT-IV20260605-01"),
+        _numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01"),
+        _numbered_row("CI-2", "CDN-2", [3], "ZWT-IV20260605-01"),
     ]
 
     with pytest.raises(TaxInvoiceConflictError) as excinfo:
@@ -245,8 +274,63 @@ def test_duplicate_document_numbers_inside_one_file_are_reported() -> None:
 
 def test_a_clean_file_raises_nothing() -> None:
     rows = [
-        _row("CI-1", "CDN-1", [2], document_no="ZWT-IV20260605-01"),
-        _row("CI-2", "CDN-2", [3], document_no="ZWT-IV20260605-02"),
+        _numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01"),
+        _numbered_row("CI-2", "CDN-2", [3], "ZWT-IV20260605-02"),
+        # 没编号的行不受完整性门槛约束：它落成 needs_review，等人工批准时再校验。
+        _row("CI-3", "CDN-3", [4]),
     ]
 
     _check(rows)
+
+
+def test_a_numbered_row_must_pass_the_same_checks_as_manual_approval() -> None:
+    """带编号 = 绕过复核直接 approved，所以完整性门槛必须一样高。
+
+    以前这条缝里能塞进一张客户地址为空的「已批准」税票，还会把编号计数器
+    往前推。
+    """
+    rows = [
+        _numbered_row(
+            "CI-1",
+            "CDN-1",
+            [2],
+            "ZWT-IV20260605-01",
+            customer_address=None,
+            exchange_rate=None,
+        )
+    ]
+
+    with pytest.raises(TaxInvoiceConflictError) as excinfo:
+        _check(rows)
+
+    issue = excinfo.value.issues[0]
+    assert issue["reason"] == "incomplete_for_number"
+    assert issue["rows"] == [2]
+    assert set(issue["fields"]) == {"exchangeRate", "customerAddress"}
+
+
+def test_a_numbered_row_over_the_template_limit_is_rejected() -> None:
+    """19 条商品的 approved 税票能安静躺在台账里，直到生成文件时才炸——
+    那时编号早就发出去了。所以要在导入这一步拦住。"""
+    rows = [
+        _numbered_row(
+            "CI-1",
+            "CDN-1",
+            [2],
+            "ZWT-IV20260605-01",
+            items=[{"line_number": n} for n in range(1, 20)],
+        )
+    ]
+
+    with pytest.raises(TaxInvoiceConflictError) as excinfo:
+        _check(rows)
+
+    issue = excinfo.value.issues[0]
+    assert issue["reason"] == "incomplete_for_number"
+    assert issue["fields"] == ["itemLimit"]
+
+
+def test_an_incomplete_row_without_a_number_is_allowed_through() -> None:
+    """没有编号就没绕过任何东西，它会落成 needs_review 等人工补。
+    在导入这一步拦它等于把「先导进来再慢慢补」这条正常路堵死。"""
+    _check([_row("CI-1", "CDN-1", [2])])
