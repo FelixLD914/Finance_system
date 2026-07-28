@@ -106,6 +106,27 @@ def test_confirmed_signature_management_is_admin_only() -> None:
     assert "salary_advance:template_manage" not in ALL_PERMISSIONS
 
 
+def test_confirmed_migration_is_admin_only() -> None:
+    """已确认：历史迁移只有 admin 能做，approver 也不行。
+
+    迁移能凭一份 Excel 直接写出「已批准」税票、沿用外部指定的编号并推进编号
+    计数器，等于绕开全部复核——破坏力在 invoice:approve 之上。能批准一张税票，
+    不等于能凭空造出一张已批准的票，所以它比 _APPROVE 更高一档。
+    """
+    assert _roles_with("invoice:migrate") == {"admin"}
+    assert not role_has("approver", "invoice:migrate")
+    assert not role_has("operator", "invoice:migrate")
+
+
+def test_migrate_is_strictly_narrower_than_approve() -> None:
+    """迁移权必须比批准权更窄。
+
+    写成集合包含关系而不是列举角色：日后新增角色时，只要有人给了一个能迁移
+    但不能批准的角色，这条就会失败。
+    """
+    assert _roles_with("invoice:migrate") < _roles_with("invoice:approve")
+
+
 def test_principal_require_raises_for_missing_permission() -> None:
     operator = build_principal(role="operator")
 

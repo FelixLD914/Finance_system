@@ -15,6 +15,10 @@ from typing import Literal, get_args
 Permission = Literal[
     "invoice:read",
     "invoice:write",
+    # 历史迁移：全系统唯一能由外部指定税票编号的入口。它跳过人工复核直接写出
+    # 「已批准」记录并推进编号计数器，破坏力在 invoice:approve 之上，所以单列
+    # 一个权限点而不是复用 write。
+    "invoice:migrate",
     "invoice:approve",
     "invoice:void",
     "invoice:correct",
@@ -77,6 +81,12 @@ _APPROVE: frozenset[str] = frozenset(
 #
 #   4. signature:manage 只给 admin。签名图片决定正式 PDF 上盖谁的名字，
 #      不下放给 approver 或 operator。
+#
+#   5. invoice:migrate 只给 admin（2026-07-28 加入，待业务复核）。理由与第 4 条
+#      同源：历史迁移能凭一份 Excel 直接写出「已批准」税票、沿用外部指定的编号
+#      并推进编号计数器，等于绕开全部复核。它不是日常动作，是上线时跑一次的
+#      一次性动作，因此不给 approver——能批准一张税票，不等于能凭空造出一张
+#      已批准的票。迁移完成后建议连 admin 的这条路一起摘掉。
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "viewer": _READ_ONLY,
     "operator": _PREPARE,

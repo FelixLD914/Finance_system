@@ -1617,6 +1617,12 @@ select {
   font-weight: 600;
 }
 
+/* 权限不足的模式：看得见但点不动，鼠标停上去解释为什么。 */
+.rate-tab-switch button:disabled {
+  color: #b3a89e;
+  cursor: not-allowed;
+}
+
 .rate-tab-switch button.is-active {
   color: #342a23;
   background: var(--surface);

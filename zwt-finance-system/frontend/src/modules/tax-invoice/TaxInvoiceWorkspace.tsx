@@ -43,6 +43,7 @@ import {
 import type { UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
+import { useAuth } from "../../auth/AuthContext";
 import type { Locale, Translate } from "../../i18n";
 import { FinanceLifecycleTabs, type FinanceLifecyclePhase } from "../../ui";
 import { ThaiText } from "../../shared/ThaiText";
@@ -532,6 +533,10 @@ function InvoiceInspector({
 
 export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Locale }) {
   const { message, modal } = AntApp.useApp();
+  // 历史迁移是 admin 专属（invoice:migrate）。前端这道只是别让人白跑一趟：
+  // 真正的拦截在后端，禁掉按钮拦不住直接调接口的人。
+  const { can } = useAuth();
+  const canMigrate = can("invoice:migrate");
   const [view, setView] = useState<WorkspaceView>("ledger");
   const [invoices, setInvoices] = useState<TaxInvoice[]>([]);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
@@ -1366,13 +1371,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             >
               {t("tax.batchModeIssue")}
             </button>
-            <button
-              className={batchMode === "migration" ? "is-active" : ""}
-              type="button"
-              onClick={() => setBatchMode("migration")}
-            >
-              {t("tax.batchModeMigration")}
-            </button>
+            {/* 没权限的人也让他看见这个模式存在、并知道该找谁要——直接藏掉会
+                让人以为功能没做。 */}
+            <Tooltip title={canMigrate ? "" : t("tax.batchMigrationNoPermission")}>
+              <button
+                className={batchMode === "migration" ? "is-active" : ""}
+                disabled={!canMigrate}
+                type="button"
+                onClick={() => setBatchMode("migration")}
+              >
+                {t("tax.batchModeMigration")}
+              </button>
+            </Tooltip>
           </nav>
 
           <div className="tax-batch-grid">
