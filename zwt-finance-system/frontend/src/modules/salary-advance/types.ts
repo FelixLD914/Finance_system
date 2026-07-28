@@ -56,20 +56,6 @@ export interface SalaryAdvanceBatchDetail {
   records: SalaryAdvanceRecord[];
 }
 
-export interface SalaryAdvanceTemplate {
-  id: string;
-  templateCode: string;
-  version: string;
-  fileName: string;
-  sha256: string;
-  pdfUnderlaySha256: string;
-  pdfLayoutVersion: string;
-  visibleSheet: string;
-  active: boolean;
-  createdByName: string;
-  createdAt: string;
-}
-
 export interface SalaryAdvanceDocument {
   id: string;
   jobId: string;

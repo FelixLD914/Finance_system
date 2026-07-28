@@ -439,10 +439,6 @@ const resources = {
     "salary.noOfficePill": "无 Office 生成链路",
     "salary.noOfficeHint":
       "正式 PDF 由 ReportLab + pypdf 生成，服务器不需要安装 Office。",
-    "salary.navLabel": "工资预支功能",
-    "salary.ledger": "批次与开具",
-    "salary.maintenance": "模板与签名",
-
     "salary.periodPlaceholder": "期间 YYYYMM",
     "salary.allBatchStatuses": "全部批次状态",
     "salary.query": "查询",
@@ -557,17 +553,6 @@ const resources = {
     "salary.requestDate": "申请日期",
     "salary.financeComment": "财务意见",
     "salary.datePlaceholder": "YYYY-MM-DD",
-
-    "salary.templateVersion": "模板版本",
-    "salary.templateFile": "Excel 模板",
-    "salary.templateIntegrity": "制版校验",
-    "salary.templateIntegrityOk": "三件套一致",
-    "salary.templateCurrent": "当前",
-    "salary.templateEnabledAt": "启用时间",
-    "salary.signatureNoticeTitle": "签名维护在「系统管理 → 签名库」",
-    "salary.signatureNoticeBody":
-      "记录里的财务/总经理签名代码（如 FIN_XING_LANHUI）直接对应签名库中同名签名的最新有效版本，本模块不单独维护签名。签名需在签名库里勾选适用范围「工资预支单」才能取用。",
-    "salary.gotoSignatures": "前往签名库",
   },
   "en-US": {
     "nav.home": "Home",
@@ -1033,10 +1018,6 @@ const resources = {
     "salary.noOfficePill": "No Office required",
     "salary.noOfficeHint":
       "Official PDFs are produced with ReportLab + pypdf; the server does not need Microsoft Office.",
-    "salary.navLabel": "Salary advance views",
-    "salary.ledger": "Batches & Issuance",
-    "salary.maintenance": "Template & Signatures",
-
     "salary.periodPlaceholder": "Period YYYYMM",
     "salary.allBatchStatuses": "All batch statuses",
     "salary.query": "Search",
@@ -1151,17 +1132,6 @@ const resources = {
     "salary.requestDate": "Request date",
     "salary.financeComment": "Finance comment",
     "salary.datePlaceholder": "YYYY-MM-DD",
-
-    "salary.templateVersion": "Template version",
-    "salary.templateFile": "Excel template",
-    "salary.templateIntegrity": "Artwork check",
-    "salary.templateIntegrityOk": "Triple matches",
-    "salary.templateCurrent": "Current",
-    "salary.templateEnabledAt": "Enabled",
-    "salary.signatureNoticeTitle": "Signatures live in Administration → Signatures",
-    "salary.signatureNoticeBody":
-      "The finance and MD signature codes in each record (e.g. FIN_XING_LANHUI) resolve to the latest active signature of the same name. This module does not maintain signatures of its own; a signature must have Salary Advance ticked in its scope before it can be used.",
-    "salary.gotoSignatures": "Open signature library",
   },
 } as const;
 
