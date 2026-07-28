@@ -36,19 +36,27 @@ from app.modules.salary_advance.schemas import (
     SalaryAdvanceRecordResponse,
     SalaryAdvanceRecordUpdate,
     SalaryAdvanceTemplateResponse,
-    SignatureBindingCreate,
-    SignatureBindingResponse,
 )
 from app.modules.salary_advance.service import (
     BatchAggregate,
-    BindingAggregate,
+    SalaryAdvanceNotFoundError,
     SalaryAdvanceService,
 )
+
+
+async def require_module_enabled() -> None:
+    # 开关必须挡住整个模块，而不是只挡导入——否则关掉后仍能锁定、生成。
+    if not get_settings().salary_advance_enabled:
+        raise SalaryAdvanceNotFoundError("工资预支模块未启用")
+
 
 router = APIRouter(
     prefix="/v1/salary-advance",
     tags=["salary-advance"],
-    dependencies=[Depends(require_permission("salary_advance:read"))],
+    dependencies=[
+        Depends(require_module_enabled),
+        Depends(require_permission("salary_advance:read")),
+    ],
 )
 
 
@@ -91,17 +99,6 @@ def _batch_detail(aggregate: BatchAggregate) -> SalaryAdvanceBatchDetail:
             SalaryAdvanceRecordResponse.model_validate(record)
             for record in aggregate.records
         ],
-    )
-
-
-def _binding_response(aggregate: BindingAggregate) -> SignatureBindingResponse:
-    response = SignatureBindingResponse.model_validate(aggregate.binding)
-    return response.model_copy(
-        update={
-            "asset_name": aggregate.asset.name,
-            "asset_version": aggregate.asset.version,
-            "asset_sha256": aggregate.asset.sha256,
-        }
     )
 
 
@@ -165,6 +162,20 @@ async def get_batch(
     service: SalaryAdvanceServiceDependency,
 ) -> SalaryAdvanceBatchDetail:
     return _batch_detail(await service.get_batch(batch_id))
+
+
+@router.delete(
+    "/batches/{batch_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def delete_batch(
+    batch_id: uuid.UUID,
+    service: SalaryAdvanceServiceDependency,
+) -> Response:
+    """删除未锁定的批次。同期间+工号会跨批次查重，传错文件后必须能删掉重来。"""
+    await service.delete_batch(batch_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/records/{record_id}", response_model=SalaryAdvanceRecordResponse)
@@ -241,32 +252,6 @@ async def list_templates(
         SalaryAdvanceTemplateResponse.model_validate(template)
         for template in templates
     ]
-
-
-@router.get(
-    "/signature-bindings",
-    response_model=list[SignatureBindingResponse],
-)
-async def list_signature_bindings(
-    service: SalaryAdvanceServiceDependency,
-) -> list[SignatureBindingResponse]:
-    return [
-        _binding_response(binding)
-        for binding in await service.list_signature_bindings()
-    ]
-
-
-@router.post(
-    "/signature-bindings",
-    response_model=SignatureBindingResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_permission("salary_advance:template_manage"))],
-)
-async def create_signature_binding(
-    payload: SignatureBindingCreate,
-    service: SalaryAdvanceServiceDependency,
-) -> SignatureBindingResponse:
-    return _binding_response(await service.create_signature_binding(payload))
 
 
 @router.post(

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
-    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -50,46 +49,6 @@ class SalaryAdvanceTemplate(Base):
     signature_anchors_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     visible_sheet: Mapped[str] = mapped_column(String(80), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_by_name: Mapped[str] = mapped_column(String(160), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
-
-
-class SalaryAdvanceSignatureBinding(Base):
-    __tablename__ = "signature_bindings"
-    __table_args__ = (
-        UniqueConstraint(
-            "signature_code",
-            "version",
-            name="uq_salary_advance_signature_bindings_code_version",
-        ),
-        CheckConstraint("role IN ('finance', 'md')", name="role_allowed"),
-        CheckConstraint(
-            "scope_type IN ('company', 'period', 'employee', 'custom')",
-            name="scope_type_allowed",
-        ),
-        Index("ix_salary_advance_signature_bindings_active", "signature_code", "active"),
-        {"schema": "salary_advance"},
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    signature_code: Mapped[str] = mapped_column(String(80), nullable=False)
-    signature_asset_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(
-            "core.signature_assets.id",
-            name="fk_salary_advance_signature_bindings_asset_id_signature_assets",
-        ),
-        nullable=False,
-    )
-    role: Mapped[str] = mapped_column(String(20), nullable=False)
-    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    scope_type: Mapped[str] = mapped_column(String(20), nullable=False, default="company")
-    scope_value: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
-    valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
-    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_name: Mapped[str] = mapped_column(String(160), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

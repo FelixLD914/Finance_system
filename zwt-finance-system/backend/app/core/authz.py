@@ -25,10 +25,10 @@ Permission = Literal[
     # 所以这里不设 wht:void —— 不留没有端点对应的死权限点。
     "wht:approve",
     "wht:generate",
+    # 工资预支签名沿用共享签名库（signature:manage），不设独立维护权限。
     "salary_advance:read",
     "salary_advance:write",
     "salary_advance:generate",
-    "salary_advance:template_manage",
     "signature:manage",
     "user:manage",
 ]

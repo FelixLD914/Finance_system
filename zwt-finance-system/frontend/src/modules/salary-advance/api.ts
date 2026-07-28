@@ -6,8 +6,6 @@ import type {
   SalaryAdvanceJobDetail,
   SalaryAdvanceRecord,
   SalaryAdvanceTemplate,
-  SignatureBinding,
-  SignatureBindingInput,
 } from "./types";
 
 const request = apiRequest;
@@ -67,6 +65,12 @@ export function revalidateSalaryAdvanceBatch(
   );
 }
 
+export function deleteSalaryAdvanceBatch(batchId: string): Promise<void> {
+  return request<void>(`/v1/salary-advance/batches/${batchId}`, {
+    method: "DELETE",
+  });
+}
+
 export function lockSalaryAdvanceBatch(
   batchId: string,
 ): Promise<SalaryAdvanceBatch> {
@@ -113,19 +117,6 @@ export function retrySalaryAdvanceJob(jobId: string): Promise<SalaryAdvanceJob> 
 
 export function listSalaryAdvanceTemplates(): Promise<SalaryAdvanceTemplate[]> {
   return request<SalaryAdvanceTemplate[]>("/v1/salary-advance/templates");
-}
-
-export function listSignatureBindings(): Promise<SignatureBinding[]> {
-  return request<SignatureBinding[]>("/v1/salary-advance/signature-bindings");
-}
-
-export function createSignatureBinding(
-  input: SignatureBindingInput,
-): Promise<SignatureBinding> {
-  return request<SignatureBinding>("/v1/salary-advance/signature-bindings", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
 }
 
 async function download(path: string, fileName?: string): Promise<void> {

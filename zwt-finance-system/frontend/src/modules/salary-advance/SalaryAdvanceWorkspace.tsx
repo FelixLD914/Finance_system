@@ -3,6 +3,7 @@ import {
   CheckCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
   EyeOutlined,
@@ -10,7 +11,6 @@ import {
   FilePdfOutlined,
   FileProtectOutlined,
   LockOutlined,
-  PlusOutlined,
   ReloadOutlined,
   RetweetOutlined,
   SafetyCertificateOutlined,
@@ -44,7 +44,7 @@ import { listSignatures } from "../wht/api";
 import type { SignatureAsset } from "../wht/types";
 import {
   createSalaryAdvanceJob,
-  createSignatureBinding,
+  deleteSalaryAdvanceBatch,
   downloadJobArtifact,
   downloadSalaryAdvanceDocument,
   downloadValidationReport,
@@ -54,7 +54,6 @@ import {
   listSalaryAdvanceBatches,
   listSalaryAdvanceJobs,
   listSalaryAdvanceTemplates,
-  listSignatureBindings,
   lockSalaryAdvanceBatch,
   previewSalaryAdvanceRecord,
   retrySalaryAdvanceJob,
@@ -69,8 +68,6 @@ import type {
   SalaryAdvanceJobDetail,
   SalaryAdvanceRecord,
   SalaryAdvanceTemplate,
-  SignatureBinding,
-  SignatureBindingInput,
   ValidationStatus,
 } from "./types";
 
@@ -327,7 +324,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   );
   const [jobDetail, setJobDetail] = useState<SalaryAdvanceJobDetail | null>(null);
   const [templates, setTemplates] = useState<SalaryAdvanceTemplate[]>([]);
-  const [bindings, setBindings] = useState<SignatureBinding[]>([]);
   const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -335,11 +331,9 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const [statusFilter, setStatusFilter] = useState<string>();
   const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [bindingOpen, setBindingOpen] = useState(false);
   const [importFiles, setImportFiles] = useState<UploadFile[]>([]);
   const [importForm] = Form.useForm();
   const [editForm] = Form.useForm();
-  const [bindingForm] = Form.useForm();
 
   const loadBatch = useCallback(async (batchId: string) => {
     const [detail, jobs] = await Promise.all([
@@ -380,13 +374,11 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const loadMaintenance = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextTemplates, nextBindings, nextSignatures] = await Promise.all([
+      const [nextTemplates, nextSignatures] = await Promise.all([
         listSalaryAdvanceTemplates(),
-        listSignatureBindings(),
         listSignatures(false),
       ]);
       setTemplates(nextTemplates);
-      setBindings(nextBindings);
       setSignatures(nextSignatures);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -540,20 +532,31 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     }
   };
 
-  const submitBinding = async () => {
-    try {
-      const values = await bindingForm.validateFields();
-      setBusy(true);
-      await createSignatureBinding(values as SignatureBindingInput);
-      message.success("签名业务绑定已创建，新版本立即生效");
-      setBindingOpen(false);
-      bindingForm.resetFields();
-      await loadMaintenance();
-    } catch (error) {
-      if (error instanceof Error) message.error(error.message);
-    } finally {
-      setBusy(false);
-    }
+  const removeBatch = () => {
+    if (!selected) return;
+    modal.confirm({
+      title: "删除该批次？",
+      content:
+        "删除后批次内所有记录一并移除，操作会留痕。源文件保留在服务器上。" +
+        "已锁定或已生成的批次不能删除。",
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setBusy(true);
+        try {
+          await deleteSalaryAdvanceBatch(selected.batch.id);
+          message.success("批次已删除");
+          setSelected(null);
+          setSelectedRecord(null);
+          setJobDetail(null);
+          await reload();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : String(error));
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   };
 
   const recordColumns: ColumnsType<SalaryAdvanceRecord> = [
@@ -650,44 +653,35 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     },
   ];
 
-  const bindingColumns: ColumnsType<SignatureBinding> = [
+  // 工资预支不再有独立的绑定表：签名代码 = 共享签名库里的名称。
+  // 这里只读展示签名库现状，维护动作统一走 系统管理 → 签名库。
+  const signatureColumns: ColumnsType<SignatureAsset> = [
     {
-      title: "业务代码",
-      dataIndex: "signatureCode",
-      width: 210,
-      render: (value: string, binding) => (
+      title: "签名代码（签名库名称）",
+      dataIndex: "name",
+      width: 260,
+      render: (value: string, signature) => (
         <div className="salary-batch-name">
           <strong>{value}</strong>
-          <span>绑定 v{binding.version}</span>
+          <span>v{signature.version} · {signature.originalFileName}</span>
         </div>
       ),
     },
     {
-      title: "角色",
-      dataIndex: "role",
-      width: 100,
-      render: (value: SignatureBinding["role"]) =>
-        value === "finance" ? "财务" : "总经理",
-    },
-    {
-      title: "签名资产",
-      key: "asset",
-      render: (_, binding) => `${binding.assetName} · v${binding.assetVersion}`,
-    },
-    {
-      title: "范围",
-      key: "scope",
-      width: 180,
-      render: (_, binding) =>
-        `${binding.scopeType}${binding.scopeValue ? ` · ${binding.scopeValue}` : ""}`,
-    },
-    {
-      title: "状态",
-      dataIndex: "active",
-      width: 90,
-      render: (value: boolean) => (
-        <Tag color={value ? "green" : "default"}>{value ? "生效" : "历史"}</Tag>
+      title: "适用范围",
+      dataIndex: "usage",
+      width: 130,
+      render: (value: SignatureAsset["usage"]) => (
+        <Tag color={value === "both" ? "purple" : value === "tax_inv" ? "blue" : "cyan"}>
+          {value}
+        </Tag>
       ),
+    },
+    {
+      title: "SHA-256",
+      dataIndex: "sha256",
+      ellipsis: true,
+      render: (value: string) => <span className="hash-value">{value}</span>,
     },
   ];
 
@@ -762,6 +756,19 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
                 校验报告
               </Button>
               <Button
+                danger
+                disabled={
+                  !["validating", "validation_failed", "ready"].includes(
+                    selected.batch.status,
+                  )
+                }
+                icon={<DeleteOutlined />}
+                loading={busy}
+                onClick={removeBatch}
+              >
+                删除批次
+              </Button>
+              <Button
                 disabled={!["ready", "validation_failed"].includes(selected.batch.status)}
                 icon={<RetweetOutlined />}
                 loading={busy}
@@ -782,7 +789,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
                   modal.confirm({
                     title: "锁定工资预支批次？",
                     content:
-                      "锁定后记录不可再编辑；正式文件会使用当前模板与签名绑定快照。",
+                      "锁定后记录不可再编辑；正式文件按签名库当前有效版本生成并留存快照。",
                     okText: "确认锁定",
                     onOk: () =>
                       run(
@@ -975,20 +982,21 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       <section className="salary-table-card">
         <div className="salary-section-heading">
           <div>
-            <span>SIGNATURE BINDINGS</span>
-            <strong>签名业务代码绑定</strong>
+            <span>SHARED SIGNATURE LIBRARY</span>
+            <strong>共享签名库（只读）</strong>
           </div>
-          <Button
-            icon={<PlusOutlined />}
-            type="primary"
-            onClick={() => setBindingOpen(true)}
-          >
-            新建绑定版本
-          </Button>
         </div>
-        <Table<SignatureBinding>
-          columns={bindingColumns}
-          dataSource={bindings}
+        <Alert
+          className="salary-modal-alert"
+          showIcon
+          type="info"
+          message="签名代码即签名库中的名称"
+          description="记录里的财务/总经理签名代码（如 FIN_XING_LANHUI）直接对应签名库里同名资产的最新有效版本。上传、换版、停用签名请到 系统管理 → 签名库（仅管理员）。"
+        />
+        <Table<SignatureAsset>
+          columns={signatureColumns}
+          dataSource={signatures}
+          loading={loading}
           pagination={{ pageSize: 10, hideOnSinglePage: true }}
           rowKey="id"
           size="small"
@@ -1029,7 +1037,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           type="button"
           onClick={() => setView("maintenance")}
         >
-          <SettingOutlined /> 模板与签名绑定
+          <SettingOutlined /> 模板与签名
         </button>
       </nav>
 
@@ -1186,82 +1194,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         </Form>
       </Modal>
 
-      <Modal
-        destroyOnHidden
-        forceRender
-        open={bindingOpen}
-        title="新建签名业务绑定版本"
-        okText="创建并启用"
-        cancelText="取消"
-        confirmLoading={busy}
-        onCancel={() => setBindingOpen(false)}
-        onOk={() => void submitBinding()}
-      >
-        <Alert
-          className="salary-modal-alert"
-          showIcon
-          type="warning"
-          message="同一业务代码的旧绑定会保留为历史版本并停用"
-        />
-        <Form
-          form={bindingForm}
-          initialValues={{ scopeType: "company" }}
-          layout="vertical"
-        >
-          <Form.Item
-            label="业务签名代码"
-            name="signatureCode"
-            rules={[{ required: true }]}
-          >
-            <Input placeholder="FIN_XING_LANHUI" />
-          </Form.Item>
-          <Form.Item label="角色" name="role" rules={[{ required: true }]}>
-            <Select
-              options={[
-                { value: "finance", label: "财务" },
-                { value: "md", label: "总经理" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item
-            label="签名资产"
-            name="signatureAssetId"
-            rules={[{ required: true }]}
-          >
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={signatures.map((signature) => ({
-                value: signature.id,
-                label: `${signature.name} · v${signature.version}`,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item label="适用范围" name="scopeType" rules={[{ required: true }]}>
-            <Select
-              options={[
-                { value: "company", label: "全公司" },
-                { value: "period", label: "指定期间" },
-                { value: "employee", label: "指定员工" },
-                { value: "custom", label: "自定义" },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate>
-            {({ getFieldValue }) =>
-              getFieldValue("scopeType") === "company" ? null : (
-                <Form.Item
-                  label="范围值"
-                  name="scopeValue"
-                  rules={[{ required: true }]}
-                >
-                  <Input placeholder="期间 YYYYMM 或工号" />
-                </Form.Item>
-              )
-            }
-          </Form.Item>
-        </Form>
-      </Modal>
     </section>
   );
 }

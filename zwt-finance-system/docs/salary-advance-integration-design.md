@@ -1,12 +1,35 @@
 # 工资预支单模块无损并入设计
 
-> 状态：实施前设计基线
+> 状态：实施前设计基线（部分章节已被落地实现取代，见下方「落地差异」）
 > 日期：2026-07-28
 > 集成分支：`codex/salary-advance-integration`
 > 当前系统基线：`138ca43`
 > 来源仓库：`FelixLD914/Salary-Advance-Form`
 > 来源基线：`8bfdf3b73532ce35db590913e32969f0af08ead3`
 > 服务器约束：生产服务器不安装或调用 Microsoft Office / LibreOffice
+
+## 0. 落地差异（2026-07-28 审计合入时确定，以代码为准）
+
+本文写作时系统基线是 `138ca43`；实际合入发生在签名跨模块共用（`e8e6db4`）
+落地之后，以下设计点已按现行系统收敛，本文相关章节仅作历史参考：
+
+1. **不设 `salary_advance.signature_bindings` 绑定表。** 记录里的签名代码
+   （`FIN_XING_LANHUI` 等）直接解析共享签名库 `core.signature_assets` 中
+   **同名资产的最新 active 版本**——换签名、升版本、停用全部沿用签名库自身
+   的语义与界面（系统管理 → 签名库），不再有第二套维护入口。凭证快照仍
+   完整记录 asset id/name/version/sha256。
+2. **不设 `salary_advance:template_manage` 权限点。** 签名维护统一走
+   `signature:manage`（仅 admin，见 test_authz.py 策略锁定）。
+3. **迁移编号为 `20260728_0010`**（原设计的 0007 已被 main 的汇率类型迁移
+   占用）。
+4. **签名人不允许推断兜底。** 原实现里「期间月份结尾 02 则默认龚尧文」的
+   规则已删除：签名代码可从签字人姓名做确定性映射，无法确定时报
+   `SIGNER_UNKNOWN` 校验错误。
+5. **补充 `DELETE /batches/{id}`（仅未锁定批次）。** 同期间+工号跨批次查重
+   意味着传错文件必须能删掉重来，否则该期间被永久毒化。
+6. **功能开关在 router 依赖层统一拦截**，而不是只挡导入。
+部署时需在签名库中把现有签名资产命名（或上传）为记录中使用的签名代码：
+`FIN_XING_LANHUI`、`MD_GONG_YAOWEN`、`MD_ZHU_FAJIAN`。
 
 ## 1. 结论
 

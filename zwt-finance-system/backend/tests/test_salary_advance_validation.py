@@ -109,5 +109,70 @@ def test_invalid_signature_mode_and_unbound_codes_are_blocking() -> None:
     assert normalized["applicant_signature_mode"] == "Handwritten"
 
 
+def test_md_signer_is_derived_from_display_name_not_guessed() -> None:
+    """签名代码可从签字人姓名确定性映射；无法确定时必须报错而不是猜。"""
+    base = {
+        "period": "202602",
+        "emp_id": "E003",
+        "first_name": "A",
+        "surname": "B",
+        "department": "Finance",
+        "position": "Officer",
+        "start_date": "2024-01-01",
+        "request_date": "2026-02-01",
+        "advance_amount": "1000",
+        "monthly_deduction": "100",
+        "approval_status": "Approve",
+    }
+
+    _, _, _, normalized = validate_and_normalize_record(
+        {**base, "md_display_name": "龚尧文", "finance_display_name": "邢兰慧"},
+        batch_period="202602",
+        active_signature_codes={"FIN_XING_LANHUI", "MD_GONG_YAOWEN"},
+    )
+    assert normalized["md_signature_code"] == "MD_GONG_YAOWEN"
+    assert normalized["finance_signature_code"] == "FIN_XING_LANHUI"
+
+    # 总经理签字人缺失/不认识：不允许按期间月份之类的旁证猜签名人。
+    status, errors, _, _ = validate_and_normalize_record(
+        base,
+        batch_period="202602",
+        active_signature_codes={"FIN_XING_LANHUI"},
+    )
+    assert status == "invalid"
+    assert any(
+        issue["field"] == "md_signature_code" and issue["code"] == "SIGNER_UNKNOWN"
+        for issue in errors
+    )
+
+
+def test_signature_codes_resolve_against_shared_library_names() -> None:
+    """active_signature_codes 现在就是共享签名库里 active 资产的名称集合。"""
+    status, errors, _, _ = validate_and_normalize_record(
+        {
+            "period": "202607",
+            "emp_id": "E004",
+            "first_name": "A",
+            "surname": "B",
+            "department": "Finance",
+            "position": "Officer",
+            "start_date": "2024-01-01",
+            "request_date": "2026-07-01",
+            "advance_amount": "1000",
+            "monthly_deduction": "100",
+            "approval_status": "Approve",
+            "finance_signature_code": "fin_xing_lanhui",
+            "md_signature_code": "MD_NOT_IN_LIBRARY",
+        },
+        batch_period="202607",
+        active_signature_codes={"FIN_XING_LANHUI"},
+    )
+    assert status == "invalid"
+    codes = {(issue["field"], issue["code"]) for issue in errors}
+    # 小写输入被规范成大写后命中签名库；不在库里的必须拦下。
+    assert ("finance_signature_code", "SIGNATURE_NOT_FOUND") not in codes
+    assert ("md_signature_code", "SIGNATURE_NOT_FOUND") in codes
+
+
 def test_excel_formula_prefix_is_escaped() -> None:
     assert safe_excel_text("=HYPERLINK(\"https://example.invalid\")").startswith("'=")

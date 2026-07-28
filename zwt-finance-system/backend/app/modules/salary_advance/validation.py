@@ -133,22 +133,55 @@ def _issue(field: str, code: str, message: str) -> dict[str, str]:
     return {"field": field, "code": code, "message": message}
 
 
-def _default_signature_codes(data: dict[str, Any], period: str) -> tuple[str, str]:
-    finance_code = normalize_text(data.get("finance_signature_code"))
-    finance_name = normalize_text(data.get("finance_display_name")).upper()
-    if not finance_code and ("邢兰慧" in finance_name or "LANHUI" in finance_name):
-        finance_code = "FIN_XING_LANHUI"
-    if not finance_code:
-        finance_code = "FIN_XING_LANHUI"
+def _resolve_signer_codes(
+    data: dict[str, Any],
+    errors: list[dict[str, str]],
+    warnings: list[dict[str, str]],
+) -> tuple[str, str]:
+    """从签名代码或签字人姓名确定财务/总经理签名代码。
 
-    md_code = normalize_text(data.get("md_signature_code"))
-    md_name = normalize_text(data.get("md_display_name")).upper()
-    if not md_code and ("龚尧文" in md_name or "YAOWEN" in md_name):
-        md_code = "MD_GONG_YAOWEN"
-    if not md_code and ("朱发坚" in md_name or "FAJIAN" in md_name):
-        md_code = "MD_ZHU_FAJIAN"
+    只做确定性的姓名→代码映射，绝不按期间、月份等无关字段猜签名人——
+    正式单据上盖错签名比导入失败严重得多。
+    """
+    finance_code = normalize_text(data.get("finance_signature_code")).upper()
+    finance_name = normalize_text(data.get("finance_display_name"))
+    if not finance_code:
+        if not finance_name or "邢兰慧" in finance_name or "LANHUI" in finance_name.upper():
+            # 本业务的财务签字人固定为邢兰慧（与旧工具口径一致），
+            # 留空时默认之，但要在校验报告里可见。
+            finance_code = "FIN_XING_LANHUI"
+            warnings.append(
+                _issue(
+                    "finance_signature_code",
+                    "DEFAULTED",
+                    "财务签名代码已按默认签字人邢兰慧填入",
+                )
+            )
+        else:
+            errors.append(
+                _issue(
+                    "finance_signature_code",
+                    "SIGNER_UNKNOWN",
+                    f"无法从财务签字人「{finance_name}」确定签名代码，请填写签名代码",
+                )
+            )
+
+    md_code = normalize_text(data.get("md_signature_code")).upper()
+    md_name = normalize_text(data.get("md_display_name"))
     if not md_code:
-        md_code = "MD_GONG_YAOWEN" if period.endswith("02") else "MD_ZHU_FAJIAN"
+        md_upper = md_name.upper()
+        if "龚尧文" in md_name or "YAOWEN" in md_upper:
+            md_code = "MD_GONG_YAOWEN"
+        elif "朱发坚" in md_name or "FAJIAN" in md_upper:
+            md_code = "MD_ZHU_FAJIAN"
+        else:
+            errors.append(
+                _issue(
+                    "md_signature_code",
+                    "SIGNER_UNKNOWN",
+                    "无法确定总经理签名代码，请填写总经理签字人或签名代码",
+                )
+            )
     return finance_code, md_code
 
 
@@ -271,7 +304,7 @@ def validate_and_normalize_record(
         )
     normalized["approval_status"] = approval_status
 
-    finance_code, md_code = _default_signature_codes(raw, period)
+    finance_code, md_code = _resolve_signer_codes(raw, errors, warnings)
     finance_name = normalize_text(raw.get("finance_display_name"))
     md_name = normalize_text(raw.get("md_display_name"))
     normalized["finance_display_name"] = finance_name or "邢兰慧"
@@ -279,8 +312,10 @@ def validate_and_normalize_record(
         normalized["md_display_name"] = md_name
     elif md_code == "MD_GONG_YAOWEN":
         normalized["md_display_name"] = "龚尧文"
-    else:
+    elif md_code == "MD_ZHU_FAJIAN":
         normalized["md_display_name"] = "朱发坚"
+    else:
+        normalized["md_display_name"] = ""
     normalized["finance_signature_code"] = finance_code
     normalized["md_signature_code"] = md_code
 
@@ -289,12 +324,13 @@ def validate_and_normalize_record(
             ("finance_signature_code", finance_code),
             ("md_signature_code", md_code),
         ):
-            if code not in active_signature_codes:
+            # 代码本身缺失时上面已报 SIGNER_UNKNOWN，不再叠加一条。
+            if code and code not in active_signature_codes:
                 errors.append(
                     _issue(
                         field,
                         "SIGNATURE_NOT_FOUND",
-                        f"签名代码 {code} 未配置或未启用",
+                        f"签名库中没有名为 {code} 的有效签名，请在系统管理 → 签名库维护",
                     )
                 )
 

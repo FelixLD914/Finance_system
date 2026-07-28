@@ -3,12 +3,12 @@ from __future__ import annotations
 import hashlib
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from anyio import to_thread
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -24,13 +24,9 @@ from app.modules.salary_advance.models import (
     SalaryAdvanceEvent,
     SalaryAdvanceImportBatch,
     SalaryAdvanceRecord,
-    SalaryAdvanceSignatureBinding,
     SalaryAdvanceTemplate,
 )
-from app.modules.salary_advance.schemas import (
-    SalaryAdvanceRecordUpdate,
-    SignatureBindingCreate,
-)
+from app.modules.salary_advance.schemas import SalaryAdvanceRecordUpdate
 from app.modules.salary_advance.validation import (
     data_fingerprint,
     validate_and_normalize_record,
@@ -57,12 +53,6 @@ class SalaryAdvanceStateError(SalaryAdvanceServiceError):
 class BatchAggregate:
     batch: SalaryAdvanceImportBatch
     records: list[SalaryAdvanceRecord]
-
-
-@dataclass(frozen=True)
-class BindingAggregate:
-    binding: SalaryAdvanceSignatureBinding
-    asset: SignatureAsset
 
 
 class SalaryAdvanceService:
@@ -120,7 +110,6 @@ class SalaryAdvanceService:
         file_name: str,
         period: str,
     ) -> BatchAggregate:
-        self._require_enabled()
         if not file_name.lower().endswith(".xlsx"):
             raise SalaryAdvanceStateError("只接受 .xlsx 文件")
         if len(content) > self.settings.max_file_mib * 1024 * 1024:
@@ -437,108 +426,47 @@ class SalaryAdvanceService:
             ).all()
         )
 
-    async def list_signature_bindings(self) -> list[BindingAggregate]:
-        rows = (
-            await self.session.execute(
-                select(SalaryAdvanceSignatureBinding, SignatureAsset)
-                .join(
-                    SignatureAsset,
-                    SignatureAsset.id
-                    == SalaryAdvanceSignatureBinding.signature_asset_id,
-                )
-                .order_by(
-                    SalaryAdvanceSignatureBinding.signature_code,
-                    SalaryAdvanceSignatureBinding.version.desc(),
-                )
-            )
-        ).all()
-        return [BindingAggregate(binding=binding, asset=asset) for binding, asset in rows]
-
-    async def create_signature_binding(
-        self,
-        payload: SignatureBindingCreate,
-    ) -> BindingAggregate:
-        asset = await self.session.scalar(
-            select(SignatureAsset).where(SignatureAsset.id == payload.signature_asset_id)
-        )
-        if asset is None:
-            raise SalaryAdvanceNotFoundError("签名资产不存在")
-        if asset.status != "active":
-            raise SalaryAdvanceStateError("只能绑定已启用的签名资产")
-        latest = (
-            await self.session.scalar(
-                select(func.max(SalaryAdvanceSignatureBinding.version)).where(
-                    SalaryAdvanceSignatureBinding.signature_code
-                    == payload.signature_code
-                )
-            )
-            or 0
-        )
-        previous = list(
-            (
+    async def active_signature_codes(self) -> set[str]:
+        # 签名代码就是共享签名库（core.signature_assets）里的名称。
+        # 维护入口统一在系统管理 → 签名库，本模块只做只读解析。
+        return {
+            str(name).strip().upper()
+            for name in (
                 await self.session.scalars(
-                    select(SalaryAdvanceSignatureBinding).where(
-                        SalaryAdvanceSignatureBinding.signature_code
-                        == payload.signature_code,
-                        SalaryAdvanceSignatureBinding.active.is_(True),
+                    select(SignatureAsset.name).where(
+                        SignatureAsset.status == "active"
                     )
                 )
             ).all()
+        }
+
+    async def delete_batch(self, batch_id: uuid.UUID) -> None:
+        batch = await self._load_batch(batch_id, for_update=True)
+        # 已锁定/已生成的批次有正式凭证在引用，不允许删；
+        # 未锁定的坏批次必须能删，否则同期间+工号的查重会永远挡住修正后的重新导入。
+        if batch.status not in {"validating", "validation_failed", "ready"}:
+            raise SalaryAdvanceStateError("只有未锁定的批次可以删除")
+        await self.session.execute(
+            delete(SalaryAdvanceRecord).where(
+                SalaryAdvanceRecord.batch_id == batch.id
+            )
         )
-        for binding in previous:
-            binding.active = False
-        binding_id = uuid.uuid4()
-        binding = SalaryAdvanceSignatureBinding(
-            id=binding_id,
-            **payload.model_dump(),
-            version=latest + 1,
-            active=True,
-            created_by_name=self.actor_name,
-        )
-        self.session.add(binding)
         self.session.add(
             self._event(
-                "signature_binding",
-                binding_id,
-                "created",
-                after_data={
-                    "signatureCode": binding.signature_code,
-                    "assetId": str(asset.id),
-                    "role": binding.role,
-                    "version": binding.version,
+                "batch",
+                batch.id,
+                "deleted",
+                before_data={
+                    "batchNo": batch.batch_no,
+                    "period": batch.period,
+                    "sourceSha256": batch.source_sha256,
+                    "totalRows": batch.total_rows,
                 },
             )
         )
+        # 源文件留在磁盘上作导入痕迹，事件里记了 sha256 可对回去。
+        await self.session.delete(batch)
         await self.session.commit()
-        await self.session.refresh(binding)
-        return BindingAggregate(binding=binding, asset=asset)
-
-    async def active_signature_codes(self) -> set[str]:
-        today = date.today()
-        return set(
-            (
-                await self.session.scalars(
-                    select(SalaryAdvanceSignatureBinding.signature_code)
-                    .join(
-                        SignatureAsset,
-                        SignatureAsset.id
-                        == SalaryAdvanceSignatureBinding.signature_asset_id,
-                    )
-                    .where(
-                        SalaryAdvanceSignatureBinding.active.is_(True),
-                        SignatureAsset.status == "active",
-                        (
-                            (SalaryAdvanceSignatureBinding.valid_from.is_(None))
-                            | (SalaryAdvanceSignatureBinding.valid_from <= today)
-                        ),
-                        (
-                            (SalaryAdvanceSignatureBinding.valid_to.is_(None))
-                            | (SalaryAdvanceSignatureBinding.valid_to >= today)
-                        ),
-                    )
-                )
-            ).all()
-        )
 
     async def _recount_batch(self, batch: SalaryAdvanceImportBatch) -> None:
         rows = (
@@ -622,7 +550,3 @@ class SalaryAdvanceService:
         return "".join(
             char for char in name if char not in '\\/:*?"<>|'
         )[:240] or "upload.xlsx"
-
-    def _require_enabled(self) -> None:
-        if not self.settings.salary_advance_enabled:
-            raise SalaryAdvanceNotFoundError("工资预支模块未启用")

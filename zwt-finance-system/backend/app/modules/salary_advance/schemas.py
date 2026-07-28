@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 
@@ -80,43 +80,6 @@ class SalaryAdvanceTemplateResponse(ApiSchema):
     pdf_underlay_sha256: str
     pdf_layout_version: str
     visible_sheet: str
-    active: bool
-    created_by_name: str
-    created_at: datetime
-
-
-class SignatureBindingCreate(ApiSchema):
-    signature_code: str = Field(min_length=2, max_length=80)
-    signature_asset_id: uuid.UUID
-    role: Literal["finance", "md"]
-    scope_type: Literal["company", "period", "employee", "custom"] = "company"
-    scope_value: str | None = Field(default=None, max_length=160)
-    valid_from: date | None = None
-    valid_to: date | None = None
-
-    @model_validator(mode="after")
-    def validate_dates_and_scope(self) -> SignatureBindingCreate:
-        self.signature_code = self.signature_code.strip().upper()
-        if self.valid_from and self.valid_to and self.valid_to < self.valid_from:
-            raise ValueError("validTo must not be before validFrom")
-        if self.scope_type != "company" and not (self.scope_value or "").strip():
-            raise ValueError("scopeValue is required for non-company scopes")
-        return self
-
-
-class SignatureBindingResponse(ApiSchema):
-    id: uuid.UUID
-    signature_code: str
-    signature_asset_id: uuid.UUID
-    asset_name: str
-    asset_version: int
-    asset_sha256: str
-    role: Literal["finance", "md"]
-    version: int
-    scope_type: str
-    scope_value: str | None
-    valid_from: date | None
-    valid_to: date | None
     active: bool
     created_by_name: str
     created_at: datetime

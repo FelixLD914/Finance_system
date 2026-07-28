@@ -56,9 +56,9 @@ MUTATING_ENDPOINTS = [
         "salary_advance:generate",
     ),
     (
-        "post",
-        "/api/v1/salary-advance/signature-bindings",
-        "salary_advance:template_manage",
+        "delete",
+        f"/api/v1/salary-advance/batches/{FAKE_ID}",
+        "salary_advance:write",
     ),
 ]
 
@@ -71,7 +71,6 @@ READ_ENDPOINTS = [
     "/api/v1/wht/number-preview?period=2026-06",
     "/api/v1/salary-advance/batches",
     "/api/v1/salary-advance/templates",
-    "/api/v1/salary-advance/signature-bindings",
 ]
 
 
@@ -84,7 +83,8 @@ def test_read_endpoints_reject_anonymous(anonymous_client, path: str) -> None:  
 def test_mutating_endpoints_reject_anonymous(
     anonymous_client, method: str, path: str, _permission: str
 ) -> None:  # noqa: ANN001
-    response = getattr(anonymous_client, method)(path, json={})
+    # 统一走 request()：httpx 的 delete() 不接受 json 参数。
+    response = anonymous_client.request(method.upper(), path, json={})
 
     assert response.status_code == 401
 
@@ -157,7 +157,8 @@ def test_mutating_endpoints_reject_role_without_permission(
         )
     )
 
-    response = getattr(client, method)(path, json={})
+    # 统一走 request()：httpx 的 delete() 不接受 json 参数。
+    response = client.request(method.upper(), path, json={})
 
     assert response.status_code == 403, f"{method.upper()} {path} 未强制 {permission}"
 

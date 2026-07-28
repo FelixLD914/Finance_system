@@ -101,7 +101,9 @@ def test_confirmed_signature_management_is_admin_only() -> None:
     """
     assert _roles_with("signature:manage") == {"admin"}
     assert not role_has("approver", "signature:manage")
-    assert _roles_with("salary_advance:template_manage") == {"admin"}
+    # 工资预支不设独立签名维护权限：签名代码直接解析共享签名库，
+    # 维护动作全部走 signature:manage。
+    assert "salary_advance:template_manage" not in ALL_PERMISSIONS
 
 
 def test_principal_require_raises_for_missing_permission() -> None:

@@ -70,34 +70,6 @@ export interface SalaryAdvanceTemplate {
   createdAt: string;
 }
 
-export interface SignatureBinding {
-  id: string;
-  signatureCode: string;
-  signatureAssetId: string;
-  assetName: string;
-  assetVersion: number;
-  assetSha256: string;
-  role: "finance" | "md";
-  version: number;
-  scopeType: "company" | "period" | "employee" | "custom";
-  scopeValue: string | null;
-  validFrom: string | null;
-  validTo: string | null;
-  active: boolean;
-  createdByName: string;
-  createdAt: string;
-}
-
-export interface SignatureBindingInput {
-  signatureCode: string;
-  signatureAssetId: string;
-  role: "finance" | "md";
-  scopeType: "company" | "period" | "employee" | "custom";
-  scopeValue?: string | null;
-  validFrom?: string | null;
-  validTo?: string | null;
-}
-
 export interface SalaryAdvanceDocument {
   id: string;
   jobId: string;

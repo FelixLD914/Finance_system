@@ -5,7 +5,7 @@ import json
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from functools import partial
 from io import BytesIO
 from pathlib import Path
@@ -33,7 +33,6 @@ from app.modules.salary_advance.models import (
     SalaryAdvanceGenerationJob,
     SalaryAdvanceImportBatch,
     SalaryAdvanceRecord,
-    SalaryAdvanceSignatureBinding,
     SalaryAdvanceTemplate,
 )
 from app.modules.salary_advance.service import (
@@ -51,15 +50,11 @@ class JobAggregate:
 
 @dataclass(frozen=True)
 class ResolvedSignature:
-    binding: SalaryAdvanceSignatureBinding
     asset: SignatureAsset
     path: Path
 
     def version_snapshot(self) -> dict[str, str | int]:
         return {
-            "bindingId": str(self.binding.id),
-            "bindingVersion": self.binding.version,
-            "signatureCode": self.binding.signature_code,
             "assetId": str(self.asset.id),
             "assetName": self.asset.name,
             "assetVersion": self.asset.version,
@@ -124,12 +119,20 @@ class SalaryAdvanceDocumentService:
             )
             if source_job is None:
                 raise SalaryAdvanceNotFoundError("原生成任务不存在")
+            # 只挑当前仍是 failed 的记录：某记录在更晚的重试里已成功的话，
+            # 它还留在旧任务的失败文档清单里，不能再被拉回来重复生成。
+            failed_document_ids = select(
+                SalaryAdvanceGeneratedDocument.record_id
+            ).where(
+                SalaryAdvanceGeneratedDocument.job_id == source_job.id,
+                SalaryAdvanceGeneratedDocument.status == "failed",
+            )
             target_ids = list(
                 (
                     await self.session.scalars(
-                        select(SalaryAdvanceGeneratedDocument.record_id).where(
-                            SalaryAdvanceGeneratedDocument.job_id == source_job.id,
-                            SalaryAdvanceGeneratedDocument.status == "failed",
+                        select(SalaryAdvanceRecord.id).where(
+                            SalaryAdvanceRecord.id.in_(failed_document_ids),
+                            SalaryAdvanceRecord.generation_status == "failed",
                         )
                     )
                 ).all()
@@ -431,53 +434,25 @@ class SalaryAdvanceDocumentService:
         code = str(record.normalized_data.get(code_key) or "").strip().upper()
         if not code:
             raise SalaryAdvanceStateError(f"记录缺少 {role} 签名代码")
-        today = date.today()
-        rows = (
-            await self.session.execute(
-                select(SalaryAdvanceSignatureBinding, SignatureAsset)
-                .join(
-                    SignatureAsset,
-                    SignatureAsset.id
-                    == SalaryAdvanceSignatureBinding.signature_asset_id,
-                )
-                .where(
-                    SalaryAdvanceSignatureBinding.signature_code == code,
-                    SalaryAdvanceSignatureBinding.role == role,
-                    SalaryAdvanceSignatureBinding.active.is_(True),
-                    SignatureAsset.status == "active",
-                    (
-                        SalaryAdvanceSignatureBinding.valid_from.is_(None)
-                        | (SalaryAdvanceSignatureBinding.valid_from <= today)
-                    ),
-                    (
-                        SalaryAdvanceSignatureBinding.valid_to.is_(None)
-                        | (SalaryAdvanceSignatureBinding.valid_to >= today)
-                    ),
-                )
-                .order_by(SalaryAdvanceSignatureBinding.version.desc())
+        # 签名代码 = 共享签名库里的名称；同名重传会自动升版本，
+        # 这里取最新的 active 版本，与签名库自身的版本语义一致。
+        asset = await self.session.scalar(
+            select(SignatureAsset)
+            .where(
+                func.upper(SignatureAsset.name) == code,
+                SignatureAsset.status == "active",
             )
-        ).all()
-        for binding, asset in rows:
-            if not self._binding_matches(binding, record):
-                continue
-            path = self._storage_path(asset.storage_key)
-            if not path.is_file():
-                raise SalaryAdvanceStateError(f"签名资产文件不存在：{code}")
-            return ResolvedSignature(binding=binding, asset=asset, path=path)
-        raise SalaryAdvanceStateError(f"没有适用于当前记录的有效签名绑定：{code}")
-
-    @staticmethod
-    def _binding_matches(
-        binding: SalaryAdvanceSignatureBinding,
-        record: SalaryAdvanceRecord,
-    ) -> bool:
-        if binding.scope_type == "company":
-            return True
-        if binding.scope_type == "period":
-            return binding.scope_value == record.period
-        if binding.scope_type == "employee":
-            return binding.scope_value == record.emp_id
-        return binding.scope_value in {record.period, record.emp_id}
+            .order_by(SignatureAsset.version.desc())
+            .limit(1)
+        )
+        if asset is None:
+            raise SalaryAdvanceStateError(
+                f"签名库中没有名为 {code} 的有效签名，请在系统管理 → 签名库维护"
+            )
+        path = self._storage_path(asset.storage_key)
+        if not path.is_file():
+            raise SalaryAdvanceStateError(f"签名资产文件不存在：{code}")
+        return ResolvedSignature(asset=asset, path=path)
 
     def _storage_path(self, storage_key: str) -> Path:
         root = self.settings.attachment_root.resolve()
@@ -567,14 +542,9 @@ async def run_salary_advance_job(job_id: uuid.UUID) -> None:
             await session.commit()
             return
 
-        previous_job_ids = select(SalaryAdvanceGenerationJob.id).where(
-            SalaryAdvanceGenerationJob.batch_id == batch.id,
-            SalaryAdvanceGenerationJob.id != job.id,
-        )
-        retry_record_ids = select(SalaryAdvanceGeneratedDocument.record_id).where(
-            SalaryAdvanceGeneratedDocument.job_id.in_(previous_job_ids),
-            SalaryAdvanceGeneratedDocument.status == "failed",
-        )
+        # create_job 已把本任务的目标记录精确重置为 pending，这里只认 pending。
+        # 不能再联历史任务的失败文档来兜底：已在后续任务成功的记录仍留在旧任务的
+        # 失败清单里，按那个口径会被重复生成。
         if batch.status == "generating":
             records = list(
                 (
@@ -583,10 +553,7 @@ async def run_salary_advance_job(job_id: uuid.UUID) -> None:
                         .where(
                             SalaryAdvanceRecord.batch_id == batch.id,
                             SalaryAdvanceRecord.validation_status != "invalid",
-                            (
-                                (SalaryAdvanceRecord.generation_status == "pending")
-                                | SalaryAdvanceRecord.id.in_(retry_record_ids)
-                            ),
+                            SalaryAdvanceRecord.generation_status == "pending",
                         )
                         .order_by(SalaryAdvanceRecord.source_row_no)
                     )
@@ -594,7 +561,6 @@ async def run_salary_advance_job(job_id: uuid.UUID) -> None:
             )
         else:
             records = []
-        records = records[: job.total_count]
         job.status = "generating"
         job.started_at = datetime.now(UTC)
         for record in records:

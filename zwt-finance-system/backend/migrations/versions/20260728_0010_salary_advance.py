@@ -1,7 +1,10 @@
-"""Salary advance import, validation, signatures and generated documents.
+"""Salary advance import, validation and generated documents.
 
-Revision ID: 20260728_0007
-Revises: 20260726_0006
+签名不建独立绑定表：签名代码直接解析共享签名库 core.signature_assets 的
+名称（取最新 active 版本），维护统一走系统管理 → 签名库。
+
+Revision ID: 20260728_0010
+Revises: 20260728_0009
 Create Date: 2026-07-28
 """
 
@@ -11,8 +14,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "20260728_0007"
-down_revision: str | None = "20260726_0006"
+revision: str = "20260728_0010"
+down_revision: str | None = "20260728_0009"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -55,52 +58,6 @@ def upgrade() -> None:
             "version",
             name="uq_salary_advance_templates_code_version",
         ),
-        schema="salary_advance",
-    )
-    op.create_table(
-        "signature_bindings",
-        sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("signature_code", sa.String(length=80), nullable=False),
-        sa.Column("signature_asset_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("role", sa.String(length=20), nullable=False),
-        sa.Column("version", sa.Integer(), nullable=False),
-        sa.Column("scope_type", sa.String(length=20), nullable=False),
-        sa.Column("scope_value", sa.String(length=160), nullable=True),
-        sa.Column("valid_from", sa.Date(), nullable=True),
-        sa.Column("valid_to", sa.Date(), nullable=True),
-        sa.Column("active", sa.Boolean(), nullable=False),
-        sa.Column("created_by_name", sa.String(length=160), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.CheckConstraint(
-            "role IN ('finance', 'md')",
-            name=op.f("ck_signature_bindings_role_allowed"),
-        ),
-        sa.CheckConstraint(
-            "scope_type IN ('company', 'period', 'employee', 'custom')",
-            name=op.f("ck_signature_bindings_scope_type_allowed"),
-        ),
-        sa.ForeignKeyConstraint(
-            ["signature_asset_id"],
-            ["core.signature_assets.id"],
-            name="fk_salary_advance_signature_bindings_asset_id_signature_assets",
-        ),
-        sa.PrimaryKeyConstraint("id", name=op.f("pk_signature_bindings")),
-        sa.UniqueConstraint(
-            "signature_code",
-            "version",
-            name="uq_salary_advance_signature_bindings_code_version",
-        ),
-        schema="salary_advance",
-    )
-    op.create_index(
-        "ix_salary_advance_signature_bindings_active",
-        "signature_bindings",
-        ["signature_code", "active"],
         schema="salary_advance",
     )
     op.create_table(
@@ -396,11 +353,5 @@ def downgrade() -> None:
             schema="salary_advance",
         )
     op.drop_table("import_batches", schema="salary_advance")
-    op.drop_index(
-        "ix_salary_advance_signature_bindings_active",
-        table_name="signature_bindings",
-        schema="salary_advance",
-    )
-    op.drop_table("signature_bindings", schema="salary_advance")
     op.drop_table("templates", schema="salary_advance")
     op.execute("DROP SCHEMA IF EXISTS salary_advance")
