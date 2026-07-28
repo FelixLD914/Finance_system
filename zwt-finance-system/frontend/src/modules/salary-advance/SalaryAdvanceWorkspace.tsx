@@ -13,7 +13,6 @@ import {
   ReloadOutlined,
   RetweetOutlined,
   SafetyCertificateOutlined,
-  SettingOutlined,
   UploadOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
@@ -38,7 +37,6 @@ import type { UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { Translate, TranslationKey } from "../../i18n";
-import type { ModuleKey } from "../registry";
 import {
   FinanceLifecycleTabs,
   type FinanceLifecyclePhase,
@@ -59,7 +57,6 @@ import {
   importSalaryAdvanceBatch,
   listSalaryAdvanceBatches,
   listSalaryAdvanceJobs,
-  listSalaryAdvanceTemplates,
   lockSalaryAdvanceBatch,
   previewSalaryAdvanceRecord,
   retrySalaryAdvanceJob,
@@ -73,11 +70,8 @@ import type {
   SalaryAdvanceDocument,
   SalaryAdvanceJobDetail,
   SalaryAdvanceRecord,
-  SalaryAdvanceTemplate,
   ValidationStatus,
 } from "./types";
-
-type WorkspaceView = "ledger" | "maintenance";
 
 // 状态文案一律走 i18n 键；语义色只表达状态，不用来区分业务类别
 // （见 frontend-design-system.md）。
@@ -361,22 +355,14 @@ function RecordDrawer({
   );
 }
 
-export function SalaryAdvanceWorkspace({
-  t,
-  onNavigateModule,
-}: {
-  t: Translate;
-  onNavigateModule?: (module: ModuleKey) => void;
-}) {
+export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const { message, modal } = AntApp.useApp();
-  const [view, setView] = useState<WorkspaceView>("ledger");
   const [batches, setBatches] = useState<SalaryAdvanceBatch[]>([]);
   const [selected, setSelected] = useState<SalaryAdvanceBatchDetail | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<SalaryAdvanceRecord | null>(
     null,
   );
   const [jobDetail, setJobDetail] = useState<SalaryAdvanceJobDetail | null>(null);
-  const [templates, setTemplates] = useState<SalaryAdvanceTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
@@ -424,24 +410,9 @@ export function SalaryAdvanceWorkspace({
     }
   }, [loadBatch, message, period, selected?.batch.id, statusFilter]);
 
-  const loadMaintenance = useCallback(async () => {
-    setLoading(true);
-    try {
-      setTemplates(await listSalaryAdvanceTemplates());
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
-    } finally {
-      setLoading(false);
-    }
-  }, [message]);
-
   useEffect(() => {
     void reload();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (view === "maintenance") void loadMaintenance();
-  }, [loadMaintenance, view]);
 
   useEffect(() => {
     const job = jobDetail?.job;
@@ -980,104 +951,6 @@ export function SalaryAdvanceWorkspace({
     </div>
   );
 
-  const renderMaintenance = () => (
-    <div className="salary-maintenance">
-      <section className="salary-table-card">
-        <div className="salary-section-heading">
-          <div>
-            <span>TEMPLATE VERSION</span>
-            <strong>{t("salary.templateVersion")}</strong>
-          </div>
-          <Button
-            icon={<ReloadOutlined />}
-            loading={loading}
-            onClick={() => void loadMaintenance()}
-          >
-            {t("common.refresh")}
-          </Button>
-        </div>
-        <Table<SalaryAdvanceTemplate>
-          dataSource={templates}
-          pagination={false}
-          rowKey="id"
-          size="small"
-          columns={[
-            {
-              title: t("salary.templateVersion"),
-              dataIndex: "version",
-              width: 110,
-              render: (value: string, template) => (
-                <Space>
-                  <strong>{value}</strong>
-                  {template.active && (
-                    <FinanceStatusBadge
-                      label={t("salary.templateCurrent")}
-                      tone="success"
-                    />
-                  )}
-                </Space>
-              ),
-            },
-            {
-              title: t("salary.templateFile"),
-              dataIndex: "fileName",
-              ellipsis: true,
-            },
-            {
-              // 哈希是审计线索不是日常信息：正式文件的 manifest 里已完整留存，
-              // 这里只表明三件套一致，具体值收进 Tooltip。
-              title: t("salary.templateIntegrity"),
-              key: "integrity",
-              width: 150,
-              render: (_, template) => (
-                <Tooltip
-                  title={
-                    <div className="salary-hash-tip">
-                      <div>XLSX: {template.sha256}</div>
-                      <div>PDF: {template.pdfUnderlaySha256}</div>
-                      <div>Layout: {template.pdfLayoutVersion}</div>
-                    </div>
-                  }
-                >
-                  <span>
-                    <FinanceStatusBadge
-                      label={t("salary.templateIntegrityOk")}
-                      tone="info"
-                    />
-                  </span>
-                </Tooltip>
-              ),
-            },
-            {
-              title: t("salary.templateEnabledAt"),
-              dataIndex: "createdAt",
-              width: 170,
-              render: formatFinanceDateTime,
-            },
-          ]}
-        />
-      </section>
-
-      <Alert
-        showIcon
-        type="info"
-        message={t("salary.signatureNoticeTitle")}
-        description={t("salary.signatureNoticeBody")}
-        action={
-          onNavigateModule && (
-            <Button
-              size="small"
-              type="primary"
-              onClick={() => onNavigateModule("administration")}
-            >
-              {t("salary.gotoSignatures")}
-            </Button>
-          )
-        }
-      />
-    </div>
-  );
-
   return (
     <section className="salary-workspace" aria-label={t("nav.salaryAdvance")}>
       {/* 页头格式与 WHT / TAX INV 一致：英文模块码 + <small> 里的中文功能名，
@@ -1098,24 +971,7 @@ export function SalaryAdvanceWorkspace({
         </Tooltip>
       </header>
 
-      <nav className="workspace-subnav" aria-label={t("salary.navLabel")}>
-        <button
-          className={view === "ledger" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("ledger")}
-        >
-          <FileProtectOutlined /> {t("salary.ledger")}
-        </button>
-        <button
-          className={view === "maintenance" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("maintenance")}
-        >
-          <SettingOutlined /> {t("salary.maintenance")}
-        </button>
-      </nav>
-
-      {view === "ledger" ? renderLedger() : renderMaintenance()}
+      {renderLedger()}
 
       {selectedRecord && (
         <RecordDrawer

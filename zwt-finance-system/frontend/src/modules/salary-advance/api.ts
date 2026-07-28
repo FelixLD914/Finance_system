@@ -5,7 +5,6 @@ import type {
   SalaryAdvanceJob,
   SalaryAdvanceJobDetail,
   SalaryAdvanceRecord,
-  SalaryAdvanceTemplate,
 } from "./types";
 
 const request = apiRequest;
@@ -113,10 +112,6 @@ export function retrySalaryAdvanceJob(jobId: string): Promise<SalaryAdvanceJob> 
     `/v1/salary-advance/generation-jobs/${jobId}/retry-failed`,
     { method: "POST" },
   );
-}
-
-export function listSalaryAdvanceTemplates(): Promise<SalaryAdvanceTemplate[]> {
-  return request<SalaryAdvanceTemplate[]>("/v1/salary-advance/templates");
 }
 
 async function download(path: string, fileName?: string): Promise<void> {

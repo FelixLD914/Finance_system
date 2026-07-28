@@ -1765,8 +1765,13 @@ select {
   background: var(--finance-canvas);
 }
 
-.salary-ledger,
-.salary-maintenance {
+/* 分隔线原来挂在 .workspace-subnav 上。工资预支只剩一页、子导航去掉后，
+   这条线得由页头自己承担，否则标题会直接糊在台账上。 */
+.salary-workspace .workspace-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.salary-ledger {
   display: grid;
   gap: 12px;
   padding: 14px 20px 24px;
@@ -1977,14 +1982,6 @@ select {
   font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* 制版哈希只在 Tooltip 里给审计看，不占表格列宽。 */
-.salary-hash-tip {
-  font-family: Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.6;
-  word-break: break-all;
 }
 
 @media (max-width: 1320px) {
