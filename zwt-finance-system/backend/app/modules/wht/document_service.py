@@ -30,10 +30,19 @@ class WhtDocumentService:
         self.actor_name = actor_name
         self.settings = get_settings()
 
-    async def list_signatures(self, include_inactive: bool) -> list[SignatureAsset]:
+    async def list_signatures(
+        self,
+        include_inactive: bool,
+        usage: str | None = None,
+    ) -> list[SignatureAsset]:
         statement = select(SignatureAsset)
         if not include_inactive:
             statement = statement.where(SignatureAsset.status == "active")
+        if usage:
+            # 请求 wht 时，标为 both 的也算数——both 表示两种单据都能盖。
+            statement = statement.where(
+                SignatureAsset.usage.in_([usage, "both"])
+            )
         return list(
             (
                 await self.session.scalars(
@@ -53,6 +62,7 @@ class WhtDocumentService:
         original_file_name: str,
         content: bytes,
         make_default: bool,
+        usage: str = "wht",
     ) -> SignatureAsset:
         clean_name = name.strip()
         if not clean_name:
@@ -77,9 +87,16 @@ class WhtDocumentService:
         stored_path.write_bytes(content)
 
         if make_default:
-            await self.session.execute(update(SignatureAsset).values(is_default=False))
+            # 只清掉适用范围有交集的那些默认：WHT 的默认签名和 TAX INV 的默认签名
+            # 可以是两个人，把全表清成 false 会顺手废掉另一种单据的默认。
+            await self.session.execute(
+                update(SignatureAsset)
+                .where(SignatureAsset.usage.in_(_conflicting_usages(usage)))
+                .values(is_default=False)
+            )
         signature = SignatureAsset(
             id=signature_id,
+            usage=usage,
             name=clean_name,
             storage_key=storage_key,
             original_file_name=Path(original_file_name).name[:260],
@@ -115,12 +132,17 @@ class WhtDocumentService:
             signature.status = payload.status
             if payload.status == "inactive":
                 signature.is_default = False
+        if payload.usage is not None:
+            signature.usage = payload.usage
         if payload.is_default is True:
             if signature.status != "active":
                 raise WhtStateError("an inactive signature cannot be the default")
             await self.session.execute(
                 update(SignatureAsset)
-                .where(SignatureAsset.id != signature.id)
+                .where(
+                    SignatureAsset.id != signature.id,
+                    SignatureAsset.usage.in_(_conflicting_usages(signature.usage)),
+                )
                 .values(is_default=False)
             )
             signature.is_default = True
@@ -171,6 +193,12 @@ class WhtDocumentService:
             signature = await self._load_signature(payload.signature_id)
             if signature.status != "active":
                 raise WhtStateError("the selected signature is inactive")
+            # 适用范围是 tax_inv 的图不能盖在 WHT 凭证上。前端已经按范围过滤，
+            # 这里再挡一次：签名决定单据上出现谁的名字，不能只靠界面把关。
+            if signature.usage not in {"wht", "both"}:
+                raise WhtStateError(
+                    "the selected signature is not approved for WHT certificates"
+                )
             signature_file = signature_path(
                 self.settings.attachment_root,
                 signature.storage_key,
@@ -305,3 +333,14 @@ class WhtDocumentService:
         if signature is None:
             raise WhtNotFoundError("signature image was not found")
         return signature
+
+
+def _conflicting_usages(usage: str) -> list[str]:
+    """与给定适用范围有交集的所有范围。
+
+    both 同时覆盖两种单据，因此它和任何范围都冲突；wht 只和 wht / both 冲突。
+    设默认签名时只清掉这些，才不会把另一种单据的默认一起废掉。
+    """
+    if usage == "both":
+        return ["wht", "tax_inv", "both"]
+    return [usage, "both"]

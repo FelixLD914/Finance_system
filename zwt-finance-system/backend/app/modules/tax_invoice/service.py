@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -26,6 +28,7 @@ from app.modules.tax_invoice.models import (
 from app.modules.tax_invoice.number_service import assign_tax_invoice_number
 from app.modules.tax_invoice.recognition import combine_invoice_and_customs
 from app.modules.tax_invoice.schemas import (
+    BotApiStatus,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
     TaxInvoiceImportResponse,
@@ -48,6 +51,26 @@ class TaxInvoiceConflictError(TaxInvoiceServiceError):
 
 class TaxInvoiceStateError(TaxInvoiceServiceError):
     status_code = 422
+
+
+@dataclass(frozen=True)
+class DailyRate:
+    """BOT 一天一个币种的四种报价。只有 buying_transfer 是必有的。"""
+
+    buying_transfer: Decimal
+    buying_sight: Decimal | None = None
+    selling: Decimal | None = None
+    mid_rate: Decimal | None = None
+
+
+class BotApiError(TaxInvoiceServiceError):
+    """BOT 网关返回了非 2xx。502 表示"上游拒了"，与本系统自身的 4xx 区分开。"""
+
+    status_code = 502
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.upstream_status = status_code
 
 
 @dataclass
@@ -604,9 +627,20 @@ class TaxInvoiceService:
             ).all()
         )
 
+    async def list_rate_currencies(self) -> list[str]:
+        return list(
+            (
+                await self.session.scalars(
+                    select(ExchangeRate.currency)
+                    .distinct()
+                    .order_by(ExchangeRate.currency)
+                )
+            ).all()
+        )
+
     async def import_exchange_rates(
         self,
-        rates: dict[date, Decimal],
+        rates: Mapping[date, Decimal | DailyRate],
         *,
         currency: str,
         source: str,
@@ -615,6 +649,9 @@ class TaxInvoiceService:
         created = 0
         updated = 0
         for rate_date, value in rates.items():
+            # BOT Excel 只给 buying transfer，API 四种全给。两种入口共用这里，
+            # 裸 Decimal 视为只有 transfer。
+            daily = value if isinstance(value, DailyRate) else DailyRate(buying_transfer=value)
             existing = await self.session.scalar(
                 select(ExchangeRate.id).where(
                     ExchangeRate.currency == currency.upper(),
@@ -624,7 +661,10 @@ class TaxInvoiceService:
             statement = insert(ExchangeRate).values(
                 currency=currency.upper(),
                 rate_date=rate_date,
-                buying_transfer=value,
+                buying_transfer=daily.buying_transfer,
+                buying_sight=daily.buying_sight,
+                selling=daily.selling,
+                mid_rate=daily.mid_rate,
                 source=source,
                 source_file_name=source_file_name,
                 updated_by_name=self.actor_name,
@@ -633,6 +673,17 @@ class TaxInvoiceService:
                 constraint="uq_core_exchange_rates_currency_date",
                 set_={
                     "buying_transfer": statement.excluded.buying_transfer,
+                    # coalesce 而不是直接覆盖：API 同步过四种汇率之后再导一次
+                    # 只含 transfer 的 Excel，不应该把另外三种抹成 NULL。
+                    "buying_sight": func.coalesce(
+                        statement.excluded.buying_sight, ExchangeRate.buying_sight
+                    ),
+                    "selling": func.coalesce(
+                        statement.excluded.selling, ExchangeRate.selling
+                    ),
+                    "mid_rate": func.coalesce(
+                        statement.excluded.mid_rate, ExchangeRate.mid_rate
+                    ),
                     "source": statement.excluded.source,
                     "source_file_name": statement.excluded.source_file_name,
                     "updated_by_name": statement.excluded.updated_by_name,
@@ -652,19 +703,39 @@ class TaxInvoiceService:
             updated=updated,
         )
 
+    def bot_api_status(self) -> BotApiStatus:
+        """给前端的配置自检。密钥本身绝不外传，只回是否配好和一小段掩码。"""
+        key = self.settings.bot_api_key.strip()
+        return BotApiStatus(
+            configured=bool(key),
+            base_url=self.settings.bot_api_base_url,
+            endpoint=self.settings.bot_api_endpoint,
+            auth_header=self.settings.bot_api_auth_header,
+            key_hint=f"{key[:4]}…{key[-4:]}" if len(key) >= 12 else None,
+            env_var="ZWT_BOT_API_KEY",
+        )
+
+    def _bot_headers(self) -> dict[str, str]:
+        scheme = self.settings.bot_api_auth_scheme.strip()
+        key = self.settings.bot_api_key.strip()
+        return {
+            "accept": "application/json",
+            self.settings.bot_api_auth_header: f"{scheme} {key}".strip() if scheme else key,
+        }
+
     async def fetch_bot_exchange_rates(
         self,
         payload: ExchangeRateFetchRequest,
     ) -> ExchangeRateImportResponse:
-        if not self.settings.bot_api_key:
-            raise TaxInvoiceStateError("BOT API key is not configured")
-        rates: dict[date, Decimal] = {}
+        if not self.settings.bot_api_configured:
+            raise TaxInvoiceStateError(
+                "BOT API key is not configured. Set ZWT_BOT_API_KEY in the server .env "
+                "and restart the API; until then use the BOT Excel import."
+            )
+        rates: dict[date, DailyRate] = {}
         async with httpx.AsyncClient(
             base_url=self.settings.bot_api_base_url,
-            headers={
-                "accept": "application/json",
-                "Authorization": self.settings.bot_api_key,
-            },
+            headers=self._bot_headers(),
             timeout=20,
         ) as client:
             chunk_start = payload.start_date
@@ -675,9 +746,19 @@ class TaxInvoiceService:
                     params={
                         "start_period": chunk_start.isoformat(),
                         "end_period": chunk_end.isoformat(),
+                        # 网关支持按币种过滤，传上去可以少下载十几种不用的货币。
+                        "currency": payload.currency,
                     },
                 )
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    # 光说 "BOT API request failed" 排查不动：401 是密钥不对、
+                    # 429 是打太快、404 是端点路径变了，把上游原话带回去。
+                    raise BotApiError(
+                        f"BOT API returned HTTP {response.status_code} for "
+                        f"{chunk_start.isoformat()}~{chunk_end.isoformat()}: "
+                        f"{response.text[:200]}",
+                        status_code=response.status_code,
+                    )
                 details = (
                     response.json()
                     .get("result", {})
@@ -696,8 +777,22 @@ class TaxInvoiceService:
                         continue
                     if value <= 0:
                         continue
-                    rates[rate_date] = value
+                    rates[rate_date] = DailyRate(
+                        buying_transfer=value,
+                        buying_sight=_optional_rate(item.get("buying_sight")),
+                        selling=_optional_rate(item.get("selling")),
+                        mid_rate=_optional_rate(item.get("mid_rate")),
+                    )
                 chunk_start = chunk_end + timedelta(days=1)
+                # 旧工具在这里 sleep 1 秒，跨年区间会拆成十几块，连着打会被网关限流。
+                if chunk_start <= payload.end_date and self.settings.bot_api_chunk_pause_seconds:
+                    await asyncio.sleep(self.settings.bot_api_chunk_pause_seconds)
+        if not rates:
+            raise TaxInvoiceStateError(
+                f"BOT API returned no {payload.currency} rate between "
+                f"{payload.start_date.isoformat()} and {payload.end_date.isoformat()}. "
+                "Check the date range: weekends and Thai public holidays have no rate."
+            )
         return await self.import_exchange_rates(
             rates,
             currency=payload.currency,
@@ -802,6 +897,18 @@ class TaxInvoiceService:
 
 def _currency(item: dict[str, Any]) -> str:
     return str(item.get("currency_id", "")).upper()
+
+
+def _optional_rate(raw: Any) -> Decimal | None:
+    """BOT 对非交易日会返回空串；解析不出来就当没有，不要让整条记录失败。"""
+    text = str(raw or "").replace(",", "").strip()
+    if not text:
+        return None
+    try:
+        value = Decimal(text)
+    except ArithmeticError:
+        return None
+    return value if value > 0 else None
 
 
 def file_sha256(content: bytes) -> str:

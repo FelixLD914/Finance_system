@@ -36,30 +36,37 @@ import {
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Upload,
 } from "antd";
 import type { UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
-import type { Translate } from "../../i18n";
+import type { Locale, Translate } from "../../i18n";
+import { FinanceLifecycleTabs, type FinanceLifecyclePhase } from "../../ui";
 import { ThaiText } from "../../shared/ThaiText";
+// 签名图库是两个模块共用的，接口挂在 WHT 路由下。
+import { listSignatures } from "../wht/api";
 import {
   approveTaxInvoice,
   createTaxInvoiceCorrection,
   downloadTaxInvoiceDocument,
   fetchExchangeRates,
   generateTaxInvoiceDocuments,
+  getBotApiStatus,
   getTaxInvoice,
   importDualFiles,
   importExchangeRates,
   importSample,
   listExchangeRates,
+  listRateCurrencies,
   listTaxInvoiceDocuments,
   listTaxInvoices,
   updateTaxInvoice,
   voidTaxInvoice,
 } from "./api";
 import type {
+  BotApiStatus,
   ExchangeRate,
   TaxInvoice,
   TaxInvoiceDocument,
@@ -68,15 +75,6 @@ import type {
 } from "./types";
 
 type WorkspaceView = "ledger" | "recognition" | "rates";
-
-const statusLabels: Record<TaxInvoiceStatus, string> = {
-  draft: "草稿",
-  needs_review: "需复核",
-  ready: "待批准",
-  approved: "已批准",
-  issued: "已出具",
-  voided: "已作废",
-};
 
 const statusClasses: Record<TaxInvoiceStatus, string> = {
   draft: "status-draft",
@@ -87,29 +85,80 @@ const statusClasses: Record<TaxInvoiceStatus, string> = {
   voided: "status-voided",
 };
 
-function StatusTag({ status }: { status: TaxInvoiceStatus }) {
+/** BOT DAILY_AVG_EXG_RATE 覆盖的主要币种。台账没数据的会标注「无数据」。 */
+const CURRENCY_CHOICES = [
+  "USD",
+  "EUR",
+  "JPY",
+  "GBP",
+  "CNY",
+  "HKD",
+  "SGD",
+  "AUD",
+  "CHF",
+  "MYR",
+  "KRW",
+  "TWD",
+  "VND",
+  "INR",
+];
+
+/** 非交易日或 Excel 导入的行拿不到这几种报价，显示为 — 而不是 0.0000。 */
+function rateCell(value: string | null): string {
+  return value ? Number(value).toFixed(4) : "—";
+}
+
+/** 业务阶段 → 内部状态，与 WHT 侧同一套语义。 */
+const taxInvoicePhaseStatuses: Record<
+  Exclude<FinanceLifecyclePhase, "all">,
+  readonly TaxInvoiceStatus[]
+> = {
+  pending: ["draft", "needs_review", "ready"],
+  issuing: ["approved"],
+  history: ["issued", "voided"],
+};
+
+function isInvoiceInPhase(
+  invoice: TaxInvoice,
+  phase: FinanceLifecyclePhase,
+): boolean {
+  return phase === "all" || taxInvoicePhaseStatuses[phase].includes(invoice.status);
+}
+
+const STATUS_ORDER: TaxInvoiceStatus[] = [
+  "draft",
+  "needs_review",
+  "ready",
+  "approved",
+  "issued",
+  "voided",
+];
+
+function statusLabel(status: TaxInvoiceStatus, t: Translate): string {
+  return t(`taxStatus.${status}` as Parameters<Translate>[0]);
+}
+
+function StatusTag({ status, t }: { status: TaxInvoiceStatus; t: Translate }) {
   return (
-    <Tag className={`status-tag ${statusClasses[status]}`}>
-      {statusLabels[status]}
-    </Tag>
+    <Tag className={`status-tag ${statusClasses[status]}`}>{statusLabel(status, t)}</Tag>
   );
 }
 
-function money(value: string | null | undefined, currency = ""): string {
+function money(value: string | null | undefined, locale: Locale, currency = ""): string {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return "—";
-  const formatted = new Intl.NumberFormat("zh-CN", {
+  const formatted = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(numeric);
   return currency ? `${currency} ${formatted}` : formatted;
 }
 
-function dateTime(value: string | null): string {
+function dateTime(value: string | null, locale: Locale): string {
   if (!value) return "—";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -136,6 +185,8 @@ function InvoiceInspector({
   invoice,
   documents,
   busy,
+  locale,
+  t,
   onClose,
   onApprove,
   onGenerate,
@@ -147,6 +198,8 @@ function InvoiceInspector({
   invoice: TaxInvoice;
   documents: TaxInvoiceDocument[];
   busy: boolean;
+  locale: Locale;
+  t: Translate;
   onClose: () => void;
   onApprove: () => void;
   onGenerate: () => void;
@@ -159,21 +212,21 @@ function InvoiceInspector({
   const canApprove = ["draft", "needs_review", "ready"].includes(invoice.status);
   const canGenerate = ["approved", "issued"].includes(invoice.status);
   return (
-    <aside className="tax-inspector" aria-label="TAX INV 明细">
+    <aside className="tax-inspector" aria-label={t("tax.inspectorLabel")}>
       <div className="inspector-header">
         <div>
-          <span className="record-eyebrow">TAX INVOICE RECORD</span>
-          <h2>{invoice.documentNo ?? "待分配正式编号"}</h2>
-          <StatusTag status={invoice.status} />
+          <span className="record-eyebrow">{t("tax.recordEyebrow")}</span>
+          <h2>{invoice.documentNo ?? t("tax.pendingFormalNumber")}</h2>
+          <StatusTag status={invoice.status} t={t} />
         </div>
         <Space>
           {["draft", "needs_review", "ready"].includes(invoice.status) && (
             <Button icon={<EditOutlined />} size="small" onClick={onEdit}>
-              编辑
+              {t("common.edit")}
             </Button>
           )}
           <Button
-            aria-label="关闭明细"
+            aria-label={t("tax.closeInspector")}
             icon={<CloseOutlined />}
             type="text"
             onClick={onClose}
@@ -184,73 +237,75 @@ function InvoiceInspector({
       {warnings > 0 && (
         <Alert
           className="tax-review-alert"
-          message={`存在 ${warnings} 项需人工确认的信息`}
-          description="批准即表示已核对报关提交日期、FOB 验算和贸易条款。"
+          message={t("tax.warningCount", { count: warnings })}
+          description={t("tax.warningBody")}
           showIcon
           type="warning"
         />
       )}
 
       <section className="inspector-section">
-        <h3>日期与编号规则</h3>
+        <h3>{t("tax.dateSection")}</h3>
         <Descriptions className="task-descriptions" column={1} colon={false}>
-          <Descriptions.Item label="正式税票编号">
-            {invoice.documentNo ?? "批准时由系统生成"}
+          <Descriptions.Item label={t("tax.formalNumber")}>
+            {invoice.documentNo ?? t("tax.numberOnApproval")}
           </Descriptions.Item>
-          <Descriptions.Item label="开票日期（报关提交日）">
+          <Descriptions.Item label={t("tax.invoiceDate")}>
             <strong>{dateLabel(invoice.invoiceDate)}</strong>
           </Descriptions.Item>
-          <Descriptions.Item label="汇率目标日期">
+          <Descriptions.Item label={t("tax.exchangeTargetDate")}>
             {dateLabel(invoice.exchangeTargetDate)}
           </Descriptions.Item>
-          <Descriptions.Item label="实际汇率日期">
+          <Descriptions.Item label={t("tax.exchangeRateDate")}>
             {dateLabel(invoice.exchangeRateDate)}
           </Descriptions.Item>
-          <Descriptions.Item label="BOT 汇率">
+          <Descriptions.Item label={t("tax.botRate")}>
             {invoice.exchangeRate
               ? `${invoice.currency} / THB ${Number(invoice.exchangeRate).toFixed(4)}`
-              : "待匹配"}
+              : t("tax.rateUnmatched")}
           </Descriptions.Item>
         </Descriptions>
       </section>
 
       <section className="inspector-section">
-        <h3>客户及报关资料</h3>
+        <h3>{t("tax.customerSection")}</h3>
         <Descriptions className="task-descriptions" column={1} colon={false}>
           <Descriptions.Item label="C/I No.">{invoice.ciNo}</Descriptions.Item>
-          <Descriptions.Item label="报关单号 CDN">
+          <Descriptions.Item label={t("tax.colCdn")}>
             {invoice.cdn ?? "—"}
           </Descriptions.Item>
-          <Descriptions.Item label="客户名称">
+          <Descriptions.Item label={t("tax.customerName")}>
             <ThaiText>{invoice.customerName}</ThaiText>
           </Descriptions.Item>
-          <Descriptions.Item label="客户地址">
+          <Descriptions.Item label={t("tax.customerAddress")}>
             <ThaiText>{invoice.customerAddress}</ThaiText>
           </Descriptions.Item>
-          <Descriptions.Item label="税号">{invoice.taxId ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("tax.taxId")}>
+            {invoice.taxId ?? "—"}
+          </Descriptions.Item>
           <Descriptions.Item label="PO No.">{invoice.poNo ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label="贸易条款">
+          <Descriptions.Item label={t("tax.incoterms")}>
             {invoice.incoterms ?? "—"}
-            {invoice.isDap && <Tag color="orange">DAP 需复核</Tag>}
+            {invoice.isDap && <Tag color="orange">{t("tax.dapNeedsReview")}</Tag>}
           </Descriptions.Item>
         </Descriptions>
       </section>
 
       <section className="inspector-section">
         <div className="section-title-row">
-          <h3>商品明细</h3>
-          <span>{invoice.items.length} / 18 行</span>
+          <h3>{t("tax.itemsSection")}</h3>
+          <span>{t("tax.itemsCount", { count: invoice.items.length })}</span>
         </div>
         <Table<TaxInvoiceItem>
           columns={[
-            { title: "序号", dataIndex: "lineNumber", width: 58 },
+            { title: t("tax.colLine"), dataIndex: "lineNumber", width: 58 },
             {
-              title: "商品",
+              title: t("tax.colProduct"),
               dataIndex: "productName",
               ellipsis: true,
             },
             {
-              title: "数量",
+              title: t("tax.colQuantity"),
               dataIndex: "quantity",
               width: 76,
               align: "right",
@@ -260,7 +315,7 @@ function InvoiceInspector({
               dataIndex: "fobRevenueUsd",
               width: 105,
               align: "right",
-              render: (value: string | null) => money(value),
+              render: (value: string | null) => money(value, locale),
             },
           ]}
           dataSource={invoice.items}
@@ -270,15 +325,15 @@ function InvoiceInspector({
           size="small"
         />
         <div className="tax-total-strip">
-          <span>合计</span>
-          <strong>{money(invoice.fobRevenueUsdTotal, "USD")}</strong>
-          <strong>{money(invoice.fobRevenueThbTotal, "THB")}</strong>
+          <span>{t("tax.total")}</span>
+          <strong>{money(invoice.fobRevenueUsdTotal, locale, "USD")}</strong>
+          <strong>{money(invoice.fobRevenueThbTotal, locale, "THB")}</strong>
         </div>
       </section>
 
       <section className="inspector-section">
         <div className="section-title-row">
-          <h3>正式文件</h3>
+          <h3>{t("tax.documentsSection")}</h3>
           <Button
             disabled={!canGenerate}
             icon={<FileDoneOutlined />}
@@ -286,7 +341,7 @@ function InvoiceInspector({
             size="small"
             onClick={onGenerate}
           >
-            生成正式文件
+            {t("tax.generate")}
           </Button>
         </div>
         {documents.length ? (
@@ -305,14 +360,16 @@ function InvoiceInspector({
                 )}
                 <span>
                   {document.fileName}
-                  <small>v{document.version} · {dateTime(document.createdAt)}</small>
+                  <small>
+                    v{document.version} · {dateTime(document.createdAt, locale)}
+                  </small>
                 </span>
                 <DownloadOutlined />
               </button>
             ))}
           </div>
         ) : (
-          <p className="muted-copy">批准后可生成正式模板文件。</p>
+          <p className="muted-copy">{t("tax.generateHint")}</p>
         )}
       </section>
 
@@ -325,17 +382,17 @@ function InvoiceInspector({
             type="primary"
             onClick={onApprove}
           >
-            复核通过并生成正式编号
+            {t("tax.approve")}
           </Button>
         )}
         {["approved", "issued"].includes(invoice.status) && (
           <Button block danger disabled={busy} onClick={onVoid}>
-            作废本张税票
+            {t("tax.void")}
           </Button>
         )}
         {invoice.status === "voided" && (
           <Button block icon={<FileSearchOutlined />} onClick={onCorrection}>
-            建立更正单
+            {t("tax.createCorrection")}
           </Button>
         )}
       </div>
@@ -343,11 +400,16 @@ function InvoiceInspector({
   );
 }
 
-export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
+export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Locale }) {
   const { message, modal } = AntApp.useApp();
   const [view, setView] = useState<WorkspaceView>("ledger");
   const [invoices, setInvoices] = useState<TaxInvoice[]>([]);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
+  // 汇率中心可以看任何币种；出口税票取哪个汇率是另一回事，业务规则仍是
+  // USD 的 buying transfer，不受这里的浏览选择影响。
+  const [currency, setCurrency] = useState("USD");
+  const [currencies, setCurrencies] = useState<string[]>([]);
+  const [botStatus, setBotStatus] = useState<BotApiStatus | null>(null);
   const [selected, setSelected] = useState<TaxInvoice | null>(null);
   const [documents, setDocuments] = useState<TaxInvoiceDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -355,6 +417,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<TaxInvoiceStatus | "all">("all");
   const [period, setPeriod] = useState("all");
+  const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
   const [customsFile, setCustomsFile] = useState<File | null>(null);
   const [sampleFile, setSampleFile] = useState<File | null>(null);
@@ -377,23 +440,37 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
       const response = await listTaxInvoices();
       setInvoices(response.items);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "税票台账加载失败");
+      message.error(error instanceof Error ? error.message : t("tax.ledgerLoadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [message]);
+  }, [message, t]);
 
-  const refreshRates = useCallback(async () => {
-    try {
-      setRates(await listExchangeRates());
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "汇率加载失败");
-    }
-  }, [message]);
+  const refreshRates = useCallback(
+    async (nextCurrency = currency) => {
+      try {
+        setRates(await listExchangeRates(nextCurrency));
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : t("tax.rateLoadFailed"));
+      }
+    },
+    [currency, message, t],
+  );
 
   useEffect(() => {
-    void Promise.all([refreshInvoices(), refreshRates()]);
-  }, [refreshInvoices, refreshRates]);
+    void refreshInvoices();
+    // 配置自检和币种列表失败都不该打断页面：拿不到就退化，不弹错。
+    void getBotApiStatus()
+      .then(setBotStatus)
+      .catch(() => setBotStatus(null));
+    void listRateCurrencies()
+      .then((items) => setCurrencies(items.length ? items : ["USD"]))
+      .catch(() => setCurrencies(["USD"]));
+  }, [refreshInvoices]);
+
+  useEffect(() => {
+    void refreshRates(currency);
+  }, [currency, refreshRates]);
 
   const openInvoice = useCallback(
     async (invoice: TaxInvoice) => {
@@ -406,12 +483,12 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         setSelected(detail);
         setDocuments(nextDocuments);
       } catch (error) {
-        message.error(error instanceof Error ? error.message : "明细加载失败");
+        message.error(error instanceof Error ? error.message : t("tax.detailLoadFailed"));
       } finally {
         setBusy(false);
       }
     },
-    [message],
+    [message, t],
   );
 
   const periods = useMemo(
@@ -425,6 +502,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const filteredInvoices = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return invoices.filter((invoice) => {
+      if (!isInvoiceInPhase(invoice, phase)) return false;
       if (status !== "all" && invoice.status !== status) return false;
       if (period !== "all" && invoice.revenuePeriod !== period) return false;
       if (!normalized) return true;
@@ -435,35 +513,45 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         invoice.customerName,
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
-  }, [invoices, period, query, status]);
+  }, [invoices, period, phase, query, status]);
+
+  const lifecycleCounts = useMemo(
+    () => ({
+      pending: invoices.filter((item) => isInvoiceInPhase(item, "pending")).length,
+      issuing: invoices.filter((item) => isInvoiceInPhase(item, "issuing")).length,
+      history: invoices.filter((item) => isInvoiceInPhase(item, "history")).length,
+      all: invoices.length,
+    }),
+    [invoices],
+  );
 
   const columns: ColumnsType<TaxInvoice> = [
     {
-      title: "税票编号",
+      title: t("tax.colDocumentNo"),
       dataIndex: "documentNo",
       width: 205,
       render: (value: string | null) => (
-        <strong className="record-number">{value ?? "待分配"}</strong>
+        <strong className="record-number">{value ?? t("tax.pendingNumber")}</strong>
       ),
     },
     {
-      title: "开票日期（报关提交日）",
+      title: t("tax.colInvoiceDate"),
       dataIndex: "invoiceDate",
       width: 180,
       render: dateLabel,
     },
     { title: "C/I No.", dataIndex: "ciNo", width: 145, ellipsis: true },
-    { title: "报关单号", dataIndex: "cdn", width: 165, ellipsis: true },
+    { title: t("tax.colCdn"), dataIndex: "cdn", width: 165, ellipsis: true },
     {
-      title: "客户",
+      title: t("tax.colCustomer"),
       dataIndex: "customerName",
       width: 260,
       ellipsis: true,
       render: (value: string) => <ThaiText>{value}</ThaiText>,
     },
-    { title: "贸易条款", dataIndex: "incoterms", width: 95 },
+    { title: t("tax.colIncoterms"), dataIndex: "incoterms", width: 95 },
     {
-      title: "实际汇率日期",
+      title: t("tax.colRateDate"),
       dataIndex: "exchangeRateDate",
       width: 130,
       render: dateLabel,
@@ -473,14 +561,14 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
       dataIndex: "fobRevenueThbTotal",
       width: 140,
       align: "right",
-      render: (value: string | null) => money(value),
+      render: (value: string | null) => money(value, locale),
     },
     {
-      title: "状态",
+      title: t("tax.colStatus"),
       dataIndex: "status",
       fixed: "right",
       width: 105,
-      render: (value: TaxInvoiceStatus) => <StatusTag status={value} />,
+      render: (value: TaxInvoiceStatus) => <StatusTag status={value} t={t} />,
     },
   ];
 
@@ -488,13 +576,13 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
     if (!selected) return;
     const warnings = warningCount(selected);
     modal.confirm({
-      title: "确认批准并分配正式编号？",
+      title: t("tax.approveTitle"),
       content:
         warnings > 0
-          ? `本记录存在 ${warnings} 项警示。确认已经人工核对后再批准。`
-          : "正式编号会按照开票日期生成，批准后不可直接修改。",
-      okText: warnings > 0 ? "已核对，继续批准" : "确认批准",
-      cancelText: "取消",
+          ? t("tax.approveWithWarnings", { count: warnings })
+          : t("tax.approveClean"),
+      okText: warnings > 0 ? t("tax.approveOkWarned") : t("tax.approveOk"),
+      cancelText: t("common.cancel"),
       async onOk() {
         setBusy(true);
         try {
@@ -507,9 +595,11 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
           setInvoices((current) =>
             current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
           );
-          message.success(`正式编号 ${updated.documentNo} 已生成`);
+          message.success(
+            t("tax.numberAssigned", { number: updated.documentNo ?? "" }),
+          );
         } catch (error) {
-          message.error(error instanceof Error ? error.message : "批准失败");
+          message.error(error instanceof Error ? error.message : t("tax.approveFailed"));
           throw error;
         } finally {
           setBusy(false);
@@ -522,16 +612,23 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
     if (!selected) return;
     setBusy(true);
     try {
-      const created = await generateTaxInvoiceDocuments(selected.id);
+      // 取适用于 TAX INV 的默认签名（usage 为 tax_inv 或 both）。
+      // 一张都没有就出不带签名的文件，而不是报错挡住出票。
+      const signatures = await listSignatures(false, "tax_inv").catch(() => []);
+      const signature = signatures.find((item) => item.isDefault) ?? signatures[0];
+      const created = await generateTaxInvoiceDocuments(
+        selected.id,
+        signature?.id ?? null,
+      );
       setDocuments((current) => [...created, ...current]);
       const detail = await getTaxInvoice(selected.id);
       setSelected(detail);
       setInvoices((current) =>
         current.map((invoice) => (invoice.id === detail.id ? detail : invoice)),
       );
-      message.success("TAX INV 正式文件已生成（Excel + PDF）");
+      message.success(t("tax.documentsGenerated"));
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "文件生成失败");
+      message.error(error instanceof Error ? error.message : t("tax.generateFailed"));
     } finally {
       setBusy(false);
     }
@@ -540,7 +637,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const runWorkflowAction = async () => {
     if (!selected || !workflowAction) return;
     if (workflowReason.trim().length < 2) {
-      message.warning("请填写至少 2 个字符的原因");
+      message.warning(t("tax.reasonTooShort"));
       return;
     }
     setBusy(true);
@@ -555,7 +652,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         setInvoices((current) =>
           current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
         );
-        message.success(`税票 ${updated.documentNo} 已作废，原编号永久保留`);
+        message.success(t("tax.voided", { number: updated.documentNo ?? "" }));
       } else {
         const correction = await createTaxInvoiceCorrection(
           selected.id,
@@ -565,12 +662,12 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         setInvoices((current) => [correction, ...current]);
         setSelected(correction);
         setDocuments([]);
-        message.success("更正单已建立，复核后会分配新的正式编号");
+        message.success(t("tax.correctionCreated"));
       }
       setWorkflowAction(null);
       setWorkflowReason("");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "流程操作失败");
+      message.error(error instanceof Error ? error.message : t("tax.workflowFailed"));
     } finally {
       setBusy(false);
     }
@@ -628,9 +725,9 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
       );
       setEditOpen(false);
-      message.success("税票复核资料已保存");
+      message.success(t("tax.editSaved"));
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "保存失败");
+      message.error(error instanceof Error ? error.message : t("tax.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -638,14 +735,17 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
 
   const runDualImport = async () => {
     if (!invoiceFile || !customsFile) {
-      message.warning("请同时选择 Export Invoice Excel 与报关单 PDF");
+      message.warning(t("tax.dualFilesRequired"));
       return;
     }
     setBusy(true);
     try {
       const result = await importDualFiles(invoiceFile, customsFile);
       message.success(
-        `识别完成：${result.invoiceCount} 份税票，${result.itemCount} 条商品`,
+        t("tax.recognitionDone", {
+          invoices: result.invoiceCount,
+          items: result.itemCount,
+        }),
       );
       setInvoiceFile(null);
       setCustomsFile(null);
@@ -656,7 +756,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         await openInvoice(detail);
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "识别导入失败");
+      message.error(error instanceof Error ? error.message : t("tax.recognitionFailed"));
     } finally {
       setBusy(false);
     }
@@ -664,20 +764,23 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
 
   const runSampleImport = async () => {
     if (!sampleFile) {
-      message.warning("请选择旧系统 Sample.xlsx");
+      message.warning(t("tax.sampleRequired"));
       return;
     }
     setBusy(true);
     try {
       const result = await importSample(sampleFile);
       message.success(
-        `历史导入完成：${result.invoiceCount} 份，其中 ${result.needsReviewCount} 份需复核`,
+        t("tax.sampleDone", {
+          invoices: result.invoiceCount,
+          review: result.needsReviewCount,
+        }),
       );
       setSampleFile(null);
       await refreshInvoices();
       setView("ledger");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "历史导入失败");
+      message.error(error instanceof Error ? error.message : t("tax.sampleFailed"));
     } finally {
       setBusy(false);
     }
@@ -685,17 +788,19 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
 
   const runRateImport = async () => {
     if (!rateFile) {
-      message.warning("请选择 BOT 汇率 Excel");
+      message.warning(t("tax.rateFileRequired"));
       return;
     }
     setBusy(true);
     try {
-      const result = await importExchangeRates(rateFile);
-      message.success(`汇率已更新：新增 ${result.created}，覆盖 ${result.updated}`);
+      const result = await importExchangeRates(rateFile, currency);
+      message.success(
+        t("tax.rateImported", { created: result.created, updated: result.updated }),
+      );
       setRateFile(null);
       await refreshRates();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "汇率导入失败");
+      message.error(error instanceof Error ? error.message : t("tax.rateImportFailed"));
     } finally {
       setBusy(false);
     }
@@ -703,7 +808,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
 
   const runBotFetch = async () => {
     if (!fetchDates.startDate || !fetchDates.endDate) {
-      message.warning("请选择开始和结束日期");
+      message.warning(t("tax.datesRequired"));
       return;
     }
     setBusy(true);
@@ -711,12 +816,18 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
       const result = await fetchExchangeRates(
         fetchDates.startDate,
         fetchDates.endDate,
+        currency,
       );
-      message.success(`BOT 汇率同步完成：新增 ${result.created}，更新 ${result.updated}`);
+      message.success(
+        t("tax.botSynced", { created: result.created, updated: result.updated }),
+      );
       setFetchOpen(false);
+      if (!currencies.includes(currency)) {
+        setCurrencies((current) => [...current, currency].sort());
+      }
       await refreshRates();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "BOT API 同步失败");
+      message.error(error instanceof Error ? error.message : t("tax.botFailed"));
     } finally {
       setBusy(false);
     }
@@ -725,57 +836,78 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const uploadList = (file: File | null): UploadFile[] =>
     file ? [{ uid: file.name, name: file.name, status: "done" }] : [];
 
+  const botUnconfigured = botStatus !== null && !botStatus.configured;
+
   return (
     <section className="tax-workspace" aria-label={t("nav.taxInvoice")}>
       <header className="workspace-header tax-workspace-header">
         <div>
-          <span className="workspace-kicker">EXPORT SALES TAX INVOICE</span>
+          <span className="workspace-kicker">{t("tax.kicker")}</span>
           <h1>
             <span>TAX INV</span>
-            税票管理
+            {t("tax.title")}
           </h1>
-          <p>识别报关资料、锁定开票日期、匹配 BOT 汇率并生成正式税票。</p>
+          <p>{t("tax.subtitle")}</p>
         </div>
-        <div className="tax-health-card">
-          <span className="health-dot" />
-          <div>
-            <strong>业务规则已锁定</strong>
-            <small>编号仅在批准时由数据库事务生成</small>
-          </div>
-        </div>
+        {/* 常驻规则说明压成一枚小胶囊：它是背景信息，不该和页面标题抢注意力。 */}
+        <Tooltip title={t("tax.rulesLocked")}>
+          <span className="tax-health-pill">
+            <span className="health-dot" />
+            {t("tax.rulesLocked")}
+          </span>
+        </Tooltip>
       </header>
 
-      <nav className="workspace-subnav" aria-label="TAX INV 功能">
+      <nav className="workspace-subnav" aria-label={t("tax.navLabel")}>
         <button
           className={view === "ledger" ? "is-active" : ""}
           type="button"
           onClick={() => setView("ledger")}
         >
-          <DatabaseOutlined />税票台账
+          <DatabaseOutlined />
+          {t("tax.ledger")}
         </button>
         <button
           className={view === "recognition" ? "is-active" : ""}
           type="button"
           onClick={() => setView("recognition")}
         >
-          <FileSearchOutlined />识别与导入
+          <FileSearchOutlined />
+          {t("tax.recognition")}
         </button>
         <button
           className={view === "rates" ? "is-active" : ""}
           type="button"
           onClick={() => setView("rates")}
         >
-          <ApiOutlined />BOT 汇率中心
+          <ApiOutlined />
+          {t("tax.rates")}
         </button>
       </nav>
 
       {view === "ledger" && (
         <div className={`tax-ledger-layout${selected ? " has-inspector" : ""}`}>
           <main className="tax-ledger-main">
+            <FinanceLifecycleTabs
+              activeKey={phase}
+              ariaLabel={t("lifecycle.aria", { module: "TAX INV" })}
+              counts={lifecycleCounts}
+              labels={{
+                pending: t("lifecycle.pending"),
+                issuing: t("lifecycle.issuing"),
+                history: t("lifecycle.history"),
+                all: t("lifecycle.all"),
+              }}
+              onChange={(nextPhase) => {
+                setPhase(nextPhase);
+                setStatus("all");
+                setSelected(null);
+              }}
+            />
             <div className="tax-filter-bar">
               <Select
                 options={[
-                  { value: "all", label: "全部期数" },
+                  { value: "all", label: t("tax.allPeriods") },
                   ...periods.map((value) => ({
                     value,
                     label: `${value.slice(0, 4)}-${value.slice(4)}`,
@@ -786,10 +918,10 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
               />
               <Select
                 options={[
-                  { value: "all", label: "全部状态" },
-                  ...Object.entries(statusLabels).map(([value, label]) => ({
+                  { value: "all", label: t("tax.allStatuses") },
+                  ...STATUS_ORDER.map((value) => ({
                     value,
-                    label,
+                    label: statusLabel(value, t),
                   })),
                 ]}
                 value={status}
@@ -797,7 +929,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
               />
               <Input.Search
                 allowClear
-                placeholder="搜索税票编号、C/I、CDN 或客户"
+                placeholder={t("tax.searchPlaceholder")}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -806,25 +938,25 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                 loading={loading}
                 onClick={() => void refreshInvoices()}
               >
-                刷新
+                {t("common.refresh")}
               </Button>
             </div>
             <div className="tax-ledger-summary">
               <div>
                 <strong>{filteredInvoices.length}</strong>
-                <span>份税票</span>
+                <span>{t("tax.countInvoices")}</span>
               </div>
               <div>
                 <strong>
                   {filteredInvoices.filter((item) => item.status === "needs_review").length}
                 </strong>
-                <span>待人工复核</span>
+                <span>{t("tax.countNeedsReview")}</span>
               </div>
               <div>
                 <strong>
                   {filteredInvoices.filter((item) => item.status === "issued").length}
                 </strong>
-                <span>已生成正式文件</span>
+                <span>{t("tax.countIssued")}</span>
               </div>
             </div>
             <Table
@@ -848,6 +980,8 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
               busy={busy}
               documents={documents}
               invoice={selected}
+              locale={locale}
+              t={t}
               onApprove={approveSelected}
               onClose={() => setSelected(null)}
               onDownload={(document) => void downloadTaxInvoiceDocument(document)}
@@ -868,26 +1002,12 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
 
       {view === "recognition" && (
         <main className="tax-tool-page">
-          <section className="tax-rule-banner">
-            <div className="rule-badge">
-              <SafetyCertificateOutlined />
-            </div>
-            <div>
-              <span>DATE GOVERNANCE</span>
-              <h2>日期字段独立保存，不再互相覆盖</h2>
-              <p>
-                开票日期取报关单提交日期；税票编号跟随开票日期；汇率目标日和实际回溯日按
-                BOT 原逻辑分别保留。
-              </p>
-            </div>
-            <div className="rule-flow">
-              <span>报关提交日</span>
-              <b>→</b>
-              <span>开票日期</span>
-              <b>→</b>
-              <span>税票编号日期</span>
-            </div>
-          </section>
+          {/* 原来是一整块深色横幅，占掉首屏近三分之一。规则本身没变，
+              但它是一次性知识，压成一行提示条即可。 */}
+          <p className="tax-rule-note">
+            <SafetyCertificateOutlined />
+            <span>{t("tax.dateGovernance")}</span>
+          </p>
 
           <div className="tax-import-grid">
             <section className="tax-tool-card tax-dual-card">
@@ -896,9 +1016,9 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                   <FileSearchOutlined />
                 </div>
                 <div>
-                  <span>新开税票</span>
-                  <h2>双文件智能识别</h2>
-                  <p>Export Invoice Excel + 泰国报关单 PDF</p>
+                  <span>{t("tax.newInvoice")}</span>
+                  <h2>{t("tax.dualRecognition")}</h2>
+                  <p>{t("tax.dualRecognitionHint")}</p>
                 </div>
               </div>
               <div className="dual-upload-grid">
@@ -915,8 +1035,8 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                   }}
                 >
                   <p className="ant-upload-drag-icon"><FileExcelOutlined /></p>
-                  <p className="ant-upload-text">Export Invoice Excel</p>
-                  <p className="ant-upload-hint">识别客户、贸易条款与商品</p>
+                  <p className="ant-upload-text">{t("tax.invoiceExcel")}</p>
+                  <p className="ant-upload-hint">{t("tax.invoiceExcelHint")}</p>
                 </Upload.Dragger>
                 <Upload.Dragger
                   accept=".pdf"
@@ -931,8 +1051,8 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                   }}
                 >
                   <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-                  <p className="ant-upload-text">Customs Declaration PDF</p>
-                  <p className="ant-upload-hint">提取 CDN 与报关提交日期</p>
+                  <p className="ant-upload-text">{t("tax.customsPdf")}</p>
+                  <p className="ant-upload-hint">{t("tax.customsPdfHint")}</p>
                 </Upload.Dragger>
               </div>
               <Button
@@ -943,7 +1063,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                 type="primary"
                 onClick={() => void runDualImport()}
               >
-                开始识别并建立复核记录
+                {t("tax.startRecognition")}
               </Button>
             </section>
 
@@ -953,14 +1073,14 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                   <DatabaseOutlined />
                 </div>
                 <div>
-                  <span>历史迁移</span>
-                  <h2>导入旧系统 Sample</h2>
-                  <p>用于导入上线前的 TAX INV 台账</p>
+                  <span>{t("tax.migration")}</span>
+                  <h2>{t("tax.importSample")}</h2>
+                  <p>{t("tax.importSampleHint")}</p>
                 </div>
               </div>
               <Alert
-                message="历史文件缺少报关提交日时不会自动正式开票"
-                description="系统会临时沿用旧 FX Date 并标为低置信度，必须人工补录或核对。"
+                message={t("tax.sampleWarning")}
+                description={t("tax.sampleWarningBody")}
                 showIcon
                 type="warning"
               />
@@ -977,7 +1097,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                 }}
               >
                 <Button icon={<UploadOutlined />} size="large">
-                  选择 Sample.xlsx
+                  {t("tax.pickSample")}
                 </Button>
               </Upload>
               <Button
@@ -986,42 +1106,109 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                 size="large"
                 onClick={() => void runSampleImport()}
               >
-                导入历史台账
+                {t("tax.runSampleImport")}
               </Button>
             </section>
           </div>
 
           <section className="tax-quality-strip">
-            <div><CheckCircleOutlined /><span><strong>最多 18 条商品</strong>超过模板容量时禁止批准</span></div>
-            <div><WarningOutlined /><span><strong>FOB 自动验算</strong>差异记录进入人工复核</span></div>
-            <div><CloudDownloadOutlined /><span><strong>源文件留档</strong>随每日附件备份保留</span></div>
+            <div>
+              <CheckCircleOutlined />
+              <span>
+                <strong>{t("tax.quality18")}</strong>
+                {t("tax.quality18Body")}
+              </span>
+            </div>
+            <div>
+              <WarningOutlined />
+              <span>
+                <strong>{t("tax.qualityFob")}</strong>
+                {t("tax.qualityFobBody")}
+              </span>
+            </div>
+            <div>
+              <CloudDownloadOutlined />
+              <span>
+                <strong>{t("tax.qualityArchive")}</strong>
+                {t("tax.qualityArchiveBody")}
+              </span>
+            </div>
           </section>
         </main>
       )}
 
       {view === "rates" && (
         <main className="tax-tool-page">
+          {/* 进页面就自检：密钥没配好时直接把配置方法写在这里，
+              而不是等用户点了同步再弹一句 "key is not configured"。 */}
+          {botStatus && (
+            <Alert
+              className="bot-status-alert"
+              showIcon
+              type={botStatus.configured ? "success" : "warning"}
+              message={
+                botStatus.configured
+                  ? t("tax.botConfigured")
+                  : t("tax.botNotConfigured")
+              }
+              description={
+                botStatus.configured
+                  ? t("tax.botConfiguredBody", {
+                      header: botStatus.authHeader,
+                      hint: botStatus.keyHint ?? "—",
+                      endpoint: botStatus.endpoint,
+                    })
+                  : t("tax.botNotConfiguredBody", {
+                      envVar: botStatus.envVar,
+                      file: "zwt-finance-system/.env",
+                    })
+              }
+            />
+          )}
           <div className="rate-stat-grid">
             <section>
-              <Statistic title="USD 汇率记录" value={rates.length} suffix="天" />
+              <Statistic
+                title={t("tax.rateRecords", { currency })}
+                value={rates.length}
+                suffix={t("tax.days")}
+              />
               <Progress
                 percent={Math.min(100, Math.round((rates.length / 366) * 100))}
                 showInfo={false}
                 strokeColor="#a87349"
               />
-              <small>列表最多显示最近 500 条</small>
+              <small>{t("tax.rateListLimit")}</small>
             </section>
             <section>
               <Statistic
                 precision={4}
-                title="最近 Buying Transfer"
+                title={t("tax.latestBuyingTransfer")}
                 value={Number(rates[0]?.buyingTransfer ?? 0)}
               />
-              <small>{rates[0]?.rateDate ?? "尚未导入"} · {rates[0]?.source ?? "—"}</small>
+              <small>
+                {rates[0]?.rateDate ?? t("tax.notImported")} · {rates[0]?.source ?? "—"}
+              </small>
             </section>
             <section className="rate-actions-card">
-              <Button icon={<ApiOutlined />} type="primary" onClick={() => setFetchOpen(true)}>
-                从 BOT API 同步
+              <label className="rate-currency-field">
+                <span>{t("tax.currency")}</span>
+                <Select
+                  options={CURRENCY_CHOICES.map((code) => ({
+                    value: code,
+                    label: currencies.includes(code) ? code : `${code} · ${t("tax.noData")}`,
+                  }))}
+                  showSearch
+                  value={currency}
+                  onChange={setCurrency}
+                />
+              </label>
+              <Button
+                disabled={botUnconfigured}
+                icon={<ApiOutlined />}
+                type="primary"
+                onClick={() => setFetchOpen(true)}
+              >
+                {t("tax.syncFromBot")}
               </Button>
               <Upload
                 accept=".xlsx,.xls"
@@ -1035,77 +1222,111 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                   setRateFile(null);
                 }}
               >
-                <Button icon={<FileExcelOutlined />}>选择 BOT Excel</Button>
+                <Button icon={<FileExcelOutlined />}>{t("tax.pickBotExcel")}</Button>
               </Upload>
-              <Button disabled={!rateFile} loading={busy} onClick={() => void runRateImport()}>
-                导入所选文件
+              <Button
+                disabled={!rateFile}
+                loading={busy}
+                onClick={() => void runRateImport()}
+              >
+                {t("tax.importPicked")}
               </Button>
             </section>
           </div>
           <section className="rate-ledger-card">
             <div className="section-title-row">
               <div>
-                <span className="workspace-kicker">EXCHANGE RATE LEDGER</span>
-                <h2>汇率台账</h2>
+                <span className="workspace-kicker">{t("tax.rateLedgerKicker")}</span>
+                <h2>{t("tax.rateLedger")}</h2>
               </div>
               <Button icon={<ReloadOutlined />} onClick={() => void refreshRates()}>
-                刷新
+                {t("common.refresh")}
               </Button>
             </div>
             {rates.length ? (
               <Table
                 columns={[
-                  { title: "币种", dataIndex: "currency", width: 100 },
-                  { title: "汇率日期", dataIndex: "rateDate", width: 150 },
+                  { title: t("tax.colCurrency"), dataIndex: "currency", width: 90 },
+                  { title: t("tax.colRateDay"), dataIndex: "rateDate", width: 120 },
                   {
-                    title: "Buying Transfer",
+                    // 出口税票取的就是这一列，加粗与其余三种区分开。
+                    title: `Buying Transfer · ${t("tax.rateUsedForInvoice")}`,
                     dataIndex: "buyingTransfer",
-                    width: 180,
+                    width: 190,
                     align: "right",
-                    render: (value: string) => Number(value).toFixed(4),
+                    render: (value: string) => <strong>{Number(value).toFixed(4)}</strong>,
                   },
                   {
-                    title: "来源",
+                    title: "Buying Sight",
+                    dataIndex: "buyingSight",
+                    width: 130,
+                    align: "right",
+                    render: rateCell,
+                  },
+                  {
+                    title: "Selling",
+                    dataIndex: "selling",
+                    width: 120,
+                    align: "right",
+                    render: rateCell,
+                  },
+                  {
+                    title: "Mid Rate",
+                    dataIndex: "midRate",
+                    width: 120,
+                    align: "right",
+                    render: rateCell,
+                  },
+                  {
+                    title: t("tax.colSource"),
                     dataIndex: "source",
                     width: 150,
                     render: (value: string) => (
                       <Tag>{value === "bot_api" ? "BOT API" : "BOT Excel"}</Tag>
                     ),
                   },
-                  { title: "源文件", dataIndex: "sourceFileName", ellipsis: true },
+                  { title: t("tax.colSourceFile"), dataIndex: "sourceFileName", ellipsis: true },
                   {
-                    title: "更新时间",
+                    title: t("tax.colUpdatedAt"),
                     dataIndex: "updatedAt",
                     width: 190,
-                    render: dateTime,
+                    render: (value: string) => dateTime(value, locale),
                   },
                 ]}
                 dataSource={rates}
                 pagination={{ pageSize: 15, showSizeChanger: false }}
                 rowKey={(record) => `${record.currency}-${record.rateDate}`}
+                scroll={{ x: 1100 }}
               />
             ) : (
-              <Empty description="尚未导入 BOT 汇率" />
+              <Empty description={t("tax.noRates")} />
             )}
           </section>
         </main>
       )}
 
       <Modal
-        cancelText="取消"
+        cancelText={t("common.cancel")}
         confirmLoading={busy}
-        okText="开始同步"
+        okText={t("tax.startSync")}
         open={fetchOpen}
-        title="从泰国央行 BOT API 同步汇率"
+        title={t("tax.botModalTitle")}
         onCancel={() => setFetchOpen(false)}
         onOk={() => void runBotFetch()}
       >
-        <p className="modal-intro">
-          API 凭证只从服务器环境变量读取，不会显示或保存在浏览器。
-        </p>
+        <p className="modal-intro">{t("tax.botModalIntro")}</p>
         <Space direction="vertical" size="middle" style={{ width: "100%" }}>
           <label className="date-field">
-            <span>开始日期</span>
+            <span>{t("tax.currency")}</span>
+            <Select
+              options={CURRENCY_CHOICES.map((code) => ({ value: code, label: code }))}
+              showSearch
+              value={currency}
+              onChange={setCurrency}
+            />
+          </label>
+          <label className="date-field">
+            <span>{t("tax.startDate")}</span>
             <Input
               type="date"
               value={fetchDates.startDate}
@@ -1118,7 +1339,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
             />
           </label>
           <label className="date-field">
-            <span>结束日期</span>
+            <span>{t("tax.endDate")}</span>
             <Input
               type="date"
               value={fetchDates.endDate}
@@ -1134,75 +1355,71 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
       </Modal>
 
       <Modal
-        cancelText="取消"
+        cancelText={t("common.cancel")}
         className="tax-edit-modal"
         confirmLoading={busy}
-        okText="保存复核资料"
+        okText={t("tax.editSave")}
         open={editOpen}
-        title="编辑 TAX INV 复核资料"
+        title={t("tax.editTitle")}
         width={1040}
         onCancel={() => setEditOpen(false)}
         onOk={() => void saveEdit()}
       >
-        <Alert
-          message="开票日期必须填写报关单提交日期；汇率目标日和实际命中日请分别维护。"
-          showIcon
-          type="info"
-        />
+        <Alert message={t("tax.editHint")} showIcon type="info" />
         <Form form={editForm} layout="vertical">
           <div className="tax-edit-grid">
             <Form.Item
-              label="开票日期（报关提交日）"
+              label={t("tax.invoiceDate")}
               name="invoiceDate"
-              rules={[{ required: true, message: "请选择开票日期" }]}
+              rules={[{ required: true, message: t("tax.invoiceDateRequired") }]}
             >
               <Input type="date" />
             </Form.Item>
             <Form.Item
-              label="汇率目标日期"
+              label={t("tax.exchangeTargetDate")}
               name="exchangeTargetDate"
-              rules={[{ required: true, message: "请选择汇率目标日期" }]}
+              rules={[{ required: true, message: t("tax.targetDateRequired") }]}
             >
               <Input type="date" />
             </Form.Item>
-            <Form.Item label="实际汇率日期" name="exchangeRateDate">
+            <Form.Item label={t("tax.exchangeRateDate")} name="exchangeRateDate">
               <Input type="date" />
             </Form.Item>
             <Form.Item
               label="BOT Buying Transfer"
               name="exchangeRate"
-              rules={[{ required: true, message: "请输入汇率" }]}
+              rules={[{ required: true, message: t("tax.rateRequired") }]}
             >
               <InputNumber min={0.000001} precision={6} />
             </Form.Item>
             <Form.Item
-              label="客户名称"
+              label={t("tax.customerName")}
               name="customerName"
-              rules={[{ required: true, message: "请输入客户名称" }]}
+              rules={[{ required: true, message: t("tax.customerNameRequired") }]}
             >
               <Input className="thai-input" />
             </Form.Item>
             <Form.Item
               className="tax-edit-address"
-              label="客户地址"
+              label={t("tax.customerAddress")}
               name="customerAddress"
-              rules={[{ required: true, message: "请输入客户地址" }]}
+              rules={[{ required: true, message: t("tax.customerAddressRequired") }]}
             >
               <Input className="thai-input" />
             </Form.Item>
-            <Form.Item label="税号" name="taxId"><Input /></Form.Item>
+            <Form.Item label={t("tax.taxId")} name="taxId"><Input /></Form.Item>
             <Form.Item label="PO No." name="poNo"><Input /></Form.Item>
-            <Form.Item label="贸易条款" name="incoterms"><Input /></Form.Item>
-            <Form.Item label="付款条件" name="paymentTerm"><Input /></Form.Item>
+            <Form.Item label={t("tax.incoterms")} name="incoterms"><Input /></Form.Item>
+            <Form.Item label={t("tax.paymentTerm")} name="paymentTerm"><Input /></Form.Item>
           </div>
-          <Divider titlePlacement="left">商品明细（最多 18 行）</Divider>
+          <Divider titlePlacement="left">{t("tax.itemsDivider")}</Divider>
           <Form.List
             name="items"
             rules={[
               {
                 async validator(_, items) {
-                  if (!items?.length) throw new Error("至少保留一条商品");
-                  if (items.length > 18) throw new Error("正式模板最多 18 条商品");
+                  if (!items?.length) throw new Error(t("tax.atLeastOneItem"));
+                  if (items.length > 18) throw new Error(t("tax.atMost18Items"));
                 },
               },
             ]}
@@ -1211,9 +1428,15 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
               <>
                 <div className="tax-item-editor">
                   <div className="tax-item-editor-head">
-                    <span>#</span><span>商品名称</span><span>商品代码</span>
-                    <span>单位</span><span>数量</span><span>FOB 单价</span>
-                    <span>FOB USD</span><span>FOB THB</span><span />
+                    <span>#</span>
+                    <span>{t("tax.colProductName")}</span>
+                    <span>{t("tax.colProductCode")}</span>
+                    <span>{t("tax.colUnit")}</span>
+                    <span>{t("tax.colQuantity")}</span>
+                    <span>{t("tax.colFobUnitPrice")}</span>
+                    <span>FOB USD</span>
+                    <span>FOB THB</span>
+                    <span />
                   </div>
                   {fields.map((field, index) => (
                     <div className="tax-item-editor-row" key={field.key}>
@@ -1256,7 +1479,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                   type="dashed"
                   onClick={() => add({ lineNumber: fields.length + 1 })}
                 >
-                  添加商品行
+                  {t("tax.addItem")}
                 </Button>
               </>
             )}
@@ -1265,29 +1488,29 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
       </Modal>
 
       <Modal
-        cancelText="取消"
+        cancelText={t("common.cancel")}
         confirmLoading={busy}
         okButtonProps={{ danger: workflowAction === "void" }}
-        okText={workflowAction === "void" ? "确认作废" : "建立更正单"}
+        okText={workflowAction === "void" ? t("tax.voidOk") : t("tax.correctionOk")}
         open={workflowAction !== null}
-        title={workflowAction === "void" ? "作废正式税票" : "从已作废税票建立更正单"}
+        title={workflowAction === "void" ? t("tax.voidTitle") : t("tax.correctionTitle")}
         onCancel={() => setWorkflowAction(null)}
         onOk={() => void runWorkflowAction()}
       >
         <Alert
           message={
-            workflowAction === "void"
-              ? "作废后原正式编号永久保留，不会回收或重复使用。"
-              : "更正单会复制原商品和客户资料，但必须重新复核，并分配新的正式编号。"
+            workflowAction === "void" ? t("tax.voidWarning") : t("tax.correctionWarning")
           }
           showIcon
           type={workflowAction === "void" ? "warning" : "info"}
         />
         <label className="workflow-reason-field">
-          <span>{workflowAction === "void" ? "作废原因" : "更正原因"}</span>
+          <span>
+            {workflowAction === "void" ? t("tax.voidReason") : t("tax.correctionReason")}
+          </span>
           <Input.TextArea
             maxLength={1000}
-            placeholder="请输入可供审计追溯的原因"
+            placeholder={t("tax.reasonPlaceholder")}
             rows={4}
             value={workflowReason}
             onChange={(event) => setWorkflowReason(event.target.value)}

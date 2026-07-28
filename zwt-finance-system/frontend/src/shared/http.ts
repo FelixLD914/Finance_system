@@ -19,6 +19,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** 逐条明细。批量导入会一次退回所有出错行，界面要能全部列出来。 */
+    readonly details: string[] = [],
   ) {
     super(message);
     this.name = "ApiError";
@@ -75,14 +77,21 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
+type ErrorDetail = string | { message?: string; errors?: string[] };
+
 async function toError(response: Response): Promise<ApiError> {
-  const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-  const detail = body?.detail ?? `请求失败（${response.status}）`;
+  const body = (await response.json().catch(() => null)) as { detail?: ErrorDetail } | null;
+  const raw = body?.detail;
+  // FastAPI 的 detail 可以是字符串，也可以是对象；批量导入用的是后者
+  // （{message, errors}）。不分开处理会得到一句 "[object Object]"。
+  const message =
+    (typeof raw === "string" ? raw : raw?.message) ?? `请求失败（${response.status}）`;
+  const details = typeof raw === "string" ? [] : (raw?.errors ?? []);
   if (response.status === 401) {
     onUnauthorized?.();
-    return new UnauthorizedError(detail);
+    return new UnauthorizedError(message);
   }
-  return new ApiError(detail, response.status);
+  return new ApiError(message, response.status, details);
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {

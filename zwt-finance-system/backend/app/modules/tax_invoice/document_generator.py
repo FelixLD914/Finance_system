@@ -16,10 +16,17 @@ from app.modules.tax_invoice.models import TaxInvoice, TaxInvoiceItem
 
 # 模板里的大写金额是 BAHTTEXT()，PDF 链路没有 Excel 求值，得自己算。
 # WHT 早就实现了同一套泰文数字，直接复用，避免两份实现各写各的。
-from app.modules.wht.document_generator import thai_baht_text
+from app.modules.wht.document_generator import build_blue_signature, thai_baht_text
 
 DATA_START_ROW = 23
 MAX_ITEMS = 18
+
+# 「ผู้มีอำนาจลงนาม/Authorized Signature」签名框，(x, y, 宽, 高)，单位 PDF 点，
+# 原点在页面左下角。从 TAX-INV-Template.pdf 底版量出：该框横跨右下角
+# "On behalf of ZHENWESTERN..." 与 "Authorized Signature" 标签之间。
+# 三联的 y 相同（见 pdf_layout 头部说明），所以三页共用这一个框。
+# 底版重新制版后必须连同 pdf_layout 一起复核。
+SIGNATURE_BOX = (398.0, 112.0, 150.0, 46.0)
 
 # 模板一页横排三联：ORIGINAL 在 B:R，两联 COPY 分别右移 18 / 36 列，
 # 且整片区域都是 "=B23" 这类镜像公式。print_area 也正是这三段，
@@ -271,8 +278,13 @@ def export_pdf_from_template(
     invoice: TaxInvoice,
     items: list[TaxInvoiceItem],
     thai_font_path: Path,
+    signature_source_path: Path | None = None,
 ) -> None:
-    """在静态底版上叠加业务数据，生成三联 TAX INV，全程不碰 Office。"""
+    """在静态底版上叠加业务数据，生成三联 TAX INV，全程不碰 Office。
+
+    signature_source_path 给定时，在「ผู้มีอำนาจลงนาม/Authorized Signature」框内
+    盖章。三联都盖：副联必须与正本一致。
+    """
     if not pdf_template_path.is_file():
         raise TaxInvoiceDocumentGenerationError(
             f"TAX INV PDF template was not found: {pdf_template_path}"
@@ -291,6 +303,7 @@ def export_pdf_from_template(
     try:
         from pypdf import PdfReader, PdfWriter
         from reportlab.lib.colors import black
+        from reportlab.lib.utils import ImageReader
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
         from reportlab.pdfgen import canvas
@@ -300,6 +313,12 @@ def export_pdf_from_template(
         ) from exc
 
     pdfmetrics.registerFont(TTFont(THAI_FONT_NAME, str(thai_font_path)))
+    # 与 WHT 共用同一套蓝笔化处理：去掉近白底、只留笔画并统一成蓝色墨迹，
+    # 两种单据上的签名观感必须一致。
+    prepared_signature: Path | None = None
+    if signature_source_path is not None:
+        prepared_signature = pdf_path.with_suffix(".signature.png")
+        build_blue_signature(signature_source_path, prepared_signature)
     header, lines, totals = pdf_field_values(invoice, items)
     reader = PdfReader(str(pdf_template_path))
     if len(reader.pages) != pdf_layout.PAGE_COUNT:
@@ -363,6 +382,18 @@ def export_pdf_from_template(
                 pdf_layout.TOTAL_BASELINES[field],
             )
 
+        if prepared_signature is not None and prepared_signature.exists():
+            overlay.drawImage(
+                ImageReader(str(prepared_signature)),
+                SIGNATURE_BOX[0],
+                SIGNATURE_BOX[1],
+                width=SIGNATURE_BOX[2],
+                height=SIGNATURE_BOX[3],
+                preserveAspectRatio=True,
+                anchor="c",
+                mask="auto",
+            )
+
         overlay.save()
         buffer.seek(0)
         writer.add_page(page)
@@ -370,6 +401,8 @@ def export_pdf_from_template(
 
     with pdf_path.open("wb") as output:
         writer.write(output)
+    if prepared_signature is not None:
+        prepared_signature.unlink(missing_ok=True)
 
 
 def _fit(text: str, font: str, size: float, max_width: float | None) -> tuple[float, str]:

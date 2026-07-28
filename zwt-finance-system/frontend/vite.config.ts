@@ -17,8 +17,11 @@ function readPort(value: string | undefined, fallback: number): number {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, "ZWT_");
+  // 优先级：ZWT_DEV_PORT（本项目的显式覆盖）> PORT（通用工具链分配的端口，
+  // 例如预览面板在 5273 被占用时会另分一个）> 5273 默认值。
+  // API 走本服务的 /api 代理（相对路径），换端口不影响会话 Cookie。
   const devPort = readPort(
-    process.env.ZWT_DEV_PORT ?? env.ZWT_DEV_PORT,
+    process.env.ZWT_DEV_PORT ?? env.ZWT_DEV_PORT ?? process.env.PORT,
     DEFAULT_DEV_PORT,
   );
   const previewPort = readPort(

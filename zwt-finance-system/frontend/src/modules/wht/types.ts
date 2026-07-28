@@ -32,7 +32,6 @@ export interface WhtTask {
   whtRate: string | null;
   totalAmount: string;
   whtAmount: string;
-  documentCount: number;
   amountTextThai: string | null;
   dateTextThai: string | null;
   sourceFileName: string | null;
@@ -57,7 +56,6 @@ export interface WhtTaskCreateInput {
   dueDate?: string | null;
   whtRate: number;
   totalAmount: number;
-  documentCount: number;
 }
 
 export interface Payee {
@@ -94,6 +92,41 @@ export interface ImportResult {
   errors: string[];
 }
 
+/** 收入类型目录项。落库的仍是 labelTh —— WHT 正式文件按泰文打印。 */
+export interface IncomeTypeOption {
+  code: string;
+  labelTh: string;
+  labelEn: string;
+  labelZh: string;
+  section: string;
+  rates: Array<{ whtType: WhtType; rate: string }>;
+  /** 本公司历史台账里实际用过的类型，排在目录前面。 */
+  inUse: boolean;
+}
+
+export interface BatchCreateResult {
+  sourceFileName: string;
+  created: number;
+  taskIds: string[];
+}
+
+export interface BatchTransitionItem {
+  taskId: string;
+  succeeded: boolean;
+  taskNo: string | null;
+  error: string | null;
+}
+
+export interface BatchTransitionResult {
+  action: string;
+  succeeded: number;
+  failed: number;
+  items: BatchTransitionItem[];
+}
+
+/** 一张签名图能盖在哪种单据上。WHT 与 TAX INV 可能是不同的签字人。 */
+export type SignatureUsage = "wht" | "tax_inv" | "both";
+
 export interface SignatureAsset {
   id: string;
   name: string;
@@ -102,6 +135,8 @@ export interface SignatureAsset {
   sha256: string;
   version: number;
   status: "active" | "inactive";
+  usage: SignatureUsage;
+  /** 默认签名按适用范围各算各的：WHT 和 TAX INV 可以各有一张默认。 */
   isDefault: boolean;
   createdByName: string;
   updatedByName: string;

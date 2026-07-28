@@ -13,6 +13,7 @@ import {
   Form,
   Input,
   Modal,
+  Radio,
   Switch,
   Table,
   Tag,
@@ -22,8 +23,8 @@ import type { ColumnsType } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
 
 import type { Translate } from "../../i18n";
-import { listSignatures, updateSignature, uploadSignature } from "./api";
-import type { SignatureAsset } from "./types";
+import { listSignatures, updateSignature, uploadSignature } from "../wht/api";
+import type { SignatureAsset } from "../wht/types";
 
 interface SignatureLibraryProps {
   t: Translate;
@@ -64,7 +65,12 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         return;
       }
       setPending(true);
-      await uploadSignature(values.name, file, Boolean(values.makeDefault));
+      await uploadSignature(
+        values.name,
+        file,
+        Boolean(values.makeDefault),
+        values.usage,
+      );
       message.success(t("wht.signatureUploaded"));
       setUploadOpen(false);
       setFileList([]);
@@ -104,6 +110,16 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
             v{signature.version} · {signature.originalFileName}
           </span>
         </div>
+      ),
+    },
+    {
+      title: t("wht.signatureUsage"),
+      dataIndex: "usage",
+      width: 150,
+      render: (usage: SignatureAsset["usage"]) => (
+        <Tag color={usage === "both" ? "purple" : usage === "tax_inv" ? "blue" : "cyan"}>
+          {t(`wht.usage.${usage}` as Parameters<typeof t>[0])}
+        </Tag>
       ),
     },
     {
@@ -216,13 +232,32 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         onOk={() => void submitUpload()}
       >
         <p className="modal-intro">{t("wht.signatureApprovalHint")}</p>
-        <Form form={form} layout="vertical" initialValues={{ makeDefault: false }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ makeDefault: false, usage: "wht" }}
+        >
           <Form.Item
             name="name"
             label={t("wht.signatureName")}
             rules={[{ required: true }]}
           >
             <Input maxLength={160} />
+          </Form.Item>
+          <Form.Item
+            name="usage"
+            label={t("wht.signatureUsage")}
+            extra={t("wht.signatureUsageHint")}
+            rules={[{ required: true }]}
+          >
+            <Radio.Group
+              options={[
+                { value: "wht", label: t("wht.usage.wht") },
+                { value: "tax_inv", label: t("wht.usage.tax_inv") },
+                { value: "both", label: t("wht.usage.both") },
+              ]}
+              optionType="button"
+            />
           </Form.Item>
           <Form.Item label={t("wht.signatureFile")} required>
             <Upload

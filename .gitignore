@@ -25,6 +25,10 @@
 
 # Secrets and local runtime state
 **/.env
+# frontend/.env.example 明确指引用户复制成 .env.local 做本地覆盖，
+# 该文件必须和 .env 一样留在本地。
+**/.env.local
+**/.env.*.local
 !**/.env.example
 **/attachments/
 **/backups/
@@ -32,6 +36,9 @@
 **/runtime/
 
 # Local tooling
+# .claude/ 放的是本机的 launch.json / settings.local.json，以及 git worktree
+# 本体（.claude/worktrees/）。不入库，也避免误 `git add .` 把整个 worktree 加进来。
+/.claude/
 /.local/
 /.tmp/
 /.playwright-mcp/

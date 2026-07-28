@@ -1,14 +1,19 @@
 import { ApiError, UnauthorizedError, apiFetch, apiRequest } from "../../shared/http";
-import { samplePayees, sampleWhtTasks } from "./sampleData";
+import { demoIncomeTypes, samplePayees, sampleWhtTasks } from "./sampleData";
 import type {
+  BatchCreateResult,
+  BatchTransitionResult,
   ImportResult,
+  IncomeTypeOption,
   Payee,
   PayeeInput,
   SignatureAsset,
+  SignatureUsage,
   WhtDocument,
   WhtTask,
   WhtTaskCreateInput,
   WhtTaskEvent,
+  WhtType,
 } from "./types";
 
 const useDemoApi = import.meta.env.VITE_USE_MOCK_API === "true";
@@ -135,7 +140,6 @@ export async function createWhtTask(input: WhtTaskCreateInput): Promise<WhtTask>
       whtRate: String(input.whtRate),
       totalAmount: input.totalAmount.toFixed(2),
       whtAmount: (input.totalAmount * input.whtRate).toFixed(2),
-      documentCount: input.documentCount,
       amountTextThai: null,
       dateTextThai: null,
       sourceFileName: null,
@@ -238,10 +242,69 @@ export async function importHistoricalTasks(file: File): Promise<ImportResult> {
   return request<ImportResult>("/v1/wht/tasks/import", { method: "POST", body });
 }
 
-export async function listSignatures(includeInactive = true): Promise<SignatureAsset[]> {
+export async function listIncomeTypes(whtType?: WhtType): Promise<IncomeTypeOption[]> {
+  if (useDemoApi) return demoIncomeTypes;
+  const query = whtType ? `?whtType=${whtType}` : "";
+  return request<IncomeTypeOption[]>(`/v1/wht/income-types${query}`);
+}
+
+/** 批量开具：一张表建多条草稿。与 importHistoricalTasks 不同，这里不带正式编号。 */
+export async function batchCreateTasks(file: File): Promise<BatchCreateResult> {
+  if (useDemoApi) {
+    return { sourceFileName: file.name, created: 0, taskIds: [] };
+  }
+  const body = new FormData();
+  body.append("file", file);
+  return request<BatchCreateResult>("/v1/wht/tasks/batch-create", {
+    method: "POST",
+    body,
+  });
+}
+
+export async function downloadBatchTemplate(): Promise<void> {
+  if (useDemoApi) return;
+  const response = await apiFetch("/v1/wht/tasks/batch-template");
+  const url = URL.createObjectURL(await response.blob());
+  const anchor = window.document.createElement("a");
+  anchor.href = url;
+  anchor.download = "ZWT-WHT-BatchIssue-Template.xlsx";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function batchTransitionTasks(
+  action: "submit-review" | "approve" | "return-to-draft",
+  tasks: WhtTask[],
+): Promise<BatchTransitionResult> {
+  if (useDemoApi) {
+    const items = tasks.map((task) => {
+      const updated = demoTransition(task.id, action);
+      return {
+        taskId: task.id,
+        succeeded: true,
+        taskNo: updated.taskNo,
+        error: null,
+      };
+    });
+    return { action, succeeded: items.length, failed: 0, items };
+  }
+  return request<BatchTransitionResult>("/v1/wht/tasks/batch-transition", {
+    method: "POST",
+    body: JSON.stringify({
+      action,
+      items: tasks.map((task) => ({ taskId: task.id, version: task.version })),
+    }),
+  });
+}
+
+export async function listSignatures(
+  includeInactive = true,
+  usage?: "wht" | "tax_inv",
+): Promise<SignatureAsset[]> {
   if (useDemoApi) return clone(demoSignatures);
+  const scope = usage ? `&usage=${usage}` : "";
   return request<SignatureAsset[]>(
-    `/v1/wht/signatures?includeInactive=${includeInactive ? "true" : "false"}`,
+    `/v1/wht/signatures?includeInactive=${includeInactive ? "true" : "false"}${scope}`,
   );
 }
 
@@ -249,6 +312,7 @@ export async function uploadSignature(
   name: string,
   file: File,
   makeDefault: boolean,
+  usage: SignatureUsage = "wht",
 ): Promise<SignatureAsset> {
   if (useDemoApi) {
     const timestamp = nowIso();
@@ -266,6 +330,7 @@ export async function uploadSignature(
       sha256: "demo",
       version: 1,
       status: "active",
+      usage,
       isDefault: makeDefault,
       createdByName: "系统管理员",
       updatedByName: "系统管理员",
@@ -278,6 +343,7 @@ export async function uploadSignature(
   const body = new FormData();
   body.append("name", name);
   body.append("makeDefault", String(makeDefault));
+  body.append("usage", usage);
   body.append("file", file);
   return request<SignatureAsset>("/v1/wht/signatures", {
     method: "POST",

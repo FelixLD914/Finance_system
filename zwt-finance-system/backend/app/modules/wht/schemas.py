@@ -46,7 +46,6 @@ class WhtTaskCreate(ApiSchema):
     wht_rate: Decimal | None = Field(default=None, gt=0, le=1)
     total_amount: Decimal = Field(default=Decimal("0"), ge=0)
     wht_amount: Decimal | None = Field(default=None, ge=0)
-    document_count: int = Field(default=1, ge=0)
 
     @model_validator(mode="after")
     def validate_issue_scope_and_payee(self) -> "WhtTaskCreate":
@@ -73,7 +72,6 @@ class WhtTaskUpdate(ApiSchema):
     wht_rate: Decimal | None = Field(default=None, gt=0, le=1)
     total_amount: Decimal | None = Field(default=None, ge=0)
     wht_amount: Decimal | None = Field(default=None, ge=0)
-    document_count: int | None = Field(default=None, ge=0)
 
 
 class WhtWorkflowRequest(ApiSchema):
@@ -111,7 +109,6 @@ class WhtTaskResponse(ApiSchema):
     wht_rate: Decimal | None
     total_amount: Decimal
     wht_amount: Decimal
-    document_count: int
     amount_text_thai: str | None
     date_text_thai: str | None
     source_file_name: str | None
@@ -180,9 +177,63 @@ class ImportResult(ApiSchema):
     errors: list[str] = Field(default_factory=list)
 
 
+class IncomeTypeRate(ApiSchema):
+    """某个收入类型在某张申报表下的法定默认税率。"""
+
+    wht_type: WhtType
+    rate: Decimal
+
+
+class IncomeTypeOptionResponse(ApiSchema):
+    code: str
+    label_th: str
+    label_en: str
+    label_zh: str
+    section: str
+    rates: list[IncomeTypeRate]
+    in_use: bool
+
+
+class BatchCreateResult(ApiSchema):
+    """批量开具导入的结果。失败时整批退回（422），所以这里只有成功路径。"""
+
+    source_file_name: str
+    created: int
+    task_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class BatchTransitionRequestItem(ApiSchema):
+    task_id: uuid.UUID
+    version: int = Field(ge=1)
+
+
+class BatchTransitionRequest(ApiSchema):
+    action: Literal["submit-review", "approve", "return-to-draft"]
+    items: list[BatchTransitionRequestItem] = Field(min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class BatchTransitionItem(ApiSchema):
+    task_id: uuid.UUID
+    succeeded: bool
+    task_no: str | None = None
+    error: str | None = None
+
+
+class BatchTransitionResponse(ApiSchema):
+    action: str
+    succeeded: int
+    failed: int
+    items: list[BatchTransitionItem]
+
+
+SignatureUsage = Literal["wht", "tax_inv", "both"]
+
+
 class SignatureAssetUpdate(ApiSchema):
     status: Literal["active", "inactive"] | None = None
     is_default: bool | None = None
+    usage: SignatureUsage | None = None
 
 
 class SignatureAssetResponse(ApiSchema):
@@ -193,6 +244,7 @@ class SignatureAssetResponse(ApiSchema):
     sha256: str
     version: int
     status: Literal["active", "inactive"]
+    usage: SignatureUsage
     is_default: bool
     created_by_name: str
     updated_by_name: str

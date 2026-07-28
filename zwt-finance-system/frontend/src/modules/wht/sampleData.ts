@@ -1,4 +1,44 @@
-import type { Payee, WhtTask } from "./types";
+import type { IncomeTypeOption, Payee, WhtTask } from "./types";
+
+/** VITE_USE_MOCK_API 演示模式用的收入类型，与后端目录里 in_use 的三条一致。 */
+export const demoIncomeTypes: IncomeTypeOption[] = [
+  {
+    code: "service_fee",
+    labelTh: "ค่าบริการ",
+    labelEn: "Service fee",
+    labelZh: "服务费",
+    section: "มาตรา 40(8)",
+    rates: [
+      { whtType: "PND3", rate: "0.03" },
+      { whtType: "PND53", rate: "0.03" },
+    ],
+    inUse: true,
+  },
+  {
+    code: "transport_fee",
+    labelTh: "ค่าขนส่ง",
+    labelEn: "Transportation",
+    labelZh: "运输费",
+    section: "มาตรา 40(8)",
+    rates: [
+      { whtType: "PND3", rate: "0.01" },
+      { whtType: "PND53", rate: "0.01" },
+    ],
+    inUse: true,
+  },
+  {
+    code: "rental_fee",
+    labelTh: "ค่าเช่า",
+    labelEn: "Rental",
+    labelZh: "租金",
+    section: "มาตรา 40(5)",
+    rates: [
+      { whtType: "PND3", rate: "0.05" },
+      { whtType: "PND53", rate: "0.05" },
+    ],
+    inUse: true,
+  },
+];
 
 const commonTask = {
   issuanceType: "normal",
@@ -31,7 +71,6 @@ export const sampleWhtTasks: WhtTask[] = [
     whtType: "PND3",
     incomeType: "ค่าบริการ",
     whtRate: "0.03",
-    documentCount: 2,
     totalAmount: "86500.00",
     whtAmount: "2595.00",
     dueDate: "2026-07-25",
@@ -52,7 +91,6 @@ export const sampleWhtTasks: WhtTask[] = [
     whtType: "PND53",
     incomeType: "ค่าขนส่ง",
     whtRate: "0.01",
-    documentCount: 3,
     totalAmount: "242800.00",
     whtAmount: "2428.00",
     dueDate: "2026-07-20",
@@ -74,7 +112,6 @@ export const sampleWhtTasks: WhtTask[] = [
     whtType: "PND53",
     incomeType: "ค่าบริการ",
     whtRate: "0.03",
-    documentCount: 4,
     totalAmount: "119250.00",
     whtAmount: "3577.50",
     dueDate: "2026-07-28",

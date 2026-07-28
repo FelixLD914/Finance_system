@@ -65,8 +65,8 @@ select {
 }
 
 .thai-copy {
-  font-size: 1.28em;
-  line-height: 1.2;
+  font-size: 1em;
+  line-height: 1.4;
   letter-spacing: 0;
 }
 
@@ -276,15 +276,15 @@ select {
   gap: 16px;
   margin: 0;
   color: #1f1c19;
-  font-family: var(--font-display);
-  font-size: 48px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.035em;
+  font-family: var(--font-ui);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
 }
 
 .page-heading h1 small {
-  font-family: "Noto Serif SC Variable", "Songti SC", "SimSun", serif;
+  font-family: var(--font-ui);
   font-size: 0.64em;
   letter-spacing: 0.02em;
 }
@@ -385,6 +385,147 @@ select {
 
 .table-toolbar strong {
   font-size: 15px;
+}
+
+/* 勾选后工具条换成批量操作区，位置不变，避免表格上下跳动。 */
+.batch-toolbar {
+  background: #f7f1e9;
+  box-shadow: inset 3px 0 0 var(--camel);
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-empty {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.table-empty strong {
+  color: #4a423b;
+  font-size: 14px;
+}
+
+.table-empty span {
+  max-width: 380px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 导入下拉里两个条目必须一眼分清：一个迁移旧票，一个批量建新票。 */
+.import-menu-item {
+  display: grid;
+  gap: 3px;
+  max-width: 330px;
+  padding: 3px 0;
+}
+
+.import-menu-item strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.import-menu-item small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: normal;
+}
+
+.import-intro {
+  margin-bottom: 16px;
+}
+
+.import-steps-title {
+  margin: 0 0 8px;
+  color: #5a5149;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.import-steps {
+  margin: 0 0 18px;
+  padding-left: 20px;
+  color: #5f564e;
+  font-size: 12.5px;
+  line-height: 1.85;
+}
+
+.import-steps li + li {
+  margin-top: 4px;
+}
+
+.import-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* 整批退回时逐行列出问题，行数多也要能滚动看完。 */
+.import-error-list {
+  max-height: 320px;
+  margin: 0;
+  padding-left: 20px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  line-height: 1.8;
+}
+
+.income-type-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.income-type-option small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.income-type-option .ant-tag {
+  margin-inline-end: 0;
+  margin-left: auto;
+}
+
+.admin-intro {
+  max-width: 1280px;
+  margin: -6px auto 18px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.bot-status-alert {
+  max-width: 1320px;
+  margin: 0 auto 16px;
+}
+
+.rate-currency-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.rate-currency-field > span {
+  color: #5a5149;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rate-currency-field .ant-select {
+  flex: 1;
 }
 
 .work-surface .ant-table-wrapper {
@@ -535,8 +676,8 @@ select {
 
 .module-placeholder h1 {
   margin: 16px 0 6px;
-  font-family: var(--font-display);
-  font-size: 30px;
+  font-family: var(--font-ui);
+  font-size: 24px;
 }
 
 .module-placeholder p {
@@ -551,7 +692,8 @@ select {
   padding: 12px 14px;
   color: #655a50;
   background: #f6f1ea;
-  border-left: 3px solid var(--camel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -699,13 +841,8 @@ select {
   gap: 14px;
 }
 
-.task-form-grid-three {
-  grid-template-columns: 1.2fr 0.9fr 0.9fr;
-}
-
 .task-form-grid .ant-picker,
-.task-form-grid .ant-input-number,
-.task-form-grid-three .ant-input-number {
+.task-form-grid .ant-input-number {
   width: 100%;
 }
 
@@ -775,8 +912,7 @@ select {
 
 .workspace-kicker,
 .record-eyebrow,
-.tool-card-heading > div > span,
-.tax-rule-banner > div > span {
+.tool-card-heading > div > span {
   color: var(--camel);
   font-size: 10px;
   font-weight: 700;
@@ -789,16 +925,16 @@ select {
   gap: 14px;
   margin: 5px 0 7px;
   color: #1f1c19;
-  font-family: "Noto Serif SC Variable", "Songti SC", "SimSun", serif;
-  font-size: 29px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-family: var(--font-ui);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 .tax-workspace-header h1 span {
-  font-family: var(--font-display);
-  font-size: 42px;
-  letter-spacing: -0.035em;
+  font-family: var(--font-ui);
+  font-size: inherit;
+  letter-spacing: inherit;
 }
 
 .tax-workspace-header p {
@@ -807,40 +943,29 @@ select {
   font-size: 13px;
 }
 
-.tax-health-card {
-  display: flex;
+/* 规则说明是背景信息而不是待办：压成一枚胶囊，别再占一整张卡片。 */
+.tax-health-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 11px;
-  min-width: 270px;
-  margin-top: 7px;
-  padding: 13px 16px;
+  gap: 7px;
+  flex: none;
+  margin-top: 10px;
+  padding: 5px 12px;
+  color: #6b6058;
   background: rgba(255, 253, 249, 0.86);
   border: 1px solid var(--line);
-  border-radius: 11px;
-  box-shadow: 0 8px 28px rgba(65, 45, 29, 0.04);
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.tax-health-card .health-dot {
+.tax-health-pill .health-dot {
   width: 9px;
   height: 9px;
   background: #6b8c5c;
   border: 2px solid #dfe9da;
   border-radius: 50%;
   box-shadow: 0 0 0 3px #eef4eb;
-}
-
-.tax-health-card div {
-  display: grid;
-  gap: 3px;
-}
-
-.tax-health-card strong {
-  font-size: 12px;
-}
-
-.tax-health-card small {
-  color: var(--muted);
-  font-size: 10px;
 }
 
 .workspace-subnav {
@@ -932,8 +1057,8 @@ select {
 
 .tax-ledger-summary strong {
   color: #352a22;
-  font-family: var(--font-display);
-  font-size: 25px;
+  font-family: var(--font-ui);
+  font-size: 18px;
 }
 
 .tax-ledger-summary span {
@@ -1088,62 +1213,26 @@ select {
   padding: 22px 30px 32px;
 }
 
-.tax-rule-banner {
-  display: grid;
-  align-items: center;
-  grid-template-columns: auto minmax(300px, 1fr) auto;
-  gap: 18px;
-  max-width: 1320px;
-  margin: 0 auto 18px;
-  padding: 20px 22px;
-  color: #f8f2ea;
-  background: linear-gradient(115deg, #211e1b, #3d332b);
-  border-radius: 14px;
-  box-shadow: 0 16px 38px rgba(42, 30, 22, 0.12);
-}
-
-.rule-badge {
-  display: grid;
-  width: 46px;
-  height: 46px;
-  color: #d5a178;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.11);
-  border-radius: 12px;
-  place-items: center;
-  font-size: 20px;
-}
-
-.tax-rule-banner h2 {
-  margin: 3px 0 5px;
-  font-family: "Noto Serif SC Variable", serif;
-  font-size: 19px;
-}
-
-.tax-rule-banner p {
-  margin: 0;
-  color: #c8bdb3;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.rule-flow {
+/* 原来的 DATE GOVERNANCE 深色横幅（标题 + 正文 + 流程图）占掉首屏近三分之一，
+   而它讲的是一条一次性就能记住的规则。改成一行提示条，导入卡片直接上首屏。 */
+.tax-rule-note {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: 9px;
+  max-width: 1320px;
+  margin: 0 auto 16px;
+  padding: 9px 14px;
+  color: #6d6259;
+  background: rgba(255, 253, 249, 0.72);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--camel);
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.65;
 }
 
-.rule-flow span {
-  padding: 7px 10px;
-  color: #eee4dc;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.rule-flow b {
-  color: #b57f55;
+.tax-rule-note .anticon {
+  color: var(--camel);
 }
 
 .tax-import-grid {
@@ -1198,8 +1287,8 @@ select {
 .tool-card-heading h2 {
   margin: 2px 0 3px;
   color: #2d2722;
-  font-family: "Noto Serif SC Variable", serif;
-  font-size: 18px;
+  font-family: var(--font-ui);
+  font-size: 16px;
 }
 
 .tool-card-heading p {
@@ -1329,7 +1418,8 @@ select {
 
 .rate-ledger-card h2 {
   margin: 3px 0 0;
-  font-family: "Noto Serif SC Variable", serif;
+  font-family: var(--font-ui);
+  font-size: 16px;
 }
 
 .date-field {
@@ -1427,13 +1517,6 @@ select {
     grid-template-columns: minmax(660px, 1fr) 390px;
   }
 
-  .rule-flow {
-    display: none;
-  }
-
-  .tax-rule-banner {
-    grid-template-columns: auto 1fr;
-  }
 }
 
 /* --- 登录与启动态 ------------------------------------------------------- */
@@ -1459,7 +1542,7 @@ select {
 
 .login-title {
   margin-bottom: 4px !important;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   letter-spacing: 0.01em;
 }
 

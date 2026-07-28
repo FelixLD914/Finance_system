@@ -2,22 +2,29 @@ import uuid
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import PrincipalDependency, require_permission
-from app.modules.wht.document_service import WhtDocumentService
-from app.modules.wht.legacy_import import (
-    LegacyWorkbookError,
-    parse_payee_sheet,
-    parse_task_sheet,
+from app.modules.wht.batch_import import (
+    BatchWorkbookError,
+    build_template_workbook,
+    parse_batch_sheet,
 )
+from app.modules.wht.document_service import WhtDocumentService
+from app.modules.wht.income_types import options_for
+from app.modules.wht.legacy_import import parse_payee_sheet, parse_task_sheet
 from app.modules.wht.numbering import build_normal_number, build_supplement_number
 from app.modules.wht.schemas import (
+    BatchCreateResult,
+    BatchTransitionRequest,
+    BatchTransitionResponse,
     DocumentGenerateRequest,
     ImportResult,
+    IncomeTypeOptionResponse,
+    IncomeTypeRate,
     PayeeCreate,
     PayeeListResponse,
     PayeeResponse,
@@ -34,6 +41,7 @@ from app.modules.wht.schemas import (
     WhtWorkflowRequest,
 )
 from app.modules.wht.service import TaskAggregate, WhtService
+from app.modules.wht.workbook import WorkbookError
 
 # 整个 WHT 路由组要求已登录。逐个端点再用 require_permission 收紧到具体权限点。
 router = APIRouter(
@@ -118,6 +126,40 @@ async def number_preview(
         sequence=sequence,
         task_no=number.task_no,
         book_no=number.book_no,
+    )
+
+
+@router.get("/income-types", response_model=list[IncomeTypeOptionResponse])
+async def list_income_types(
+    wht_type: Literal["PND3", "PND53"] | None = Query(default=None, alias="whtType"),
+) -> list[IncomeTypeOptionResponse]:
+    """收入类型目录。前端据此把「收入类型」渲染成可选项并带出默认税率。"""
+    return [
+        IncomeTypeOptionResponse(
+            code=option.code,
+            label_th=option.label_th,
+            label_en=option.label_en,
+            label_zh=option.label_zh,
+            section=option.section,
+            rates=[
+                IncomeTypeRate(wht_type=name, rate=rate) for name, rate in option.rates.items()
+            ],
+            in_use=option.in_use,
+        )
+        for option in options_for(wht_type)
+    ]
+
+
+# 必须排在 /tasks/{task_id} 之前：task_id 声明为 UUID，
+# "batch-template" 到不了这个路由就会先被 UUID 校验拒成 422。
+@router.get("/tasks/batch-template")
+async def batch_issue_template() -> Response:
+    return Response(
+        content=build_template_workbook(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="ZWT-WHT-BatchIssue-Template.xlsx"'
+        },
     )
 
 
@@ -231,12 +273,71 @@ async def import_historical_tasks(
     service: WhtServiceDependency,
     file: Annotated[UploadFile, File(description="Legacy WHT Data.xlsx")],
 ) -> ImportResult:
+    """历史迁移：导入旧系统**已经开过**的 WHT 台账（表里必须有 RefNo 正式编号）。
+
+    落库状态直接是 issued，并把编号计数器推到该序号之后。要批量录入还没开的票，
+    用 /tasks/batch-create。
+    """
     content, file_name = await _read_xlsx(file)
     try:
         rows = parse_task_sheet(content)
-    except LegacyWorkbookError as exc:
+    except WorkbookError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await service.import_tasks(rows, file_name)
+
+
+@router.post(
+    "/tasks/batch-create",
+    response_model=BatchCreateResult,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def batch_create_tasks(
+    service: WhtServiceDependency,
+    file: Annotated[UploadFile, File(description="Batch issuance .xlsx")],
+) -> BatchCreateResult:
+    """批量开具：一张表建多条**草稿**，正式编号仍在批准时由服务器事务生成。"""
+    content, file_name = await _read_xlsx(file)
+    try:
+        rows = parse_batch_sheet(content)
+    except BatchWorkbookError as exc:
+        # 逐行问题一次性全给出来，用户改一轮就能过，不用一次试一行。
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc), "errors": exc.errors},
+        ) from exc
+    except WorkbookError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await service.batch_create_tasks(rows, file_name)
+
+
+@router.post(
+    "/tasks/batch-transition",
+    response_model=BatchTransitionResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def batch_transition(
+    payload: BatchTransitionRequest,
+    service: WhtServiceDependency,
+    principal: PrincipalDependency,
+) -> BatchTransitionResponse:
+    """批量提交复核 / 批准 / 退回。逐条独立提交，失败的那条不影响其余。"""
+    # 批准和退回属于审批动作，路由级的 wht:write 不够，这里按动作再收紧一次，
+    # 与单条端点 /approve、/return-to-draft 的权限要求保持一致。
+    if payload.action in {"approve", "return-to-draft"}:
+        principal.require("wht:approve")
+    items = await service.batch_transition(
+        payload.action,
+        [(item.task_id, item.version) for item in payload.items],
+        payload.note,
+    )
+    succeeded = sum(1 for item in items if item.succeeded)
+    return BatchTransitionResponse(
+        action=payload.action,
+        succeeded=succeeded,
+        failed=len(items) - succeeded,
+        items=items,
+    )
 
 
 @router.get("/payees", response_model=PayeeListResponse)
@@ -290,7 +391,7 @@ async def import_payees(
     content, file_name = await _read_xlsx(file)
     try:
         rows = parse_payee_sheet(content)
-    except LegacyWorkbookError as exc:
+    except WorkbookError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await service.import_payees(rows, file_name)
 
@@ -299,8 +400,10 @@ async def import_payees(
 async def list_signatures(
     service: WhtDocumentServiceDependency,
     include_inactive: bool = Query(default=False, alias="includeInactive"),
+    usage: Literal["wht", "tax_inv"] | None = Query(default=None),
 ) -> list[SignatureAssetResponse]:
-    signatures = await service.list_signatures(include_inactive)
+    """usage 过滤会带上标为 both 的签名；不传则返回整个图库。"""
+    signatures = await service.list_signatures(include_inactive, usage)
     return [SignatureAssetResponse.model_validate(signature) for signature in signatures]
 
 
@@ -314,6 +417,7 @@ async def create_signature(
     service: WhtDocumentServiceDependency,
     name: Annotated[str, Form(min_length=1, max_length=160)],
     make_default: Annotated[bool, Form(alias="makeDefault")] = False,
+    usage: Annotated[Literal["wht", "tax_inv", "both"], Form()] = "wht",
     file: Annotated[UploadFile, File(description="Approved PNG or JPEG signature image")] = ...,
 ) -> SignatureAssetResponse:
     maximum = min(get_settings().max_file_mib, 5) * 1024 * 1024
@@ -328,6 +432,7 @@ async def create_signature(
         original_file_name=file.filename or "signature",
         content=content,
         make_default=make_default,
+        usage=usage,
     )
     return SignatureAssetResponse.model_validate(signature)
 

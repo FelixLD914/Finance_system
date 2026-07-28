@@ -19,6 +19,7 @@ from app.modules.tax_invoice.recognition import (
     parse_sample_workbook,
 )
 from app.modules.tax_invoice.schemas import (
+    BotApiStatus,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
     ExchangeRateResponse,
@@ -319,6 +320,18 @@ async def import_exchange_rates(
     )
 
 
+@router.get("/exchange-rates/currencies", response_model=list[str])
+async def list_rate_currencies(service: ServiceDependency) -> list[str]:
+    """汇率台账里已有数据的币种，用于前端的币种下拉。"""
+    return await service.list_rate_currencies()
+
+
+@router.get("/exchange-rates/bot-status", response_model=BotApiStatus)
+async def bot_api_status(service: ServiceDependency) -> BotApiStatus:
+    """页面进入时自检：密钥没配好就直接显示配置指引，而不是等用户点了才报错。"""
+    return service.bot_api_status()
+
+
 @router.post(
     "/exchange-rates/fetch",
     response_model=ExchangeRateImportResponse,
@@ -331,9 +344,11 @@ async def fetch_exchange_rates(
     try:
         return await service.fetch_bot_exchange_rates(payload)
     except httpx.HTTPError as exc:
+        # 连不上/超时/TLS 失败：这类没有 HTTP 状态码，把 httpx 的原话带回去，
+        # 至少能区分"域名解析不了"和"代理挡了"。
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="BOT API request failed",
+            detail=f"BOT API request failed: {type(exc).__name__}: {exc}",
         ) from exc
 
 

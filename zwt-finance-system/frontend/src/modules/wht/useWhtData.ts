@@ -1,16 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
+  batchCreateTasks,
+  batchTransitionTasks,
   createWhtTask,
   getWhtTask,
   importHistoricalTasks,
   importPayees,
+  listIncomeTypes,
   listPayees,
   listWhtTasks,
   savePayee,
   transitionWhtTask,
 } from "./api";
-import type { Payee, PayeeInput, WhtTask, WhtTaskCreateInput } from "./types";
+import type {
+  IncomeTypeOption,
+  Payee,
+  PayeeInput,
+  WhtTask,
+  WhtTaskCreateInput,
+} from "./types";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "未知错误";
@@ -19,6 +28,7 @@ function errorMessage(error: unknown): string {
 export function useWhtData() {
   const [tasks, setTasks] = useState<WhtTask[]>([]);
   const [payees, setPayees] = useState<Payee[]>([]);
+  const [incomeTypes, setIncomeTypes] = useState<IncomeTypeOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [mutationPending, setMutationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +44,15 @@ export function useWhtData() {
       setError(errorMessage(loadError));
     } finally {
       setLoading(false);
+    }
+
+    // 收入类型目录单独取、失败不影响主数据：它只是把输入框从"自由文本"
+    // 升级成"带建议的自由文本"，取不到就退回自由输入，不该让整个台账打不开。
+    // 目录只有十来条且不随数据变化，所以整份取回、按 PND 类型在前端过滤。
+    try {
+      setIncomeTypes(await listIncomeTypes());
+    } catch {
+      setIncomeTypes([]);
     }
   }, []);
 
@@ -134,9 +153,39 @@ export function useWhtData() {
     }
   }, []);
 
+  const uploadBatchTasks = useCallback(async (file: File) => {
+    setMutationPending(true);
+    try {
+      const result = await batchCreateTasks(file);
+      setTasks(await listWhtTasks());
+      return result;
+    } finally {
+      setMutationPending(false);
+    }
+  }, []);
+
+  const runBatchTransition = useCallback(
+    async (
+      action: "submit-review" | "approve" | "return-to-draft",
+      selection: WhtTask[],
+    ) => {
+      setMutationPending(true);
+      try {
+        const result = await batchTransitionTasks(action, selection);
+        // 批量流转允许部分成功，本地无法逐条推断新状态，直接重新拉一遍列表。
+        setTasks(await listWhtTasks());
+        return result;
+      } finally {
+        setMutationPending(false);
+      }
+    },
+    [],
+  );
+
   return {
     tasks,
     payees,
+    incomeTypes,
     loading,
     mutationPending,
     error,
@@ -147,5 +196,7 @@ export function useWhtData() {
     persistPayee,
     uploadPayees,
     uploadHistoricalTasks,
+    uploadBatchTasks,
+    runBatchTransition,
   };
 }

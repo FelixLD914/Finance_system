@@ -91,7 +91,12 @@ export interface TaxInvoiceImportResult {
 export interface ExchangeRate {
   currency: string;
   rateDate: string;
+  /** 出口税票计价用的汇率，必有值。 */
   buyingTransfer: string;
+  /** BOT 同条记录里的另外三种报价；Excel 导入的行为 null。 */
+  buyingSight: string | null;
+  selling: string | null;
+  midRate: string | null;
   source: string;
   sourceFileName: string | null;
   updatedByName: string;
@@ -103,6 +108,16 @@ export interface ExchangeRateImportResult {
   currency: string;
   created: number;
   updated: number;
+}
+
+/** BOT 接口配置自检。keyHint 只有首尾各 4 位，完整密钥不出服务器。 */
+export interface BotApiStatus {
+  configured: boolean;
+  baseUrl: string;
+  endpoint: string;
+  authHeader: string;
+  keyHint: string | null;
+  envVar: string;
 }
 
 export interface TaxInvoiceDocument {

@@ -5,6 +5,7 @@ import {
   apiRequest,
 } from "../../shared/http";
 import type {
+  BotApiStatus,
   ExchangeRate,
   ExchangeRateImportResult,
   TaxInvoice,
@@ -94,13 +95,23 @@ export function importSample(file: File): Promise<TaxInvoiceImportResult> {
   });
 }
 
-export function listExchangeRates(): Promise<ExchangeRate[]> {
-  return request<ExchangeRate[]>("/v1/tax-invoice/exchange-rates?currency=USD");
+export function listExchangeRates(currency = "USD"): Promise<ExchangeRate[]> {
+  return request<ExchangeRate[]>(
+    `/v1/tax-invoice/exchange-rates?currency=${encodeURIComponent(currency)}`,
+  );
 }
 
-export function importExchangeRates(file: File): Promise<ExchangeRateImportResult> {
+/** 台账里已有数据的币种，用于币种下拉。 */
+export function listRateCurrencies(): Promise<string[]> {
+  return request<string[]>("/v1/tax-invoice/exchange-rates/currencies");
+}
+
+export function importExchangeRates(
+  file: File,
+  currency = "USD",
+): Promise<ExchangeRateImportResult> {
   const form = new FormData();
-  form.append("currency", "USD");
+  form.append("currency", currency);
   form.append("file", file);
   return request<ExchangeRateImportResult>("/v1/tax-invoice/exchange-rates/import", {
     method: "POST",
@@ -111,11 +122,17 @@ export function importExchangeRates(file: File): Promise<ExchangeRateImportResul
 export function fetchExchangeRates(
   startDate: string,
   endDate: string,
+  currency = "USD",
 ): Promise<ExchangeRateImportResult> {
   return request<ExchangeRateImportResult>("/v1/tax-invoice/exchange-rates/fetch", {
     method: "POST",
-    body: JSON.stringify({ currency: "USD", startDate, endDate }),
+    body: JSON.stringify({ currency, startDate, endDate }),
   });
+}
+
+/** BOT 接口配置自检。进页面就查，密钥没配好直接在界面上说清楚怎么配。 */
+export function getBotApiStatus(): Promise<BotApiStatus> {
+  return request<BotApiStatus>("/v1/tax-invoice/exchange-rates/bot-status");
 }
 
 export function listTaxInvoiceDocuments(
@@ -128,14 +145,16 @@ export function listTaxInvoiceDocuments(
 
 export function generateTaxInvoiceDocuments(
   invoiceId: string,
+  signatureId: string | null = null,
 ): Promise<TaxInvoiceDocument[]> {
   return request<TaxInvoiceDocument[]>(
     `/v1/tax-invoice/invoices/${invoiceId}/generate-documents`,
     {
       method: "POST",
       body: JSON.stringify({
-        includeSignature: false,
-        signatureId: null,
+        // 签名只盖在 PDF 上；后端还会再校验这张图的适用范围是否含 tax_inv。
+        includeSignature: signatureId !== null,
+        signatureId,
         formats: ["xlsx", "pdf"],
       }),
     },

@@ -93,6 +93,10 @@ class SignatureAsset(Base):
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    # 这张签名能盖在哪种单据上：wht / tax_inv / both。WHT 与 TAX INV 在旧工具里
+    # 用的是不同的人，所以适用范围必须显式记录。
+    usage: Mapped[str] = mapped_column(String(20), nullable=False, default="wht")
+    # 默认签名是"按适用范围"的：WHT 的默认和 TAX INV 的默认可以是两张不同的图。
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -126,7 +130,12 @@ class ExchangeRate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     rate_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # 出口税票一律按 buying transfer 计价，所以它是必填；其余三种是 BOT 同一条
+    # 记录里顺带给出的，留档备查，Excel 导入的行拿不到就是 NULL。
     buying_transfer: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+    buying_sight: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    selling: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
+    mid_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 6), nullable=True)
     source: Mapped[str] = mapped_column(String(40), nullable=False)
     source_file_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
     updated_by_name: Mapped[str] = mapped_column(String(160), nullable=False)

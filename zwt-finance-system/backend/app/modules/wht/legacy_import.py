@@ -1,74 +1,21 @@
 import re
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
-from io import BytesIO
 from typing import Any
 
-from openpyxl import load_workbook
-
 from app.modules.wht.numbering import compact_period
+from app.modules.wht.workbook import WorkbookError
+from app.modules.wht.workbook import date_value as _date
+from app.modules.wht.workbook import decimal_value as _decimal
+from app.modules.wht.workbook import load as _load
+from app.modules.wht.workbook import split_aliases as _aliases
+from app.modules.wht.workbook import tax_id as _tax_id
+from app.modules.wht.workbook import text as _text
 
 NORMAL_NUMBER_PATTERN = re.compile(r"^ZWT(?P<period>\d{6})(?P<sequence>\d{1,3})$")
 SUPPLEMENT_NUMBER_PATTERN = re.compile(r"^ZWT(?P<period>\d{6})BK(?P<run>[1-9])(?P<sequence>\d{2})$")
 
 
-class LegacyWorkbookError(ValueError):
-    pass
-
-
-def _text(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value).strip()
-
-
-def _tax_id(value: Any) -> str:
-    tax_id = re.sub(r"\D", "", _text(value))
-    if tax_id and len(tax_id) < 13:
-        tax_id = tax_id.zfill(13)
-    return tax_id
-
-
-def _aliases(value: Any) -> list[str]:
-    raw = _text(value)
-    if not raw:
-        return []
-    return list(dict.fromkeys(part.strip() for part in re.split(r"[/\n\r]+", raw) if part.strip()))
-
-
-def _decimal(value: Any, default: str = "0") -> Decimal:
-    raw = _text(value).replace(",", "")
-    if not raw:
-        return Decimal(default)
-    try:
-        return Decimal(raw)
-    except InvalidOperation as exc:
-        raise LegacyWorkbookError(f"invalid decimal value: {value}") from exc
-
-
-def _date(value: Any) -> date | None:
-    if value in (None, ""):
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    raw = _text(value).replace("/", "-")
-    for date_format in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(raw, date_format).date()
-        except ValueError:
-            continue
-    raise LegacyWorkbookError(f"invalid date value: {value}")
-
-
-def _load(content: bytes):
-    try:
-        return load_workbook(BytesIO(content), read_only=True, data_only=True)
-    except Exception as exc:
-        raise LegacyWorkbookError("the uploaded file is not a readable XLSX workbook") from exc
+class LegacyWorkbookError(WorkbookError):
+    """保留原名：路由和测试都按这个名字捕获历史迁移的解析失败。"""
 
 
 def parse_payee_sheet(content: bytes) -> list[dict[str, Any]]:

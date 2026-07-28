@@ -144,7 +144,11 @@ class TaxInvoiceImportResponse(ApiSchema):
 class ExchangeRateResponse(ApiSchema):
     currency: str
     rate_date: date
+    # 出口税票取 buying_transfer；其余三种留档备查，Excel 导入的行会是 null。
     buying_transfer: Decimal
+    buying_sight: Decimal | None = None
+    selling: Decimal | None = None
+    mid_rate: Decimal | None = None
     source: str
     source_file_name: str | None
     updated_by_name: str
@@ -156,6 +160,21 @@ class ExchangeRateImportResponse(ApiSchema):
     currency: str
     created: int
     updated: int
+
+
+class BotApiStatus(ApiSchema):
+    """BOT 汇率接口的配置自检结果。
+
+    key_hint 只回首尾各 4 位，用来确认"服务器读到的是不是我填的那把"，
+    完整密钥永远不出服务器——前端拿到也没用，只会多一处泄露面。
+    """
+
+    configured: bool
+    base_url: str
+    endpoint: str
+    auth_header: str
+    key_hint: str | None = None
+    env_var: str
 
 
 class ExchangeRateFetchRequest(ApiSchema):

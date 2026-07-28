@@ -9,9 +9,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ServiceError
+from app.modules.wht.batch_import import resolve_rate as resolve_batch_rate
 from app.modules.wht.models import IssueCounter, PayeeProfile, WhtTask, WhtTaskEvent
 from app.modules.wht.number_service import assign_number_on_approval
 from app.modules.wht.schemas import (
+    BatchCreateResult,
+    BatchTransitionItem,
     ImportResult,
     PayeeCreate,
     PayeeUpdate,
@@ -373,7 +376,6 @@ class WhtService:
                 **values,
                 payee_id=payee_id,
                 status="issued",
-                document_count=1,
                 source_file_name=source_file_name,
                 created_by_name="历史导入",
                 updated_by_name=self.actor_name,
@@ -389,6 +391,132 @@ class WhtService:
             result.created += 1
         await self.session.commit()
         return result
+
+    async def batch_create_tasks(
+        self,
+        rows: list[dict[str, Any]],
+        source_file_name: str,
+    ) -> BatchCreateResult:
+        """批量建草稿。全表校验通过才写库，任何一行不合格就整批退回。
+
+        草稿没有正式编号可以去重，"部分成功"会让用户改完重传时把已建的行再建一遍，
+        所以这里刻意不做逐行提交：先把收款方、税率全部解析好，最后一次 commit。
+        """
+        tax_ids = {row["payee_tax_id"] for row in rows}
+        payees = {
+            payee.tax_id: payee
+            for payee in (
+                await self.session.scalars(
+                    select(PayeeProfile).where(PayeeProfile.tax_id.in_(tax_ids))
+                )
+            ).all()
+        }
+
+        errors: list[str] = []
+        prepared: list[dict[str, Any]] = []
+        for row in rows:
+            row_number = row["row_number"]
+            payee = payees.get(row["payee_tax_id"])
+            if payee is None:
+                errors.append(
+                    f"row {row_number}: no payee with taxId {row['payee_tax_id']}; "
+                    f"add it to the payee master data first"
+                )
+                continue
+            if not payee.is_active:
+                errors.append(f"row {row_number}: payee {payee.name_th} is deactivated")
+                continue
+            wht_rate = resolve_batch_rate(row, payee.wht_type)
+            if wht_rate is None:
+                errors.append(
+                    f"row {row_number}: TaxRate is required because \"{row['income_type']}\" "
+                    f"is not in the income-type catalogue for {payee.wht_type}"
+                )
+                continue
+            if row["issuance_type"] == "normal" and row["supplement_run"] != 0:
+                errors.append(f"row {row_number}: normal issuance must use SupplementRun 0")
+                continue
+            prepared.append({"row": row, "payee": payee, "wht_rate": wht_rate})
+
+        if errors:
+            raise WhtStateError("; ".join(errors))
+
+        created: list[WhtTask] = []
+        for entry in prepared:
+            row, payee = entry["row"], entry["payee"]
+            task = WhtTask(
+                period=row["period"],
+                issuance_type=row["issuance_type"],
+                supplement_run=row["supplement_run"],
+                payee_id=payee.id,
+                company_name=payee.name_th,
+                company_name_en=payee.name_en,
+                payee_address=payee.address_th,
+                tax_id=payee.tax_id,
+                wht_type=payee.wht_type,
+                income_type=row["income_type"],
+                payment_date=row["payment_date"],
+                wht_rate=entry["wht_rate"],
+                total_amount=row["total_amount"],
+                wht_amount=self._calculated_wht_amount(
+                    row["total_amount"],
+                    entry["wht_rate"],
+                    None,
+                ),
+                source_file_name=source_file_name,
+                created_by_name=self.actor_name,
+                updated_by_name=self.actor_name,
+            )
+            self.session.add(task)
+            created.append(task)
+        await self.session.flush()
+        for task in created:
+            self.session.add(self._event(task, "batch_created", None, "draft", source_file_name))
+        await self.session.commit()
+        return BatchCreateResult(
+            source_file_name=source_file_name,
+            created=len(created),
+            task_ids=[task.id for task in created],
+        )
+
+    async def batch_transition(
+        self,
+        action: str,
+        items: list[tuple[uuid.UUID, int]],
+        note: str | None = None,
+    ) -> list[BatchTransitionItem]:
+        """批量流转。每条独立提交：批准要逐条取编号，一条失败不应回滚已拿到编号的。
+
+        与批量导入相反，这里"部分成功"是正确行为——重跑时已经流转过的那些会因为
+        状态校验被拒，不会重复扣号，所以逐条提交没有重复建数据的风险。
+        """
+        handlers = {
+            "submit-review": self.submit_for_review,
+            "approve": self.approve,
+            "return-to-draft": self.return_to_draft,
+        }
+        handler = handlers.get(action)
+        if handler is None:
+            raise WhtStateError(f"unsupported batch action: {action}")
+
+        results: list[BatchTransitionItem] = []
+        for task_id, version in items:
+            try:
+                aggregate = await handler(task_id, version, note)
+            except WhtServiceError as exc:
+                await self.session.rollback()
+                results.append(
+                    BatchTransitionItem(task_id=task_id, succeeded=False, error=str(exc))
+                )
+                continue
+            results.append(
+                BatchTransitionItem(
+                    task_id=task_id,
+                    succeeded=True,
+                    task_no=aggregate.task.task_no,
+                )
+            )
+        return results
 
     async def _load_task(
         self,

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
+from app.core.models import SignatureAsset
 from app.modules.tax_invoice.document_generator import (
     TaxInvoiceDocumentGenerationError,
     export_pdf_from_template,
@@ -27,6 +28,7 @@ from app.modules.tax_invoice.service import (
     TaxInvoiceNotFoundError,
     TaxInvoiceStateError,
 )
+from app.modules.wht.document_generator import signature_path
 
 
 class TaxInvoiceDocumentService:
@@ -108,6 +110,31 @@ class TaxInvoiceDocumentService:
         output_root = self._storage_path(relative_root.as_posix())
         output_root.mkdir(parents=True, exist_ok=False)
 
+        # 签名：图库是 WHT 与 TAX INV 共用的，但一张图能盖在哪种单据上由
+        # usage 决定——两种单据在旧工具里用的是不同的人。
+        signature: SignatureAsset | None = None
+        signature_file: Path | None = None
+        if payload.include_signature:
+            if payload.signature_id is None:
+                raise TaxInvoiceStateError("signatureId is required when includeSignature is true")
+            signature = await self.session.scalar(
+                select(SignatureAsset).where(SignatureAsset.id == payload.signature_id)
+            )
+            if signature is None:
+                raise TaxInvoiceNotFoundError("signature image was not found")
+            if signature.status != "active":
+                raise TaxInvoiceStateError("the selected signature is inactive")
+            if signature.usage not in {"tax_inv", "both"}:
+                raise TaxInvoiceStateError(
+                    "the selected signature is not approved for tax invoices"
+                )
+            signature_file = signature_path(
+                self.settings.attachment_root,
+                signature.storage_key,
+            )
+            if not signature_file.is_file():
+                raise TaxInvoiceNotFoundError("signature image file was not found")
+
         template_hashes: dict[str, str] = {}
         created_files: list[Path] = []
         documents: list[TaxInvoiceDocument] = []
@@ -130,6 +157,7 @@ class TaxInvoiceDocumentService:
                     invoice,
                     items,
                     self.settings.thai_font_path,
+                    signature_file,
                 )
                 template_hashes["pdf"] = hashlib.sha256(
                     pdf_template_path.read_bytes()
@@ -149,7 +177,8 @@ class TaxInvoiceDocumentService:
                 ) + 1
                 document = TaxInvoiceDocument(
                     invoice_id=invoice.id,
-                    signature_id=None,
+                    # 只有 PDF 会盖章；xlsx 走 Excel 模板，不叠图。
+                    signature_id=signature.id if signature and file_format == "pdf" else None,
                     file_format=file_format,
                     version=version,
                     file_name=path.name,

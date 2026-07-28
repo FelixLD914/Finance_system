@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     bot_api_base_url: str = "https://gateway.api.bot.or.th"
     bot_api_endpoint: str = "/Stat-ExchangeRate/v2/DAILY_AVG_EXG_RATE/"
     bot_api_key: str = ""
+    # BOT 网关认证头。旧版 ZWT-TAX-INV 工具用的是不带 scheme 的
+    # `Authorization: <token>`，本系统沿用同一口径；若央行改发 IBM 网关的
+    # client id，把 header 改成 X-IBM-Client-Id 即可，不必改代码。
+    bot_api_auth_header: str = "Authorization"
+    bot_api_auth_scheme: str = ""
+    # 分块之间的停顿。旧工具每 30 天一块并 sleep 1 秒，连续请求会被网关拒。
+    bot_api_chunk_pause_seconds: float = Field(default=1.0, ge=0, le=10)
+
+    @property
+    def bot_api_configured(self) -> bool:
+        return bool(self.bot_api_key.strip())
     bootstrap_admin_display_name: str = "系统管理员"
     bootstrap_admin_username: str = "admin"
 

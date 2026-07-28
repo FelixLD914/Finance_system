@@ -68,7 +68,6 @@ class WhtTask(Base):
             "(issuance_type = 'supplement' AND supplement_run BETWEEN 1 AND 9)",
             name="supplement_run_matches_type",
         ),
-        CheckConstraint("document_count >= 0", name="document_count_non_negative"),
         CheckConstraint("version >= 1", name="version_positive"),
         Index("ix_wht_tasks_period_status", "period", "status"),
         {"schema": "wht"},
@@ -101,7 +100,6 @@ class WhtTask(Base):
     wht_amount: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False, default=Decimal("0")
     )
-    document_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     amount_text_thai: Mapped[str | None] = mapped_column(Text, nullable=True)
     date_text_thai: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
