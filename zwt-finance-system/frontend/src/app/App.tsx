@@ -47,7 +47,8 @@ export function App() {
       ) : activeModule === "tax-invoice" ? (
         <TaxInvoiceWorkspace locale={locale} t={t} />
       ) : activeModule === "salary-advance" ? (
-        <SalaryAdvanceWorkspace t={t} />
+        // 签名维护统一在系统管理，工资预支页需要能把用户送过去。
+        <SalaryAdvanceWorkspace t={t} onNavigateModule={setActiveModule} />
       ) : activeModule === "administration" ? (
         <AdministrationWorkspace t={t} />
       ) : (

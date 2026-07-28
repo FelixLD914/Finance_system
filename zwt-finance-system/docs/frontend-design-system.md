@@ -23,12 +23,32 @@
 
 ## 公共组件
 
-- `FinancePageHeader`：26px 无衬线页面标题、说明、模块页签和操作区。
-- `FinanceLifecycleTabs`：固定阶段顺序与计数，WHT / TAX INV 只提供状态映射。
-- `FinanceStatusBadge`：语义状态色；业务类别不得借用成功/警告/危险色。
-- `FinanceRecordDrawer`：440px 覆盖式详情、统一标题/状态/页脚动作。
-- `formatFinanceAmount` / `formatFinanceDateTime`：金额与日期显示的唯一入口。
-- `tokens.css`：字体、颜色、间距、圆角、动效和兼容变量。
+新增页面**先在这里找**，找不到再往模块 CSS 里加。任何模块都不得自己重定义
+标题字号、卡片圆角、状态色和金额/日期格式。
+
+| 件 | 用途 | 落地情况 |
+| --- | --- | --- |
+| `.workspace-header` + `.workspace-kicker` | 模块页头：10px 字距标识 + 26px 无衬线标题 + 13px 说明 | TAX INV、工资预支 |
+| `.workspace-subnav` | 模块内视图切换（胶囊按钮） | TAX INV、工资预支 |
+| `.workspace-health-pill` | 常驻背景信息压成胶囊，不占卡片 | TAX INV（`.tax-health-pill`）、工资预支 |
+| `FinanceLifecycleTabs` | 固定阶段顺序与计数，模块只提供状态映射 | WHT、TAX INV |
+| `FinanceStatusBadge` | 语义状态色；业务类别不得借用成功/警告/危险色 | 工资预支 |
+| `FinanceRecordDrawer` | 440px 覆盖式详情、统一标题/状态/页脚动作 | 工资预支 |
+| `formatFinanceAmount` / `formatFinanceDateTime` | 金额与日期显示的唯一入口 | 工资预支 |
+| `tokens.css` | 字体、颜色、间距、圆角、动效和兼容变量 | 全站 |
+
+**已知欠账**（新增页面别照着旧页抄，按上表办）：
+
+- WHT 仍用 `.page-heading` + `.workspace-view-switch` 这套更早的页头，与
+  `.workspace-header` 并存；应择机统一到 `.workspace-header`。
+- `FinancePageHeader` 组件与 `.finance-page-header` 样式都在仓库里，但没有页面
+  使用（页头目前是手写 `.workspace-header` 结构）。要么让它成为唯一页头入口，
+  要么删掉——不要维持"文档推荐、代码不用"的状态。
+- WHT / TAX INV 的状态标签仍是直接写 antd `Tag` 配色，未走
+  `FinanceStatusBadge`。
+
+字体分工：`--font-ui` 用于一切界面文字；`--font-brand`（Cormorant Garamond）
+**只**用于侧栏 logo 与登录页，页面标题一律无衬线。
 
 ## 业务功能的界面落位
 
@@ -41,6 +61,9 @@
 | 签名适用范围 | 系统管理 / 签名图库 | 显示 WHT、TAX INV、两者通用；默认值按范围独立 |
 | TAX INV 出票签名 | 待出具详情动作 | 只在适用范围内自动选取默认签名，绝不跨范围选用；无可用签名时出具不带签名的文件 |
 | BOT 配置自检与多币种 | TAX INV / BOT 汇率中心 | 汇率查询与数据入库分开；报价表优先展示 Buying Transfer |
+| 工资预支批次与开具 | 工资预支单 / 批次与开具 | 导入→校验→锁定→生成的单链路；未锁定批次可删除重来 |
+| 工资预支模板版本 | 工资预支单 / 模板与签名 | 只显示版本与「三件套一致」，制版哈希收进 Tooltip |
+| 工资预支签名 | 系统管理 / 签名库 | 签名代码＝签名库名称，取最新有效版本；本模块只跳转不维护 |
 
 后续新增功能沿用同样的落位方式：页面结构、组件、密度和颜色以本文件为准；不得恢复
 分栏挤压台账、大号衬线标题或卡片拼贴。

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircleOutlined,
-  CloseOutlined,
   CloudDownloadOutlined,
   DeleteOutlined,
   DownloadOutlined,
@@ -23,7 +22,6 @@ import {
   App as AntApp,
   Button,
   Descriptions,
-  Drawer,
   Empty,
   Form,
   Input,
@@ -33,15 +31,21 @@ import {
   Select,
   Space,
   Table,
-  Tag,
+  Tooltip,
   Upload,
 } from "antd";
 import type { UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { Translate } from "../../i18n";
-import { listSignatures } from "../wht/api";
-import type { SignatureAsset } from "../wht/types";
+import type { ModuleKey } from "../registry";
+import {
+  FinanceRecordDrawer,
+  FinanceStatusBadge,
+  type FinanceStatusTone,
+  formatFinanceAmount,
+  formatFinanceDateTime,
+} from "../../ui";
 import {
   createSalaryAdvanceJob,
   deleteSalaryAdvanceBatch,
@@ -84,10 +88,42 @@ const batchLabels: Record<BatchStatus, string> = {
   failed: "生成失败",
 };
 
+// 语义色只表达状态，不用来区分业务类别（见 frontend-design-system.md）。
+const batchTones: Record<BatchStatus, FinanceStatusTone> = {
+  validating: "neutral",
+  validation_failed: "danger",
+  ready: "info",
+  locked: "info",
+  generating: "info",
+  completed: "success",
+  partially_completed: "warning",
+  failed: "danger",
+};
+
 const validationLabels: Record<ValidationStatus, string> = {
   valid: "通过",
   warning: "有警告",
   invalid: "错误",
+};
+
+const validationTones: Record<ValidationStatus, FinanceStatusTone> = {
+  valid: "success",
+  warning: "warning",
+  invalid: "danger",
+};
+
+const generationLabels: Record<string, string> = {
+  pending: "待生成",
+  generating: "生成中",
+  success: "已生成",
+  failed: "生成失败",
+};
+
+const generationTones: Record<string, FinanceStatusTone> = {
+  pending: "neutral",
+  generating: "info",
+  success: "success",
+  failed: "danger",
 };
 
 function displayValue(value: unknown): string {
@@ -95,32 +131,26 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-function dateTime(value: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("zh-CN", { hour12: false });
-}
-
 function BatchStatusTag({ status }: { status: BatchStatus }) {
-  const color =
-    status === "completed"
-      ? "green"
-      : status === "validation_failed" || status === "failed"
-        ? "red"
-        : status === "partially_completed"
-          ? "orange"
-          : status === "generating"
-            ? "processing"
-            : status === "locked"
-              ? "blue"
-              : "default";
-  return <Tag color={color}>{batchLabels[status]}</Tag>;
+  return <FinanceStatusBadge label={batchLabels[status]} tone={batchTones[status]} />;
 }
 
 function ValidationTag({ status }: { status: ValidationStatus }) {
-  const color = status === "valid" ? "green" : status === "warning" ? "orange" : "red";
-  return <Tag color={color}>{validationLabels[status]}</Tag>;
+  return (
+    <FinanceStatusBadge
+      label={validationLabels[status]}
+      tone={validationTones[status]}
+    />
+  );
+}
+
+function GenerationTag({ status }: { status: string }) {
+  return (
+    <FinanceStatusBadge
+      label={generationLabels[status] ?? status}
+      tone={generationTones[status] ?? "neutral"}
+    />
+  );
 }
 
 interface RecordDrawerProps {
@@ -148,51 +178,58 @@ function RecordDrawer({
   const data = record.normalizedData;
   const issues = [...record.validationErrors, ...record.validationWarnings];
   return (
-    <Drawer
-      className="salary-record-drawer"
-      destroyOnHidden
+    <FinanceRecordDrawer
       open
-      placement="right"
-      title={
-        <div className="salary-drawer-title">
-          <span>工资预支记录</span>
-          <strong>{record.empId}</strong>
+      status={<ValidationTag status={record.validationStatus} />}
+      title={record.empId}
+      footer={
+        <div className="inspector-actions">
+          <Button
+            block
+            disabled={busy || record.validationStatus === "invalid"}
+            icon={<EyeOutlined />}
+            onClick={onPreview}
+          >
+            PDF 预览
+          </Button>
+          <Button block disabled={busy} icon={<EditOutlined />} onClick={onEdit}>
+            修正记录
+          </Button>
         </div>
-      }
-      width={560}
-      closeIcon={false}
-      extra={
-        <Button
-          aria-label="关闭明细"
-          icon={<CloseOutlined />}
-          type="text"
-          onClick={onClose}
-        />
       }
       onClose={onClose}
     >
-      <div className="salary-drawer-status">
-        <ValidationTag status={record.validationStatus} />
-        <Tag>{record.generationStatus}</Tag>
-        <span>源表第 {record.sourceRowNo} 行 · v{record.version}</span>
-      </div>
+      <section className="inspector-section">
+        <div className="section-title-row">
+          <h3>状态</h3>
+          <span>
+            源表第 {record.sourceRowNo} 行 · v{record.version}
+          </span>
+        </div>
+        <Space size={6} wrap>
+          <ValidationTag status={record.validationStatus} />
+          <GenerationTag status={record.generationStatus} />
+        </Space>
+      </section>
 
       {issues.length > 0 && (
-        <Alert
-          className="salary-issue-alert"
-          showIcon
-          type={record.validationErrors.length ? "error" : "warning"}
-          message={`${record.validationErrors.length} 个错误，${record.validationWarnings.length} 个警告`}
-          description={
-            <ul>
-              {issues.map((issue) => (
-                <li key={`${issue.field}-${issue.code}`}>
-                  <strong>{issue.field}</strong>：{issue.message}
-                </li>
-              ))}
-            </ul>
-          }
-        />
+        <section className="inspector-section">
+          <Alert
+            className="salary-issue-alert"
+            showIcon
+            type={record.validationErrors.length ? "error" : "warning"}
+            message={`${record.validationErrors.length} 个错误，${record.validationWarnings.length} 个警告`}
+            description={
+              <ul>
+                {issues.map((issue) => (
+                  <li key={`${issue.field}-${issue.code}`}>
+                    <strong>{issue.field}</strong>：{issue.message}
+                  </li>
+                ))}
+              </ul>
+            }
+          />
+        </section>
       )}
 
       <section className="inspector-section">
@@ -215,10 +252,14 @@ function RecordDrawer({
             {displayValue(data.reason)}
           </Descriptions.Item>
           <Descriptions.Item label="预支金额">
-            THB {displayValue(data.advance_amount)}
+            <span className="money-value">
+              {formatFinanceAmount(data.advance_amount as string, "THB")}
+            </span>
           </Descriptions.Item>
           <Descriptions.Item label="月扣金额">
-            THB {displayValue(data.monthly_deduction)}
+            <span className="money-value">
+              {formatFinanceAmount(data.monthly_deduction as string, "THB")}
+            </span>
           </Descriptions.Item>
         </Descriptions>
       </section>
@@ -263,7 +304,7 @@ function RecordDrawer({
                     v{document.generationVersion}
                     <small>
                       {document.status === "success"
-                        ? dateTime(document.createdAt)
+                        ? formatFinanceDateTime(document.createdAt)
                         : document.errorMessage}
                     </small>
                   </span>
@@ -298,23 +339,17 @@ function RecordDrawer({
         )}
       </section>
 
-      <div className="salary-drawer-actions">
-        <Button
-          disabled={busy || record.validationStatus === "invalid"}
-          icon={<EyeOutlined />}
-          onClick={onPreview}
-        >
-          PDF 预览
-        </Button>
-        <Button disabled={busy} icon={<EditOutlined />} onClick={onEdit}>
-          修正记录
-        </Button>
-      </div>
-    </Drawer>
+    </FinanceRecordDrawer>
   );
 }
 
-export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
+export function SalaryAdvanceWorkspace({
+  t,
+  onNavigateModule,
+}: {
+  t: Translate;
+  onNavigateModule?: (module: ModuleKey) => void;
+}) {
   const { message, modal } = AntApp.useApp();
   const [view, setView] = useState<WorkspaceView>("ledger");
   const [batches, setBatches] = useState<SalaryAdvanceBatch[]>([]);
@@ -324,7 +359,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   );
   const [jobDetail, setJobDetail] = useState<SalaryAdvanceJobDetail | null>(null);
   const [templates, setTemplates] = useState<SalaryAdvanceTemplate[]>([]);
-  const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [period, setPeriod] = useState("");
@@ -374,12 +408,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const loadMaintenance = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextTemplates, nextSignatures] = await Promise.all([
-        listSalaryAdvanceTemplates(),
-        listSignatures(false),
-      ]);
-      setTemplates(nextTemplates);
-      setSignatures(nextSignatures);
+      setTemplates(await listSalaryAdvanceTemplates());
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -608,8 +637,8 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     {
       title: "文件",
       dataIndex: "generationStatus",
-      width: 96,
-      render: (value: string) => <Tag>{value}</Tag>,
+      width: 106,
+      render: (value: string) => <GenerationTag status={value} />,
     },
   ];
 
@@ -649,39 +678,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       title: "导入时间",
       dataIndex: "createdAt",
       width: 168,
-      render: dateTime,
-    },
-  ];
-
-  // 工资预支不再有独立的绑定表：签名代码 = 共享签名库里的名称。
-  // 这里只读展示签名库现状，维护动作统一走 系统管理 → 签名库。
-  const signatureColumns: ColumnsType<SignatureAsset> = [
-    {
-      title: "签名代码（签名库名称）",
-      dataIndex: "name",
-      width: 260,
-      render: (value: string, signature) => (
-        <div className="salary-batch-name">
-          <strong>{value}</strong>
-          <span>v{signature.version} · {signature.originalFileName}</span>
-        </div>
-      ),
-    },
-    {
-      title: "适用范围",
-      dataIndex: "usage",
-      width: 130,
-      render: (value: SignatureAsset["usage"]) => (
-        <Tag color={value === "both" ? "purple" : value === "tax_inv" ? "blue" : "cyan"}>
-          {value}
-        </Tag>
-      ),
-    },
-    {
-      title: "SHA-256",
-      dataIndex: "sha256",
-      ellipsis: true,
-      render: (value: string) => <span className="hash-value">{value}</span>,
+      render: formatFinanceDateTime,
     },
   ];
 
@@ -709,7 +706,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void reload()}>
           查询
         </Button>
-        <span className="salary-filter-spacer" />
         <Button icon={<UploadOutlined />} type="primary" onClick={() => setImportOpen(true)}>
           导入工资预支表
         </Button>
@@ -740,7 +736,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       </section>
 
       {selected ? (
-        <section className="salary-table-card salary-record-card">
+        <section className="salary-table-card">
           <div className="salary-batch-toolbar">
             <div>
               <span>{selected.batch.batchNo}</span>
@@ -920,17 +916,11 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
 
   const renderMaintenance = () => (
     <div className="salary-maintenance">
-      <Alert
-        showIcon
-        type="info"
-        message="服务器运行时不依赖 Office"
-        description="正式 PDF 使用已批准的一页静态底版和坐标版本生成；XLSX、PDF、坐标三者哈希必须匹配。模板升级通过受控发布流程制版，页面不接受任意模板覆盖。"
-      />
       <section className="salary-table-card">
         <div className="salary-section-heading">
           <div>
-            <span>TEMPLATE TRIPLE</span>
-            <strong>模板版本与制版资产</strong>
+            <span>TEMPLATE VERSION</span>
+            <strong>模板版本</strong>
           </div>
           <Button
             icon={<ReloadOutlined />}
@@ -949,79 +939,84 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
             {
               title: "版本",
               dataIndex: "version",
-              width: 90,
+              width: 110,
               render: (value: string, template) => (
                 <Space>
                   <strong>{value}</strong>
-                  {template.active && <Tag color="green">当前</Tag>}
+                  {template.active && (
+                    <FinanceStatusBadge label="当前" tone="success" />
+                  )}
                 </Space>
               ),
             },
-            { title: "Excel 模板", dataIndex: "fileName", width: 240 },
+            { title: "Excel 模板", dataIndex: "fileName", ellipsis: true },
             {
-              title: "XLSX SHA-256",
-              dataIndex: "sha256",
-              ellipsis: true,
-              render: (value: string) => <span className="hash-value">{value}</span>,
-            },
-            {
-              title: "PDF SHA-256",
-              dataIndex: "pdfUnderlaySha256",
-              ellipsis: true,
-              render: (value: string) => <span className="hash-value">{value}</span>,
-            },
-            {
-              title: "坐标版本",
-              dataIndex: "pdfLayoutVersion",
+              // 哈希是审计线索不是日常信息：正式文件的 manifest 里已完整留存，
+              // 这里只表明三件套一致，具体值收进 Tooltip。
+              title: "制版校验",
+              key: "integrity",
               width: 150,
+              render: (_, template) => (
+                <Tooltip
+                  title={
+                    <div className="salary-hash-tip">
+                      <div>XLSX：{template.sha256}</div>
+                      <div>PDF 底版：{template.pdfUnderlaySha256}</div>
+                      <div>坐标版本：{template.pdfLayoutVersion}</div>
+                    </div>
+                  }
+                >
+                  <span>
+                    <FinanceStatusBadge label="三件套一致" tone="info" />
+                  </span>
+                </Tooltip>
+              ),
+            },
+            {
+              title: "启用时间",
+              dataIndex: "createdAt",
+              width: 170,
+              render: formatFinanceDateTime,
             },
           ]}
         />
       </section>
 
-      <section className="salary-table-card">
-        <div className="salary-section-heading">
-          <div>
-            <span>SHARED SIGNATURE LIBRARY</span>
-            <strong>共享签名库（只读）</strong>
-          </div>
-        </div>
-        <Alert
-          className="salary-modal-alert"
-          showIcon
-          type="info"
-          message="签名代码即签名库中的名称"
-          description="记录里的财务/总经理签名代码（如 FIN_XING_LANHUI）直接对应签名库里同名资产的最新有效版本。上传、换版、停用签名请到 系统管理 → 签名库（仅管理员）。"
-        />
-        <Table<SignatureAsset>
-          columns={signatureColumns}
-          dataSource={signatures}
-          loading={loading}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
-          rowKey="id"
-          size="small"
-        />
-      </section>
+      <Alert
+        showIcon
+        type="info"
+        message="签名维护在「系统管理 → 签名库」"
+        description="记录里的财务/总经理签名代码（如 FIN_XING_LANHUI）直接对应签名库中同名签名的最新有效版本，本模块不单独维护签名。"
+        action={
+          onNavigateModule && (
+            <Button
+              size="small"
+              type="primary"
+              onClick={() => onNavigateModule("administration")}
+            >
+              前往签名库
+            </Button>
+          )
+        }
+      />
     </div>
   );
 
   return (
     <section className="salary-workspace" aria-label={t("nav.salaryAdvance")}>
-      <header className="salary-workspace-header">
+      {/* 页头排版走共享的 .workspace-header，与 TAX INV 同一套字号和间距。 */}
+      <header className="workspace-header">
         <div>
-          <span className="workspace-kicker">CONTROLLED DOCUMENT ISSUANCE</span>
-          <h1>
-            工资预支单 <span>Salary Advance</span>
-          </h1>
+          <span className="workspace-kicker">SALARY ADVANCE</span>
+          <h1>工资预支单</h1>
           <p>导入、校验、签名快照和正式文件全链路留痕。</p>
         </div>
-        <div className="salary-runtime-card">
-          <span className="health-dot" />
-          <div>
-            <strong>无 Office 生成链路</strong>
-            <small>ReportLab + pypdf · A4 单页</small>
-          </div>
-        </div>
+        <Tooltip title="正式 PDF 由 ReportLab + pypdf 生成，服务器不需要安装 Office">
+          <span className="workspace-health-pill">
+            <span className="health-dot" />
+            无 Office 生成链路
+          </span>
+        </Tooltip>
       </header>
 
       <nav className="workspace-subnav" aria-label="工资预支功能">

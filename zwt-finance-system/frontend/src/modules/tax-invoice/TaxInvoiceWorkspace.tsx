@@ -850,7 +850,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
 
   return (
     <section className="tax-workspace" aria-label={t("nav.taxInvoice")}>
-      <header className="workspace-header tax-workspace-header">
+      <header className="workspace-header">
         <div>
           <span className="workspace-kicker">{t("tax.kicker")}</span>
           <h1>

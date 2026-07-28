@@ -1,4 +1,4 @@
-@import "@fontsource/dm-sans/400.css";
+﻿@import "@fontsource/dm-sans/400.css";
 @import "@fontsource/dm-sans/500.css";
 @import "@fontsource/dm-sans/600.css";
 @import "@fontsource/dm-sans/700.css";
@@ -919,7 +919,10 @@ select {
   letter-spacing: 0.16em;
 }
 
-.tax-workspace-header h1 {
+/* 模块页头排版是全站共享的一套：26px 无衬线标题 + 13px 说明。
+   任何模块页头挂上 .workspace-header 就自动继承，不要按模块另起一套
+   （尤其不要大号衬线标题——那是品牌字，只用于登录页和侧栏 logo）。 */
+.workspace-header h1 {
   display: flex;
   align-items: baseline;
   gap: 14px;
@@ -931,19 +934,20 @@ select {
   letter-spacing: -0.015em;
 }
 
-.tax-workspace-header h1 span {
+.workspace-header h1 span {
   font-family: var(--font-ui);
   font-size: inherit;
   letter-spacing: inherit;
 }
 
-.tax-workspace-header p {
+.workspace-header p {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
 }
 
 /* 规则说明是背景信息而不是待办：压成一枚胶囊，别再占一整张卡片。 */
+.workspace-health-pill,
 .tax-health-pill {
   display: inline-flex;
   align-items: center;
@@ -959,6 +963,7 @@ select {
   white-space: nowrap;
 }
 
+.workspace-health-pill .health-dot,
 .tax-health-pill .health-dot {
   width: 9px;
   height: 9px;
@@ -1564,151 +1569,48 @@ select {
 
 }
 
-/* Salary Advance workspace */
+/* --- 工资预支单 ---------------------------------------------------------
+   页头、抽屉、状态标签、金额与日期一律走公共件（.workspace-header /
+   FinanceRecordDrawer / FinanceStatusBadge / formatFinance*），这里只保留
+   本模块独有的批次指标条与生成任务条。新增模块照此办理：先找公共件，
+   找不到再往这里加，不要整套重定义标题、间距和颜色。 */
 .salary-workspace {
   height: 100%;
   min-height: 0;
-  padding: 24px 28px 36px;
   overflow: auto;
-  background:
-    radial-gradient(circle at 92% 4%, rgba(168, 115, 73, 0.09), transparent 24%),
-    var(--paper);
-}
-
-.salary-workspace-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 18px;
-}
-
-.salary-workspace-header h1 {
-  margin: 2px 0 3px;
-  font-family: var(--font-display);
-  font-size: 38px;
-  line-height: 1;
-  font-weight: 600;
-}
-
-.salary-workspace-header h1 span {
-  margin-left: 8px;
-  color: var(--camel);
-  font-size: 23px;
-  font-style: italic;
-}
-
-.salary-workspace-header p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.salary-runtime-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 248px;
-  padding: 10px 14px;
-  background: rgba(255, 253, 249, 0.82);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.salary-runtime-card .health-dot {
-  width: 9px;
-  height: 9px;
-  background: #49845b;
-  border-radius: 50%;
-  box-shadow: 0 0 0 4px rgba(73, 132, 91, 0.13);
-}
-
-.salary-runtime-card div {
-  display: grid;
-}
-
-.salary-runtime-card strong {
-  font-size: 12px;
-}
-
-.salary-runtime-card small {
-  color: var(--muted);
-  font-size: 10px;
+  background: var(--finance-canvas);
 }
 
 .salary-ledger,
 .salary-maintenance {
   display: grid;
-  gap: 14px;
-  margin-top: 15px;
+  gap: 12px;
+  padding: 14px 20px 24px;
 }
 
 .salary-filter-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 136px 160px auto 1fr auto;
   align-items: center;
   gap: 8px;
   padding: 10px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-
-.salary-filter-bar > .ant-input-affix-wrapper {
-  width: 180px;
-}
-
-.salary-filter-bar > .ant-select {
-  width: 190px;
-}
-
-.salary-filter-spacer {
-  flex: 1;
+  background: var(--finance-surface);
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-md);
 }
 
 .salary-table-card,
 .salary-empty-card {
-  min-width: 0;
   overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  box-shadow: 0 7px 25px rgba(49, 41, 35, 0.035);
+  background: var(--finance-surface);
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-md);
 }
 
 .salary-empty-card {
   display: grid;
-  min-height: 260px;
   place-items: center;
-}
-
-.salary-table-card > .ant-table-wrapper .ant-table-thead > tr > th {
-  padding-block: 8px;
-  color: #6b6157;
-  background: #f4efe8;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.035em;
-}
-
-.salary-table-card > .ant-table-wrapper .ant-table-tbody > tr {
-  cursor: pointer;
-}
-
-.salary-table-card > .ant-table-wrapper .ant-table-tbody > tr:hover > td,
-.salary-table-card
-  > .ant-table-wrapper
-  .ant-table-tbody
-  > tr.selected-table-row
-  > td {
-  background: #fbf3e9;
-}
-
-.salary-table-card
-  > .ant-table-wrapper
-  .ant-table-tbody
-  > tr.selected-table-row
-  > td:first-child {
-  box-shadow: inset 3px 0 var(--camel);
+  padding: 44px 0;
 }
 
 .salary-section-heading,
@@ -1716,224 +1618,147 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
+  gap: 16px;
+  min-height: 46px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--finance-border);
 }
 
-.salary-section-heading > div,
-.salary-batch-toolbar > div:first-child {
-  display: grid;
-}
-
-.salary-section-heading span,
-.salary-batch-toolbar span {
-  color: var(--camel);
-  font-size: 9px;
+.salary-section-heading > div > span,
+.salary-batch-toolbar > div:first-child > span {
+  display: block;
+  color: var(--finance-primary);
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.16em;
 }
 
 .salary-section-heading strong,
 .salary-batch-toolbar strong {
-  margin-top: 2px;
-  font-family: var(--font-display);
-  font-size: 20px;
+  display: block;
+  color: var(--finance-text);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  letter-spacing: -0.01em;
 }
 
 .salary-section-heading small {
-  color: var(--muted);
-}
-
-.salary-batch-name {
-  display: grid;
-  min-width: 0;
+  color: var(--finance-text-muted);
+  font-size: 12px;
 }
 
 .salary-batch-name strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
+  display: block;
+  color: var(--finance-text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .salary-batch-name span {
-  overflow: hidden;
-  color: var(--muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10px;
+  color: var(--finance-text-muted);
+  font-size: 11px;
 }
 
-.error-copy {
-  color: #b33b38;
-}
-
+/* 批次指标条：四个计数横排；错误数非零时转危险色。 */
 .salary-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border-bottom: 1px solid var(--line);
-  background: #faf7f2;
+  display: flex;
+  flex-wrap: wrap;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--finance-border);
 }
 
 .salary-metrics > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 9px 16px;
-}
-
-.salary-metrics > div + div {
-  border-left: 1px solid var(--line);
+  min-width: 120px;
+  padding: 10px 18px 9px 0;
 }
 
 .salary-metrics span {
-  color: var(--muted);
-  font-size: 10px;
+  display: block;
+  color: var(--finance-text-muted);
+  font-size: 12px;
 }
 
 .salary-metrics strong {
-  font-family: var(--font-display);
-  font-size: 24px;
+  color: var(--finance-text);
+  font-family: var(--font-ui);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
 }
 
 .salary-metrics .has-error strong {
-  color: #b33b38;
+  color: var(--finance-danger-text);
 }
 
+/* 生成任务条：进度与产物下载。 */
 .salary-job-strip {
   display: grid;
-  grid-template-columns: 180px minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(180px, auto) minmax(160px, 1fr) auto;
   align-items: center;
-  gap: 14px;
-  padding: 9px 14px;
-  background: #f4efe8;
-  border-bottom: 1px solid var(--line);
+  gap: 16px;
+  padding: 10px 12px;
+  background: var(--finance-surface-muted);
+  border-bottom: 1px solid var(--finance-border);
 }
 
-.salary-job-strip > div:first-child {
-  display: grid;
+.salary-job-strip > div:first-child span {
+  display: block;
+  color: var(--finance-text-muted);
+  font-size: 11px;
 }
 
-.salary-job-strip span {
-  color: var(--muted);
-  font-size: 9px;
-  text-transform: uppercase;
-}
-
-.salary-job-strip strong {
-  font-size: 12px;
+.salary-job-strip > div:first-child strong {
+  color: var(--finance-text);
+  font-size: 13px;
 }
 
 .salary-job-strip .ant-progress {
   margin: 0;
 }
 
-.salary-record-drawer .ant-drawer-body {
-  padding: 14px 18px 80px;
-}
-
-.salary-drawer-title {
-  display: grid;
-}
-
-.salary-drawer-title span {
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-}
-
-.salary-drawer-title strong {
-  font-family: var(--font-display);
-  font-size: 22px;
-}
-
-.salary-drawer-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.salary-drawer-status > span:last-child {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.salary-issue-alert {
-  margin-bottom: 12px;
-}
-
-.salary-issue-alert ul {
-  max-height: 140px;
-  margin: 7px 0 0;
-  padding-left: 18px;
-  overflow: auto;
-}
-
-.hash-value {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  color: #75695f;
-  font-family: Consolas, monospace;
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
-
+/* 抽屉内的生成文件列表。 */
 .salary-document-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  gap: 12px;
+  padding: 8px 0;
 }
 
 .salary-document-row + .salary-document-row {
-  margin-top: 6px;
+  border-top: 1px solid var(--finance-border);
 }
 
 .salary-document-row > div:first-child {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
-  min-width: 0;
 }
 
 .salary-document-row span {
   display: grid;
-  font-size: 11px;
+  min-width: 0;
+  color: var(--finance-text);
+  font-size: 13px;
 }
 
 .salary-document-row small {
   overflow: hidden;
-  color: var(--muted);
-  font-size: 9px;
+  color: var(--finance-text-muted);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.salary-drawer-actions {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 18px;
-  background: rgba(255, 253, 249, 0.96);
-  border-top: 1px solid var(--line);
+.salary-issue-alert {
+  margin: 0 0 12px;
 }
 
-.salary-maintenance > .ant-alert {
-  border-color: #d9c6ad;
-  background: #fbf6ed;
+.salary-issue-alert ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .salary-modal-alert {
@@ -1948,7 +1773,7 @@ select {
 .salary-edit-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0 12px;
+  gap: 0 16px;
 }
 
 .salary-edit-grid .ant-input-number {
@@ -1959,13 +1784,32 @@ select {
   grid-column: 1 / -1;
 }
 
+.hash-value {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--finance-text-muted);
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 制版哈希只在 Tooltip 里给审计看，不占表格列宽。 */
+.salary-hash-tip {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
 @media (max-width: 1320px) {
-  .salary-job-strip {
-    grid-template-columns: 150px 1fr;
+  .salary-filter-bar {
+    grid-template-columns: 1fr 1fr auto;
   }
 
-  .salary-job-strip > .ant-space {
-    grid-column: 1 / -1;
+  .salary-edit-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
