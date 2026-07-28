@@ -22,12 +22,20 @@ class Settings(BaseSettings):
     api_workers: int = Field(default=1, ge=1, le=4)
     database_url: str = "postgresql+psycopg://zwt_finance_app:change-me@127.0.0.1:5432/zwt_finance"
     attachment_root: Path = Path(r"D:\ZWTFinance\data\attachments")
-    wht_template_path: Path = Path(r"D:\ZWTFinance\data\templates\WHT-Template.xlsx")
+    # 四份模板与泰文字体都随应用发布，默认指向仓库里的 assets，clone 下来即可
+    # 出票，不需要另外准备运行期文件。业务换版式时用 ZWT_*_TEMPLATE_PATH 覆盖。
+    #
+    # TAX INV 的 xlsx 与 PDF 底版是一对：底版的叠加坐标是从这份 xlsx 制版量出来
+    # 的，pdf_layout.py 里记着它的 sha256。覆盖 xlsx 而不重新制版，两份交付物会
+    # 印出不同的数字，所以 Initialize-ZwtDev.ps1 会校验这个校验和。
+    wht_template_path: Path = (
+        Path(__file__).parents[1] / "assets" / "templates" / "WHT-Template.xlsx"
+    )
     wht_pdf_template_path: Path = (
         Path(__file__).parents[1] / "assets" / "templates" / "WHT-Template.pdf"
     )
     tax_invoice_template_path: Path = (
-        Path(r"D:\ZWTFinance\data\templates\TAX-INV-Template.xlsx")
+        Path(__file__).parents[1] / "assets" / "templates" / "TAX-INV-Template.xlsx"
     )
     tax_invoice_pdf_template_path: Path = (
         Path(__file__).parents[1] / "assets" / "templates" / "TAX-INV-Template.pdf"
