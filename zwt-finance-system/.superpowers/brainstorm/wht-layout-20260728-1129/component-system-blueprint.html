@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ZWT Finance UI System</title>
+  <style>
+    :root {
+      --canvas: #ece9e4;
+      --paper: #f7f5f1;
+      --surface: #fffefa;
+      --surface-muted: #f3f0eb;
+      --ink: #25221f;
+      --muted: #746e67;
+      --line: #ddd7cf;
+      --accent: #a66d42;
+      --success-bg: #eaf3e7;
+      --success-fg: #3d6134;
+      --warning-bg: #fff0dc;
+      --warning-fg: #8c581c;
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--canvas);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: linear-gradient(180deg, #f1efeb, #e7e3de); }
+
+    .page {
+      width: min(1500px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 30px 0 60px;
+    }
+
+    .hero {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 28px;
+      padding: 0 2px 22px;
+      border-bottom: 1px solid #d5cec6;
+    }
+
+    .eyebrow {
+      margin-bottom: 7px;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .14em;
+    }
+
+    h1 { margin: 0; font-size: 30px; letter-spacing: -.025em; }
+    .hero p { max-width: 800px; margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+    .decision {
+      min-width: 290px;
+      padding: 13px 15px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .decision b { display: block; margin-bottom: 4px; color: #6f4426; }
+
+    .section { margin-top: 24px; }
+    .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 11px; }
+    .section-title h2 { margin: 0; font-size: 17px; }
+    .section-title p { margin: 0; color: var(--muted); font-size: 11px; }
+
+    .principles {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .principle { min-height: 105px; padding: 16px; }
+    .principle + .principle { border-left: 1px solid var(--line); }
+    .principle span { display: block; color: var(--accent); font-size: 10px; font-weight: 800; }
+    .principle strong { display: block; margin: 7px 0 5px; font-size: 13px; }
+    .principle p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
+
+    .specimen {
+      min-height: 650px;
+      display: grid;
+      grid-template-columns: 170px minmax(0, 1fr);
+      overflow: hidden;
+      background: var(--paper);
+      border: 1px solid #d6cfc6;
+      border-radius: 13px;
+      box-shadow: 0 18px 46px rgba(58, 48, 38, .11);
+    }
+
+    .side {
+      padding: 16px 10px;
+      background: #efebe5;
+      border-right: 1px solid var(--line);
+    }
+
+    .brand { margin: 0 10px 27px; font-family: Georgia, serif; font-size: 22px; }
+    .brand span { color: var(--accent); font-size: 13px; }
+    .nav { padding: 9px 11px; color: #625b54; border-radius: 7px; font-size: 11px; }
+    .nav.active { color: #2d2824; background: #e4dfd8; font-weight: 800; }
+
+    .app { position: relative; min-width: 0; }
+    .top {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 17px;
+      background: #fffdfa;
+      border-bottom: 1px solid var(--line);
+      color: #5f5953;
+      font-size: 10px;
+    }
+
+    .main { min-width: 0; padding: 15px 17px 18px; }
+    .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+    .page-head h3 { margin: 0; font-size: 24px; line-height: 1.2; letter-spacing: -.015em; }
+    .tabs { display: flex; gap: 18px; margin-top: 9px; color: #716a63; font-size: 10px; font-weight: 700; }
+    .tabs .active { color: #6b4022; border-bottom: 2px solid var(--accent); padding-bottom: 5px; }
+    .actions { display: flex; gap: 7px; }
+    .button {
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      padding: 0 10px;
+      color: #3a342f;
+      background: #fffefa;
+      border: 1px solid #d5cec5;
+      border-radius: 6px;
+      font-size: 9px;
+      font-weight: 800;
+    }
+
+    .button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
+    .filter {
+      display: grid;
+      grid-template-columns: 118px 118px 126px minmax(240px, 1fr) auto;
+      gap: 7px;
+      align-items: end;
+      padding: 9px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-bottom: 0;
+      border-radius: 9px 9px 0 0;
+    }
+
+    .field label { display: block; margin-bottom: 4px; color: #67605a; font-size: 8px; font-weight: 800; }
+    .input {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      overflow: hidden;
+      color: #544e48;
+      background: #fffefa;
+      border: 1px solid #d9d2ca;
+      border-radius: 5px;
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+    .ledger { overflow: hidden; background: var(--surface); border: 1px solid var(--line); border-radius: 0 0 9px 9px; }
+    .ledger-bar { height: 33px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px; border-bottom: 1px solid #e6e0d9; font-size: 9px; font-weight: 800; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8px; }
+    th { height: 30px; padding: 0 8px; color: #635c55; background: var(--surface-muted); text-align: left; }
+    td { height: 33px; padding: 0 8px; overflow: hidden; border-top: 1px solid #eee8e1; text-overflow: ellipsis; white-space: nowrap; }
+    tr.selected td { background: #f8eee6; }
+    tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .money { text-align: right; font-variant-numeric: tabular-nums; }
+    .mono { font-variant-numeric: tabular-nums; }
+    .tag { display: inline-block; padding: 3px 6px; color: var(--success-fg); background: var(--success-bg); border-radius: 5px; font-size: 7px; font-weight: 800; }
+    .tag.warn { color: var(--warning-fg); background: var(--warning-bg); }
+
+    .drawer {
+      position: absolute;
+      top: 46px;
+      right: 0;
+      bottom: 0;
+      width: 360px;
+      display: flex;
+      flex-direction: column;
+      background: #fffefa;
+      border-left: 1px solid #d3cbc1;
+      box-shadow: -16px 0 40px rgba(57, 44, 32, .15);
+    }
+
+    .drawer-head { display: flex; align-items: start; justify-content: space-between; padding: 16px; border-bottom: 1px solid var(--line); }
+    .drawer-head h4 { margin: 0 0 6px; font-size: 14px; }
+    .close { color: #827970; font-size: 11px; }
+    .drawer-section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .drawer-section h5 { margin: 0 0 11px; font-size: 10px; }
+    .kv { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 8px 12px; font-size: 9px; }
+    .kv span { color: #7b726a; }
+    .kv b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .drawer-actions { display: grid; gap: 7px; margin-top: auto; padding: 14px 16px 17px; }
+    .drawer-actions .button { justify-content: center; width: 100%; }
+
+    .component-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+
+    .component-group { padding: 17px; }
+    .component-group:nth-child(even) { border-left: 1px solid var(--line); }
+    .component-group:nth-child(n+3) { border-top: 1px solid var(--line); }
+    .component-group h3 { margin: 0 0 5px; font-size: 13px; }
+    .component-group > p { margin: 0 0 12px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { padding: 5px 7px; color: #594d43; background: #f1ece6; border-radius: 5px; font-family: Consolas, monospace; font-size: 9px; }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: 1fr 1.35fr;
+      gap: 14px;
+    }
+
+    .tree, .rules { padding: 17px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+    .tree pre { margin: 0; color: #473e37; font: 10px/1.7 Consolas, monospace; white-space: pre-wrap; }
+    .rules ol { margin: 0; padding-left: 19px; color: #514a44; font-size: 11px; line-height: 1.8; }
+    .rules b { color: #2e2925; }
+
+    @media (max-width: 1000px) {
+      .principles { grid-template-columns: 1fr 1fr; }
+      .principle:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+      .principle:nth-child(4) { border-top: 1px solid var(--line); }
+      .specimen { grid-template-columns: 120px minmax(0,1fr); }
+      .filter { grid-template-columns: repeat(3, minmax(90px,1fr)); }
+      .drawer { width: 330px; }
+      .architecture { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">ZWT FINANCE UI SYSTEM · DENSITY B</div>
+        <h1>财务工作台组件体系</h1>
+        <p>不是重写 Ant Design，而是在它上面建立稳定的财务业务组合层。所有模块共享同一套密度、页面骨架、台账、详情抽屉、格式化和状态反馈。</p>
+      </div>
+      <div class="decision">
+        <b>推荐组织方式</b>
+        Ant Design 基础控件 + ZWT 业务组合组件 + 模块配置。先服务当前单体前端，暂不拆独立 npm 包。
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-title"><h2>四条固定设计原则</h2><p>以后新增页面只选模板和填业务配置，不再重新决定视觉。</p></div>
+      <div class="principles">
+        <div class="principle"><span>01 · DENSITY</span><strong>数字和记录优先</strong><p>默认 14px 正文、32px 控件、36px 台账行，1080p 首屏可见更多数据。</p></div>
+        <div class="principle"><span>02 · LAYOUT</span><strong>台账始终全宽</strong><p>详情使用覆盖式抽屉，不再挤压表格；无数据和未选择状态不预留空列。</p></div>
+        <div class="principle"><span>03 · TYPE</span><strong>业务页统一无衬线</strong><p>大标题收敛到 24–26px；金额、编号和日期使用等宽数字，提升纵向核对。</p></div>
+        <div class="principle"><span>04 · COLOR</span><strong>颜色只表达状态</strong><p>保留单一棕色操作强调；绿、橙、红仅用于成功、待复核和异常。</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2>标准台账模板</h2><p>WHT 与 TAX INV 共用相同骨架，右侧抽屉覆盖主表。</p></div>
+      <div class="specimen">
+        <aside class="side">
+          <div class="brand">ZWT <span>Finance</span></div>
+          <div class="nav">首页</div>
+          <div class="nav active">WHT 开票</div>
+          <div class="nav">TAX INV 开票</div>
+          <div class="nav">共享数据</div>
+          <div class="nav">相关链接</div>
+          <div class="nav">系统管理</div>
+        </aside>
+        <div class="app">
+          <header class="top"><span>主导航</span><strong>系统管理员 · admin</strong></header>
+          <div class="main">
+            <div class="page-head">
+              <div>
+                <h3>WHT 开票管理</h3>
+                <div class="tabs"><span class="active">开票任务</span><span>收款方主数据</span><span>签名图片</span></div>
+              </div>
+              <div class="actions"><span class="button">导入台账</span><span class="button primary">新建任务</span></div>
+            </div>
+            <div class="filter">
+              <div class="field"><label>期数</label><div class="input">2026-06</div></div>
+              <div class="field"><label>状态</label><div class="input">全部</div></div>
+              <div class="field"><label>册码</label><div class="input">全部册码</div></div>
+              <div class="field"><label>快速查找</label><div class="input">公司 / 税号 / 任务编号</div></div>
+              <span class="button">更多筛选</span>
+            </div>
+            <div class="ledger">
+              <div class="ledger-bar"><span>6 项任务 · 金额合计 2,847,520.00 THB</span><span>最后更新 11:26</span></div>
+              <table>
+                <thead><tr><th>任务编号</th><th>册码</th><th>期数</th><th style="width:21%">公司名称</th><th>类型</th><th>状态</th><th class="money">付款金额</th><th>付款日期</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">ZWT202606014</td><td>BK-02</td><td>2026-06</td><td>บริษัท เอเชีย โลจิสติกส์</td><td>PND 3</td><td><span class="tag">已批准</span></td><td class="money">248,600.00</td><td class="mono">2026-06-26</td></tr>
+                  <tr class="selected"><td class="mono">ZWT202606015</td><td>BK-02</td><td>2026-06</td><td>บริษัท สยาม เซอร์วิส</td><td>PND 53</td><td><span class="tag warn">待复核</span></td><td class="money">486,920.00</td><td class="mono">2026-06-27</td></tr>
+                  <tr><td>待分配</td><td>BK-03</td><td>2026-06</td><td>บริษัท ไทย อินดัสเทรียล</td><td>PND 3</td><td><span class="tag warn">草稿</span></td><td class="money">160,500.00</td><td class="mono">2026-06-28</td></tr>
+                  <tr><td class="mono">ZWT202606012</td><td>BK-01</td><td>2026-06</td><td>บริษัท โกลบอล พาร์ท</td><td>PND 53</td><td><span class="tag">已批准</span></td><td class="money">748,000.00</td><td class="mono">2026-06-25</td></tr>
+                  <tr><td class="mono">ZWT202606011</td><td>BK-01</td><td>2026-06</td><td>บริษัท เมโทร เทรดดิ้ง</td><td>PND 3</td><td><span class="tag">已签发</span></td><td class="money">319,500.00</td><td class="mono">2026-06-24</td></tr>
+                  <tr><td>待分配</td><td>BK-03</td><td>2026-06</td><td>บริษัท พรีเมียม ซัพพลาย</td><td>PND 3</td><td><span class="tag warn">草稿</span></td><td class="money">884,000.00</td><td class="mono">2026-06-29</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <aside class="drawer">
+            <div class="drawer-head"><div><h4>ZWT202606015</h4><span class="tag warn">待复核</span></div><span class="close">关闭</span></div>
+            <section class="drawer-section"><h5>基本信息</h5><div class="kv"><span>收款方</span><b>บริษัท สยาม เซอร์วิส</b><span>税号</span><b class="mono">0105561234567</b><span>册码</span><b>BK-02</b><span>付款日期</span><b class="mono">2026-06-27</b></div></section>
+            <section class="drawer-section"><h5>金额核对</h5><div class="kv"><span>付款金额</span><b class="money">486,920.00 THB</b><span>预扣税率</span><b>3.00%</b><span>预扣税额</span><b class="money">14,607.60 THB</b></div></section>
+            <section class="drawer-section"><h5>流程状态</h5><div class="kv"><span>录入</span><b>财务操作员 · 10:18</b><span>当前步骤</span><b>等待批准</b></div></section>
+            <div class="drawer-actions"><span class="button primary">批准并分配编号</span><span class="button">退回草稿</span></div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2>组件分层</h2><p>只封装稳定业务模式，不重复包装 Button、Input、Select 等 Ant Design 原语。</p></div>
+      <div class="component-grid">
+        <div class="component-group"><h3>页面骨架</h3><p>统一标题、页签、动作区、全宽台账与抽屉状态。</p><div class="chips"><span class="chip">FinancePage</span><span class="chip">PageHeader</span><span class="chip">WorkspaceTabs</span><span class="chip">PageActions</span></div></div>
+        <div class="component-group"><h3>筛选与台账</h3><p>统一筛选高度、表格密度、列格式和选择行为。</p><div class="chips"><span class="chip">FilterToolbar</span><span class="chip">FilterField</span><span class="chip">LedgerTable&lt;T&gt;</span><span class="chip">LedgerSummary</span></div></div>
+        <div class="component-group"><h3>详情与流程</h3><p>覆盖式详情、信息分组、工作流动作和关闭后焦点恢复。</p><div class="chips"><span class="chip">RecordDrawer</span><span class="chip">DetailSection</span><span class="chip">KeyValueList</span><span class="chip">DrawerActions</span></div></div>
+        <div class="component-group"><h3>财务语义</h3><p>金额、日期、编号、泰文和业务状态保持一致。</p><div class="chips"><span class="chip">MoneyText</span><span class="chip">DateText</span><span class="chip">RecordId</span><span class="chip">StatusBadge</span><span class="chip">ThaiText</span></div></div>
+        <div class="component-group"><h3>表单模式</h3><p>控制字段密度、金额精度、验证信息和复杂行项目。</p><div class="chips"><span class="chip">CompactForm</span><span class="chip">FormGrid</span><span class="chip">AmountField</span><span class="chip">LineItemEditor</span></div></div>
+        <div class="component-group"><h3>加载与异常</h3><p>各模块共用加载、空数据、失败、权限不足和重试状态。</p><div class="chips"><span class="chip">AsyncState</span><span class="chip">EmptyState</span><span class="chip">ErrorState</span><span class="chip">PermissionState</span></div></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title"><h2>建议代码边界</h2><p>业务规则继续留在模块内；共享层只负责稳定 UI 与展示语义。</p></div>
+      <div class="architecture">
+        <div class="tree"><pre>src/
+├─ app/
+│  ├─ AppShell.tsx
+│  └─ theme.ts
+├─ ui/
+│  ├─ tokens/       颜色、字号、密度、间距
+│  ├─ components/   财务语义小组件
+│  ├─ patterns/     台账、抽屉、表单组合
+│  ├─ formatters/   金额、日期、编号
+│  └─ index.ts
+└─ modules/
+   ├─ wht/          列定义、状态映射、流程规则
+   └─ tax-invoice/  列定义、状态映射、税票规则</pre></div>
+        <div class="rules">
+          <ol>
+            <li><b>不包装所有 Ant Design 控件：</b>Button、Input、Select 仍直接使用，避免组件层变厚。</li>
+            <li><b>模块只传配置：</b>标题、筛选项、列定义、抽屉内容、允许动作和状态映射。</li>
+            <li><b>财务数字统一：</b>金额右对齐并使用等宽数字；精度由业务 formatter 明确声明。</li>
+            <li><b>默认密度固定：</b>32px 控件、36px 行高、24–26px 页面标题，不允许页面自行放大。</li>
+            <li><b>抽屉不改变表格宽度：</b>打开详情只覆盖右侧；关闭后恢复原行焦点和滚动位置。</li>
+            <li><b>组件必须有测试样例：</b>至少覆盖空数据、加载、错误、长泰文、长编号和权限禁用状态。</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

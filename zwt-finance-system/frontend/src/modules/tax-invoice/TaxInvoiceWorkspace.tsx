@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiOutlined,
   CheckCircleOutlined,
-  CloseOutlined,
   CloudDownloadOutlined,
   DatabaseOutlined,
   DeleteOutlined,
@@ -44,6 +43,17 @@ import type { ColumnsType } from "antd/es/table";
 import type { Translate } from "../../i18n";
 import { ThaiText } from "../../shared/ThaiText";
 import {
+  FinanceLifecycleTabs,
+  FinancePageHeader,
+  FinanceRecordDrawer,
+  FinanceStatusBadge,
+  formatFinanceAmount,
+  formatFinanceDateTime,
+  type FinanceLifecyclePhase,
+  type FinanceStatusTone,
+  type FinanceTabItem,
+} from "../../ui";
+import {
   approveTaxInvoice,
   createTaxInvoiceCorrection,
   downloadTaxInvoiceDocument,
@@ -78,45 +88,38 @@ const statusLabels: Record<TaxInvoiceStatus, string> = {
   voided: "已作废",
 };
 
-const statusClasses: Record<TaxInvoiceStatus, string> = {
-  draft: "status-draft",
-  needs_review: "status-pending",
-  ready: "status-ready",
-  approved: "status-approved",
-  issued: "status-issued",
-  voided: "status-voided",
+const statusTones: Record<TaxInvoiceStatus, FinanceStatusTone> = {
+  draft: "neutral",
+  needs_review: "warning",
+  ready: "info",
+  approved: "success",
+  issued: "info",
+  voided: "danger",
 };
+
+const taxInvoicePhaseStatuses: Record<
+  Exclude<FinanceLifecyclePhase, "all">,
+  readonly TaxInvoiceStatus[]
+> = {
+  pending: ["draft", "needs_review", "ready"],
+  issuing: ["approved"],
+  history: ["issued", "voided"],
+};
+
+function isInvoiceInPhase(
+  invoice: TaxInvoice,
+  phase: FinanceLifecyclePhase,
+): boolean {
+  return phase === "all" || taxInvoicePhaseStatuses[phase].includes(invoice.status);
+}
 
 function StatusTag({ status }: { status: TaxInvoiceStatus }) {
   return (
-    <Tag className={`status-tag ${statusClasses[status]}`}>
-      {statusLabels[status]}
-    </Tag>
+    <FinanceStatusBadge
+      label={statusLabels[status]}
+      tone={statusTones[status]}
+    />
   );
-}
-
-function money(value: string | null | undefined, currency = ""): string {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return "—";
-  const formatted = new Intl.NumberFormat("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(numeric);
-  return currency ? `${currency} ${formatted}` : formatted;
-}
-
-function dateTime(value: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(parsed);
 }
 
 function dateLabel(value: string | null): string {
@@ -158,29 +161,48 @@ function InvoiceInspector({
   const warnings = warningCount(invoice);
   const canApprove = ["draft", "needs_review", "ready"].includes(invoice.status);
   const canGenerate = ["approved", "issued"].includes(invoice.status);
-  return (
-    <aside className="tax-inspector" aria-label="TAX INV 明细">
-      <div className="inspector-header">
-        <div>
-          <span className="record-eyebrow">TAX INVOICE RECORD</span>
-          <h2>{invoice.documentNo ?? "待分配正式编号"}</h2>
-          <StatusTag status={invoice.status} />
-        </div>
-        <Space>
-          {["draft", "needs_review", "ready"].includes(invoice.status) && (
-            <Button icon={<EditOutlined />} size="small" onClick={onEdit}>
-              编辑
-            </Button>
-          )}
-          <Button
-            aria-label="关闭明细"
-            icon={<CloseOutlined />}
-            type="text"
-            onClick={onClose}
-          />
-        </Space>
-      </div>
+  const footer = (
+    <div className="inspector-footer">
+      {canApprove && (
+        <Button
+          block
+          icon={<SafetyCertificateOutlined />}
+          loading={busy}
+          type="primary"
+          onClick={onApprove}
+        >
+          复核通过并生成正式编号
+        </Button>
+      )}
+      {["approved", "issued"].includes(invoice.status) && (
+        <Button block danger disabled={busy} onClick={onVoid}>
+          作废本张税票
+        </Button>
+      )}
+      {invoice.status === "voided" && (
+        <Button block icon={<FileSearchOutlined />} onClick={onCorrection}>
+          建立更正单
+        </Button>
+      )}
+    </div>
+  );
 
+  return (
+    <FinanceRecordDrawer
+      extra={
+        ["draft", "needs_review", "ready"].includes(invoice.status) ? (
+          <Button icon={<EditOutlined />} size="small" onClick={onEdit}>
+            编辑
+          </Button>
+        ) : undefined
+      }
+      footer={footer}
+      open
+      rootClassName="tax-record-drawer"
+      status={<StatusTag status={invoice.status} />}
+      title={invoice.documentNo ?? "待分配正式编号"}
+      onClose={onClose}
+    >
       {warnings > 0 && (
         <Alert
           className="tax-review-alert"
@@ -260,7 +282,7 @@ function InvoiceInspector({
               dataIndex: "fobRevenueUsd",
               width: 105,
               align: "right",
-              render: (value: string | null) => money(value),
+              render: (value: string | null) => formatFinanceAmount(value),
             },
           ]}
           dataSource={invoice.items}
@@ -271,8 +293,8 @@ function InvoiceInspector({
         />
         <div className="tax-total-strip">
           <span>合计</span>
-          <strong>{money(invoice.fobRevenueUsdTotal, "USD")}</strong>
-          <strong>{money(invoice.fobRevenueThbTotal, "THB")}</strong>
+          <strong>{formatFinanceAmount(invoice.fobRevenueUsdTotal, "USD")}</strong>
+          <strong>{formatFinanceAmount(invoice.fobRevenueThbTotal, "THB")}</strong>
         </div>
       </section>
 
@@ -305,7 +327,9 @@ function InvoiceInspector({
                 )}
                 <span>
                   {document.fileName}
-                  <small>v{document.version} · {dateTime(document.createdAt)}</small>
+                  <small>
+                    v{document.version} · {formatFinanceDateTime(document.createdAt)}
+                  </small>
                 </span>
                 <DownloadOutlined />
               </button>
@@ -316,36 +340,14 @@ function InvoiceInspector({
         )}
       </section>
 
-      <div className="inspector-footer">
-        {canApprove && (
-          <Button
-            block
-            icon={<SafetyCertificateOutlined />}
-            loading={busy}
-            type="primary"
-            onClick={onApprove}
-          >
-            复核通过并生成正式编号
-          </Button>
-        )}
-        {["approved", "issued"].includes(invoice.status) && (
-          <Button block danger disabled={busy} onClick={onVoid}>
-            作废本张税票
-          </Button>
-        )}
-        {invoice.status === "voided" && (
-          <Button block icon={<FileSearchOutlined />} onClick={onCorrection}>
-            建立更正单
-          </Button>
-        )}
-      </div>
-    </aside>
+    </FinanceRecordDrawer>
   );
 }
 
 export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const { message, modal } = AntApp.useApp();
   const [view, setView] = useState<WorkspaceView>("ledger");
+  const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   const [invoices, setInvoices] = useState<TaxInvoice[]>([]);
   const [rates, setRates] = useState<ExchangeRate[]>([]);
   const [selected, setSelected] = useState<TaxInvoice | null>(null);
@@ -425,6 +427,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const filteredInvoices = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return invoices.filter((invoice) => {
+      if (!isInvoiceInPhase(invoice, phase)) return false;
       if (status !== "all" && invoice.status !== status) return false;
       if (period !== "all" && invoice.revenuePeriod !== period) return false;
       if (!normalized) return true;
@@ -435,13 +438,28 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
         invoice.customerName,
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
-  }, [invoices, period, query, status]);
+  }, [invoices, period, phase, query, status]);
+
+  const lifecycleCounts = useMemo(
+    () => ({
+      pending: invoices.filter((invoice) => isInvoiceInPhase(invoice, "pending")).length,
+      issuing: invoices.filter((invoice) => isInvoiceInPhase(invoice, "issuing")).length,
+      history: invoices.filter((invoice) => isInvoiceInPhase(invoice, "history")).length,
+      all: invoices.length,
+    }),
+    [invoices],
+  );
+
+  const availableStatuses =
+    phase === "all"
+      ? (Object.keys(statusLabels) as TaxInvoiceStatus[])
+      : [...taxInvoicePhaseStatuses[phase]];
 
   const columns: ColumnsType<TaxInvoice> = [
     {
       title: "税票编号",
       dataIndex: "documentNo",
-      width: 205,
+      width: 145,
       render: (value: string | null) => (
         <strong className="record-number">{value ?? "待分配"}</strong>
       ),
@@ -449,37 +467,37 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
     {
       title: "开票日期（报关提交日）",
       dataIndex: "invoiceDate",
-      width: 180,
+      width: 145,
       render: dateLabel,
     },
-    { title: "C/I No.", dataIndex: "ciNo", width: 145, ellipsis: true },
-    { title: "报关单号", dataIndex: "cdn", width: 165, ellipsis: true },
+    { title: "C/I No.", dataIndex: "ciNo", width: 120, ellipsis: true },
+    { title: "报关单号", dataIndex: "cdn", width: 130, ellipsis: true },
     {
       title: "客户",
       dataIndex: "customerName",
-      width: 260,
+      width: 195,
       ellipsis: true,
       render: (value: string) => <ThaiText>{value}</ThaiText>,
     },
-    { title: "贸易条款", dataIndex: "incoterms", width: 95 },
+    { title: "贸易条款", dataIndex: "incoterms", width: 72 },
     {
       title: "实际汇率日期",
       dataIndex: "exchangeRateDate",
-      width: 130,
+      width: 110,
       render: dateLabel,
     },
     {
       title: "FOB THB",
       dataIndex: "fobRevenueThbTotal",
-      width: 140,
+      width: 105,
       align: "right",
-      render: (value: string | null) => money(value),
+      render: (value: string | null) => formatFinanceAmount(value),
     },
     {
       title: "状态",
       dataIndex: "status",
       fixed: "right",
-      width: 105,
+      width: 78,
       render: (value: TaxInvoiceStatus) => <StatusTag status={value} />,
     },
   ];
@@ -725,53 +743,50 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
   const uploadList = (file: File | null): UploadFile[] =>
     file ? [{ uid: file.name, name: file.name, status: "done" }] : [];
 
+  const workspaceTabs: FinanceTabItem<WorkspaceView>[] = [
+    { key: "ledger", label: "任务台账" },
+    { key: "recognition", label: "业务操作台" },
+    { key: "rates", label: "数据维护" },
+  ];
+
   return (
     <section className="tax-workspace" aria-label={t("nav.taxInvoice")}>
-      <header className="workspace-header tax-workspace-header">
-        <div>
-          <span className="workspace-kicker">EXPORT SALES TAX INVOICE</span>
-          <h1>
-            <span>TAX INV</span>
-            税票管理
-          </h1>
-          <p>识别报关资料、锁定开票日期、匹配 BOT 汇率并生成正式税票。</p>
-        </div>
-        <div className="tax-health-card">
-          <span className="health-dot" />
-          <div>
-            <strong>业务规则已锁定</strong>
-            <small>编号仅在批准时由数据库事务生成</small>
+      <FinancePageHeader
+        actions={
+          <div className="tax-health-card">
+            <span className="health-dot" />
+            <div>
+              <strong>编号规则</strong>
+              <small>批准时生成，作废后不回收</small>
+            </div>
           </div>
-        </div>
-      </header>
-
-      <nav className="workspace-subnav" aria-label="TAX INV 功能">
-        <button
-          className={view === "ledger" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("ledger")}
-        >
-          <DatabaseOutlined />税票台账
-        </button>
-        <button
-          className={view === "recognition" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("recognition")}
-        >
-          <FileSearchOutlined />识别与导入
-        </button>
-        <button
-          className={view === "rates" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("rates")}
-        >
-          <ApiOutlined />BOT 汇率中心
-        </button>
-      </nav>
+        }
+        activeTab={view}
+        description="识别报关资料、锁定开票日期、匹配 BOT 汇率并生成正式税票。"
+        onTabChange={setView}
+        tabs={workspaceTabs}
+        title="TAX INV · 税票管理"
+      />
 
       {view === "ledger" && (
-        <div className={`tax-ledger-layout${selected ? " has-inspector" : ""}`}>
+        <div className="tax-ledger-layout">
           <main className="tax-ledger-main">
+            <FinanceLifecycleTabs
+              activeKey={phase}
+              ariaLabel={t("lifecycle.aria", { module: "TAX INV" })}
+              counts={lifecycleCounts}
+              labels={{
+                pending: t("lifecycle.pending"),
+                issuing: t("lifecycle.issuing"),
+                history: t("lifecycle.history"),
+                all: t("lifecycle.all"),
+              }}
+              onChange={(nextPhase) => {
+                setPhase(nextPhase);
+                setStatus("all");
+                setSelected(null);
+              }}
+            />
             <div className="tax-filter-bar">
               <Select
                 options={[
@@ -787,9 +802,9 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
               <Select
                 options={[
                   { value: "all", label: "全部状态" },
-                  ...Object.entries(statusLabels).map(([value, label]) => ({
+                  ...availableStatuses.map((value) => ({
                     value,
-                    label,
+                    label: statusLabels[value],
                   })),
                 ]}
                 value={status}
@@ -836,7 +851,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                 record.id === selected?.id ? "selected-table-row" : ""
               }
               rowKey="id"
-              scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
+              scroll={{ x: 1100, y: "calc(100vh - 450px)" }}
               size="middle"
               onRow={(record) => ({
                 onClick: () => void openInvoice(record),
@@ -873,8 +888,8 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
               <SafetyCertificateOutlined />
             </div>
             <div>
-              <span>DATE GOVERNANCE</span>
-              <h2>日期字段独立保存，不再互相覆盖</h2>
+              <span>日期与编号规则</span>
+              <h2>日期字段独立保存</h2>
               <p>
                 开票日期取报关单提交日期；税票编号跟随开票日期；汇率目标日和实际回溯日按
                 BOT 原逻辑分别保留。
@@ -1045,7 +1060,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
           <section className="rate-ledger-card">
             <div className="section-title-row">
               <div>
-                <span className="workspace-kicker">EXCHANGE RATE LEDGER</span>
+                <span className="workspace-kicker">汇率数据</span>
                 <h2>汇率台账</h2>
               </div>
               <Button icon={<ReloadOutlined />} onClick={() => void refreshRates()}>
@@ -1077,7 +1092,7 @@ export function TaxInvoiceWorkspace({ t }: { t: Translate }) {
                     title: "更新时间",
                     dataIndex: "updatedAt",
                     width: 190,
-                    render: dateTime,
+                    render: formatFinanceDateTime,
                   },
                 ]}
                 dataSource={rates}

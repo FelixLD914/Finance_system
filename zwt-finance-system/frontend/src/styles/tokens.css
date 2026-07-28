@@ -1,0 +1,43 @@
+:root {
+  --font-ui: "DM Sans", "Noto Sans SC Variable", "Microsoft YaHei UI",
+    "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+  --font-brand: "Cormorant Garamond", Georgia, serif;
+  --font-thai: "Sarabun", "Leelawadee UI", Tahoma, sans-serif;
+
+  --finance-canvas: #f6f6f4;
+  --finance-surface: #ffffff;
+  --finance-surface-muted: #f1f0ed;
+  --finance-sidebar: #efeeea;
+  --finance-text: #222222;
+  --finance-text-muted: #5f5d59;
+  --finance-border: #d9d7d2;
+  --finance-primary: #875334;
+  --finance-primary-hover: #6f4126;
+  --finance-selected: #f3ece7;
+
+  --finance-success-text: #32613e;
+  --finance-success-bg: #edf5ef;
+  --finance-warning-text: #8a571b;
+  --finance-warning-bg: #fff4e5;
+  --finance-danger-text: #8b3a36;
+  --finance-danger-bg: #fcefed;
+  --finance-info-text: #365d78;
+  --finance-info-bg: #edf4f8;
+
+  --finance-radius-sm: 6px;
+  --finance-radius-md: 8px;
+  --finance-radius-lg: 12px;
+  --finance-control-height: 32px;
+  --finance-page-gap: 20px;
+  --finance-motion-fast: 160ms cubic-bezier(0.25, 1, 0.5, 1);
+  --finance-motion-drawer: 200ms cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* Compatibility aliases while legacy module styles are migrated. */
+  --paper: var(--finance-canvas);
+  --paper-deep: var(--finance-sidebar);
+  --surface: var(--finance-surface);
+  --ink: var(--finance-text);
+  --muted: var(--finance-text-muted);
+  --line: var(--finance-border);
+  --camel: var(--finance-primary);
+}

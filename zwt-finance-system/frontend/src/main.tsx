@@ -7,6 +7,8 @@ import { App } from "./app/App";
 import { financeTheme } from "./app/theme";
 import { AuthProvider } from "./auth/AuthContext";
 import "./styles/global.css";
+import "./styles/tokens.css";
+import "./ui/finance-ui.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -19,4 +21,3 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ConfigProvider>
   </React.StrictMode>,
 );
-

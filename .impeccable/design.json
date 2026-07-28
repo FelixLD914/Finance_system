@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-28T05:00:00Z",
+  "title": "Design System: ZWT Finance UI System",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Approval Brown",
+        "canonical": "#875334",
+        "tonalRamp": ["#F3ECE7", "#D5BBAA", "#875334", "#6F4126"]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Audit Canvas",
+        "canonical": "#F6F6F4",
+        "tonalRamp": ["#FFFFFF", "#F6F6F4", "#EFEEEA", "#D9D7D2"]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Ledger Ink",
+        "canonical": "#222222",
+        "tonalRamp": ["#5F5D59", "#3D3B38", "#222222"]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Page Headline",
+        "purpose": "Compact business-page titles only."
+      },
+      "body": {
+        "displayName": "Operational Body",
+        "purpose": "Tables, forms, descriptions and utility copy."
+      },
+      "label": {
+        "displayName": "Financial Label",
+        "purpose": "Table headers, field labels and secondary navigation."
+      }
+    },
+    "shadows": [
+      {
+        "name": "drawer-overlay",
+        "value": "-8px 0 16px rgba(34, 34, 34, 0.10)",
+        "purpose": "Shows that the record drawer overlays the full-width ledger."
+      },
+      {
+        "name": "floating-menu",
+        "value": "0 4px 8px rgba(34, 34, 34, 0.10)",
+        "purpose": "Dropdowns, menus and short-lived floating UI."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "160ms cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "Hover, selection and focus changes."
+      },
+      {
+        "name": "drawer",
+        "value": "200ms cubic-bezier(0.25, 1, 0.5, 1)",
+        "purpose": "Record drawer open and close."
+      }
+    ],
+    "breakpoints": [
+      { "name": "compact-desktop", "value": "1380px" },
+      { "name": "standard-desktop", "value": "1600px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "One primary workflow action per local surface.",
+      "html": "<button class=\"ds-btn-primary\">批准并分配编号</button>",
+      "css": ".ds-btn-primary{height:32px;padding:0 12px;border:0;border-radius:6px;background:#875334;color:#fff;font:600 14px 'Microsoft YaHei UI',sans-serif;transition:background 160ms cubic-bezier(.25,1,.5,1)}.ds-btn-primary:hover{background:#6F4126}.ds-btn-primary:focus-visible{outline:2px solid rgba(135,83,52,.35);outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "description": "Neutral secondary action.",
+      "html": "<button class=\"ds-btn-secondary\">退回草稿</button>",
+      "css": ".ds-btn-secondary{height:32px;padding:0 12px;border:1px solid #D9D7D2;border-radius:6px;background:#fff;color:#222;font:600 14px 'Microsoft YaHei UI',sans-serif}.ds-btn-secondary:hover{border-color:#875334;color:#6F4126}.ds-btn-secondary:focus-visible{outline:2px solid rgba(135,83,52,.35);outline-offset:2px}"
+    },
+    {
+      "name": "Filter Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Compact filter and form field.",
+      "html": "<input class=\"ds-input\" value=\"2026-06\" aria-label=\"期数\">",
+      "css": ".ds-input{height:32px;padding:0 10px;border:1px solid #D9D7D2;border-radius:6px;background:#fff;color:#222;font:400 14px 'Microsoft YaHei UI',sans-serif}.ds-input:focus{border-color:#875334;outline:2px solid rgba(135,83,52,.18);outline-offset:0}"
+    },
+    {
+      "name": "Warning Status",
+      "kind": "chip",
+      "refersTo": "status-warning",
+      "description": "Pending review or recoverable attention state.",
+      "html": "<span class=\"ds-status-warning\">待复核</span>",
+      "css": ".ds-status-warning{display:inline-flex;padding:3px 8px;border-radius:6px;background:#FFF4E5;color:#8A571B;font:600 12px 'Microsoft YaHei UI',sans-serif}"
+    },
+    {
+      "name": "Lifecycle Navigation",
+      "kind": "nav",
+      "description": "Shared WHT and TAX INV lifecycle navigation.",
+      "html": "<nav class=\"ds-nav\"><button>业务操作台</button><button class=\"is-active\">待处理 <b>6</b></button><button>待出具</button><button>历史记录</button></nav>",
+      "css": ".ds-nav{display:flex;gap:20px;border-bottom:1px solid #D9D7D2}.ds-nav button{height:36px;padding:0;border:0;background:transparent;color:#5F5D59;font:600 13px 'Microsoft YaHei UI',sans-serif}.ds-nav button.is-active{color:#6F4126;box-shadow:inset 0 -2px #875334}.ds-nav b{margin-left:4px;font-variant-numeric:tabular-nums}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Audit Desk",
+    "overview": "A dense, restrained and familiar finance workspace. Neutral surfaces carry the work; one approval brown marks primary actions and selection. The interface disappears behind records, amounts, workflow state and audit history.",
+    "keyCharacteristics": [
+      "Full-width ledgers",
+      "Overlay record drawers",
+      "Single sans-serif hierarchy",
+      "Tabular financial numbers",
+      "State-only color"
+    ],
+    "rules": [
+      {
+        "name": "The Business Sans Rule",
+        "body": "Serif type is reserved for the brand mark and never appears in operational headings or data.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-by-Default Rule",
+        "body": "Static work surfaces rely on dividers and tonal layers; shadows are reserved for overlays.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Use 24–26px page headings, 32px controls and 36–40px ledger rows.",
+      "Keep ledgers full width and place record details in an overlay drawer.",
+      "Use tabular numbers and right-align amounts."
+    ],
+    "donts": [
+      "Do not use exaggerated serif headings or marketing copy.",
+      "Do not reserve blank detail columns when no record is selected.",
+      "Do not decorate ordinary content with status colors or wide shadows."
+    ]
+  }
+}

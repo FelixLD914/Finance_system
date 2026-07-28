@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircleFilled,
-  CloseOutlined,
   DownloadOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -25,7 +24,6 @@ import {
   Select,
   Steps,
   Table,
-  Tag,
   Upload,
 } from "antd";
 import type { UploadProps } from "antd";
@@ -33,6 +31,17 @@ import type { ColumnsType } from "antd/es/table";
 
 import type { Translate } from "../../i18n";
 import { ThaiText } from "../../shared/ThaiText";
+import {
+  FinanceLifecycleTabs,
+  FinancePageHeader,
+  FinanceRecordDrawer,
+  FinanceStatusBadge,
+  formatFinanceAmount,
+  formatFinanceDateTime,
+  type FinanceLifecyclePhase,
+  type FinanceStatusTone,
+  type FinanceTabItem,
+} from "../../ui";
 import {
   downloadWhtDocument,
   generateWhtDocuments,
@@ -55,13 +64,28 @@ interface Filters {
   query: string;
 }
 
-const statusClass: Record<WhtStatus, string> = {
-  approved: "status-approved",
-  draft: "status-draft",
-  issued: "status-issued",
-  pending_review: "status-pending",
-  voided: "status-voided",
+type WhtWorkspaceView = "tasks" | "payees" | "signatures";
+
+const statusTone: Record<WhtStatus, FinanceStatusTone> = {
+  approved: "success",
+  draft: "neutral",
+  issued: "info",
+  pending_review: "warning",
+  voided: "danger",
 };
+
+const whtPhaseStatuses: Record<
+  Exclude<FinanceLifecyclePhase, "all">,
+  readonly WhtStatus[]
+> = {
+  pending: ["draft", "pending_review"],
+  issuing: ["approved"],
+  history: ["issued", "voided"],
+};
+
+function isTaskInPhase(task: WhtTask, phase: FinanceLifecyclePhase): boolean {
+  return phase === "all" || whtPhaseStatuses[phase].includes(task.status);
+}
 
 function statusLabel(status: WhtStatus, t: Translate): string {
   const key = {
@@ -76,20 +100,11 @@ function statusLabel(status: WhtStatus, t: Translate): string {
 
 function StatusTag({ status, t }: { status: WhtStatus; t: Translate }) {
   return (
-    <Tag className={`status-tag ${statusClass[status]}`}>
-      {statusLabel(status, t)}
-    </Tag>
+    <FinanceStatusBadge
+      label={statusLabel(status, t)}
+      tone={statusTone[status]}
+    />
   );
-}
-
-function formatMoney(value: string): string {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? new Intl.NumberFormat("zh-CN", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(number)
-    : "—";
 }
 
 function formatRate(value: string | null): string {
@@ -100,23 +115,11 @@ function formatRate(value: string | null): string {
     : "—";
 }
 
-function formatDateTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
 function DetailPanel({
   task,
   documents,
   t,
+  open,
   pending,
   onClose,
   onAction,
@@ -126,6 +129,7 @@ function DetailPanel({
   task: WhtTask;
   documents: WhtDocument[];
   t: Translate;
+  open: boolean;
   pending: boolean;
   onClose: () => void;
   onAction: (
@@ -140,38 +144,84 @@ function DetailPanel({
     task.events.length > 0
       ? task.events.map((event) => ({
           title: statusLabel(event.toStatus, t),
-          content: `${event.actorName} · ${formatDateTime(event.createdAt)}`,
+          content: `${event.actorName} · ${formatFinanceDateTime(event.createdAt)}`,
         }))
       : [
           {
             title: t("status.draft"),
-            content: `${task.createdByName} · ${formatDateTime(task.createdAt)}`,
+            content: `${task.createdByName} · ${formatFinanceDateTime(task.createdAt)}`,
           },
           ...(task.status !== "draft" ? [{ title: t("status.pendingReview") }] : []),
           ...(isFormal ? [{ title: t("status.approved") }] : []),
         ];
 
-  return (
-    <aside className="task-inspector" aria-label={t("wht.basicInfo")}>
-      <div className="inspector-header">
-        <div>
-          <h2>{task.taskNo ?? t("wht.pendingNumber")}</h2>
-          <StatusTag status={task.status} t={t} />
-        </div>
-        <div className="inspector-header-actions">
-          <Button disabled={task.status !== "draft"} icon={<EditOutlined />} size="small">
-            {t("common.edit")}
+  const footer = (
+    <div className="inspector-actions">
+      {task.status === "draft" && (
+        <Button
+          block
+          loading={pending}
+          type="primary"
+          onClick={() => void onAction("submit-review")}
+        >
+          {t("wht.submitReview")}
+        </Button>
+      )}
+      {task.status === "pending_review" && (
+        <>
+          <Button
+            block
+            loading={pending}
+            type="primary"
+            onClick={() => void onAction("approve")}
+          >
+            {t("wht.approveAndNumber")}
           </Button>
           <Button
-            aria-label={t("common.close")}
-            icon={<CloseOutlined />}
-            size="small"
-            type="text"
-            onClick={onClose}
-          />
-        </div>
-      </div>
+            block
+            disabled={pending}
+            onClick={() => void onAction("return-to-draft")}
+          >
+            {t("wht.returnDraft")}
+          </Button>
+        </>
+      )}
+      {isFormal && (
+        <>
+          <Button
+            block
+            icon={<FileDoneOutlined />}
+            loading={pending}
+            type="primary"
+            onClick={onGenerate}
+          >
+            {t("wht.generateDocuments")}
+          </Button>
+          <Button block disabled icon={<CheckCircleFilled />}>
+            {t("wht.formalNumberReady")}
+          </Button>
+        </>
+      )}
+    </div>
+  );
 
+  return (
+    <FinanceRecordDrawer
+      extra={
+        <Button
+          disabled={task.status !== "draft"}
+          icon={<EditOutlined />}
+          size="small"
+        >
+          {t("common.edit")}
+        </Button>
+      }
+      footer={footer}
+      open={open}
+      status={<StatusTag status={task.status} t={t} />}
+      title={task.taskNo ?? t("wht.pendingNumber")}
+      onClose={onClose}
+    >
       <section className="inspector-section">
         <h3>{t("wht.basicInfo")}</h3>
         <Descriptions
@@ -205,12 +255,12 @@ function DetailPanel({
             {
               key: "amount",
               label: t("wht.totalAmount"),
-              children: formatMoney(task.totalAmount),
+              children: formatFinanceAmount(task.totalAmount),
             },
             {
               key: "wht",
               label: t("wht.whtAmount"),
-              children: formatMoney(task.whtAmount),
+              children: formatFinanceAmount(task.whtAmount),
             },
             { key: "due", label: t("wht.dueDate"), children: value(task.dueDate) },
             {
@@ -221,7 +271,7 @@ function DetailPanel({
             {
               key: "createdAt",
               label: t("wht.createdAt"),
-              children: formatDateTime(task.createdAt),
+              children: formatFinanceDateTime(task.createdAt),
             },
             {
               key: "updatedBy",
@@ -231,7 +281,7 @@ function DetailPanel({
             {
               key: "updatedAt",
               label: t("wht.updatedAt"),
-              children: formatDateTime(task.updatedAt),
+              children: formatFinanceDateTime(task.updatedAt),
             },
           ]}
         />
@@ -254,7 +304,7 @@ function DetailPanel({
                   <div>
                     <strong>{document.fileFormat.toUpperCase()}</strong>
                     <span>
-                      v{document.version} · {formatDateTime(document.createdAt)}
+                      v{document.version} · {formatFinanceDateTime(document.createdAt)}
                     </span>
                   </div>
                   <Button
@@ -271,54 +321,7 @@ function DetailPanel({
         </section>
       )}
 
-      <div className="inspector-actions">
-        {task.status === "draft" && (
-          <Button
-            block
-            loading={pending}
-            type="primary"
-            onClick={() => void onAction("submit-review")}
-          >
-            {t("wht.submitReview")}
-          </Button>
-        )}
-        {task.status === "pending_review" && (
-          <>
-            <Button
-              block
-              loading={pending}
-              type="primary"
-              onClick={() => void onAction("approve")}
-            >
-              {t("wht.approveAndNumber")}
-            </Button>
-            <Button
-              block
-              disabled={pending}
-              onClick={() => void onAction("return-to-draft")}
-            >
-              {t("wht.returnDraft")}
-            </Button>
-          </>
-        )}
-        {isFormal && (
-          <>
-            <Button
-              block
-              icon={<FileDoneOutlined />}
-              loading={pending}
-              type="primary"
-              onClick={onGenerate}
-            >
-              {t("wht.generateDocuments")}
-            </Button>
-            <Button block disabled icon={<CheckCircleFilled />}>
-              {t("wht.formalNumberReady")}
-            </Button>
-          </>
-        )}
-      </div>
-    </aside>
+    </FinanceRecordDrawer>
   );
 }
 
@@ -338,9 +341,10 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
     uploadPayees,
     uploadHistoricalTasks,
   } = useWhtData();
-  const [view, setView] = useState<"tasks" | "payees" | "signatures">("tasks");
+  const [view, setView] = useState<WhtWorkspaceView>("tasks");
+  const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [documentPending, setDocumentPending] = useState(false);
@@ -383,6 +387,7 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
   const filteredTasks = useMemo(() => {
     const query = filters.query.trim().toLocaleLowerCase();
     return tasks.filter((task) => {
+      const matchesPhase = isTaskInPhase(task, phase);
       const matchesPeriod = filters.period === "all" || task.period === filters.period;
       const matchesStatus = filters.status === "all" || task.status === filters.status;
       const matchesBook = filters.bookNo === "all" || task.bookNo === filters.bookNo;
@@ -392,9 +397,24 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
         task.companyNameEn?.toLocaleLowerCase().includes(query) ||
         task.taxId?.includes(query) ||
         task.taskNo?.toLocaleLowerCase().includes(query);
-      return matchesPeriod && matchesStatus && matchesBook && matchesQuery;
+      return matchesPhase && matchesPeriod && matchesStatus && matchesBook && matchesQuery;
     });
-  }, [filters, tasks]);
+  }, [filters, phase, tasks]);
+
+  const lifecycleCounts = useMemo(
+    () => ({
+      pending: tasks.filter((task) => isTaskInPhase(task, "pending")).length,
+      issuing: tasks.filter((task) => isTaskInPhase(task, "issuing")).length,
+      history: tasks.filter((task) => isTaskInPhase(task, "history")).length,
+      all: tasks.length,
+    }),
+    [tasks],
+  );
+
+  const availableStatuses =
+    phase === "all"
+      ? (["draft", "pending_review", "approved", "issued", "voided"] as WhtStatus[])
+      : [...whtPhaseStatuses[phase]];
 
   const selectedTask = tasks.find((task) => task.id === selectedId);
 
@@ -451,7 +471,9 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
       title: t("wht.updatedAt"),
       dataIndex: "updatedAt",
       width: 142,
-      render: (value: string) => <span className="date-value">{formatDateTime(value)}</span>,
+      render: (value: string) => (
+        <span className="date-value">{formatFinanceDateTime(value)}</span>
+      ),
     },
   ];
 
@@ -565,39 +587,17 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
     }
   };
 
+  const workspaceTabs: FinanceTabItem<WhtWorkspaceView>[] = [
+    { key: "tasks", label: t("wht.taskLedger") },
+    { key: "payees", label: t("wht.payeeMaster") },
+    { key: "signatures", label: t("wht.signatureLibrary") },
+  ];
+
   const taskView = (
     <section className="workspace-main">
-      <div className="page-heading">
-        <div>
-          <h1>
-            <span>WHT</span>
-            <small>{t("wht.title")}</small>
-          </h1>
-          <div className="workspace-view-switch" role="tablist">
-            <button
-              className={view === "tasks" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("tasks")}
-            >
-              {t("wht.taskLedger")}
-            </button>
-            <button
-              className={view === "payees" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("payees")}
-            >
-              {t("wht.payeeMaster")}
-            </button>
-            <button
-              className={view === "signatures" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("signatures")}
-            >
-              {t("wht.signatureLibrary")}
-            </button>
-          </div>
-        </div>
-        <div className="page-actions">
+      <FinancePageHeader
+        actions={
+          <>
           <Upload
             accept=".xlsx"
             customRequest={historyImport}
@@ -612,8 +612,13 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
           <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
             {t("wht.newTask")}
           </Button>
-        </div>
-      </div>
+          </>
+        }
+        activeTab={view}
+        onTabChange={setView}
+        tabs={workspaceTabs}
+        title={`WHT · ${t("wht.title")}`}
+      />
 
       {error && (
         <Alert
@@ -629,6 +634,23 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
           }
         />
       )}
+
+      <FinanceLifecycleTabs
+        activeKey={phase}
+        ariaLabel={t("lifecycle.aria", { module: "WHT" })}
+        counts={lifecycleCounts}
+        labels={{
+          pending: t("lifecycle.pending"),
+          issuing: t("lifecycle.issuing"),
+          history: t("lifecycle.history"),
+          all: t("lifecycle.all"),
+        }}
+        onChange={(nextPhase) => {
+          setPhase(nextPhase);
+          setInspectorOpen(false);
+          setFilters((current) => ({ ...current, status: "all" }));
+        }}
+      />
 
       <section className="work-surface">
         <div className="filter-bar">
@@ -646,11 +668,10 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
               value={filters.status}
               options={[
                 { value: "all", label: t("wht.all") },
-                { value: "draft", label: t("status.draft") },
-                { value: "pending_review", label: t("status.pendingReview") },
-                { value: "approved", label: t("status.approved") },
-                { value: "issued", label: t("status.issued") },
-                { value: "voided", label: t("status.voided") },
+                ...availableStatuses.map((value) => ({
+                  value,
+                  label: statusLabel(value, t),
+                })),
               ]}
               onChange={(status) => setFilters((current) => ({ ...current, status }))}
             />
@@ -697,7 +718,7 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
           columns={columns}
           dataSource={filteredTasks}
           loading={loading}
-          pagination={{ pageSize: 8, hideOnSinglePage: true }}
+          pagination={{ pageSize: 15, hideOnSinglePage: true }}
           rowKey="id"
           scroll={{ x: 900 }}
           tableLayout="fixed"
@@ -716,25 +737,12 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
 
   const payeeView = (
     <section className="workspace-main">
-      <div className="page-heading">
-        <div>
-          <h1>
-            <span>WHT</span>
-            <small>{t("wht.payeeMaster")}</small>
-          </h1>
-          <div className="workspace-view-switch" role="tablist">
-            <button type="button" onClick={() => setView("tasks")}>
-              {t("wht.taskLedger")}
-            </button>
-            <button className="is-active" type="button" onClick={() => setView("payees")}>
-              {t("wht.payeeMaster")}
-            </button>
-            <button type="button" onClick={() => setView("signatures")}>
-              {t("wht.signatureLibrary")}
-            </button>
-          </div>
-        </div>
-      </div>
+      <FinancePageHeader
+        activeTab={view}
+        onTabChange={setView}
+        tabs={workspaceTabs}
+        title={`WHT · ${t("wht.payeeMaster")}`}
+      />
       <PayeeDirectory
         error={error}
         loading={loading}
@@ -749,40 +757,24 @@ export function WhtWorkspace({ t }: WhtWorkspaceProps) {
 
   const signatureView = (
     <section className="workspace-main">
-      <div className="page-heading">
-        <div>
-          <h1>
-            <span>WHT</span>
-            <small>{t("wht.signatureLibrary")}</small>
-          </h1>
-          <div className="workspace-view-switch" role="tablist">
-            <button type="button" onClick={() => setView("tasks")}>
-              {t("wht.taskLedger")}
-            </button>
-            <button type="button" onClick={() => setView("payees")}>
-              {t("wht.payeeMaster")}
-            </button>
-            <button
-              className="is-active"
-              type="button"
-              onClick={() => setView("signatures")}
-            >
-              {t("wht.signatureLibrary")}
-            </button>
-          </div>
-        </div>
-      </div>
+      <FinancePageHeader
+        activeTab={view}
+        onTabChange={setView}
+        tabs={workspaceTabs}
+        title={`WHT · ${t("wht.signatureLibrary")}`}
+      />
       <SignatureLibrary t={t} />
     </section>
   );
 
   return (
-    <div className={`workspace ${view === "tasks" && inspectorOpen ? "with-inspector" : ""}`}>
+    <div className="workspace">
       {view === "tasks" ? taskView : view === "payees" ? payeeView : signatureView}
 
-      {view === "tasks" && inspectorOpen && selectedTask && (
+      {view === "tasks" && selectedTask && (
         <DetailPanel
           documents={documents}
+          open={inspectorOpen}
           pending={mutationPending || documentPending}
           task={selectedTask}
           t={t}

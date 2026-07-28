@@ -50,7 +50,24 @@ BOM、空行、幂等替换）。**语法检查和肉眼审查不算验证**，�
 | WHT 编号不变量（`ZWTYYYYMMNNN` / 补开 `ZWTYYYYMMBKRSS`，正式号只在批准事务中分配） | [docs/architecture.md](docs/architecture.md) |
 | TAX INV 规则（开票日期取报关提交日期、`ZWT-IVYYYYMMDD-NN`、18 行上限禁止批准不得截断、作废号不回收、汇率最多回溯 9 天） | [docs/architecture.md](docs/architecture.md) |
 | 模块只能通过服务层读共享数据，WHT 与 TAX INV 不直接写对方业务表 | [docs/architecture.md](docs/architecture.md)，对应 `core` / `wht` / `tax_invoice` / `audit` 四个 PG schema |
-| 视觉与文案基准（Warm Ivory、泰文字号 1.28em/行高 1.2、默认简体中文、UI 文案不得作为业务数据持久化） | `../zwt-finance-ui-prototype/`（已冻结，仅作基准） |
+| 视觉与文案基准（高密度财务台账、业务页无衬线、全宽表格、覆盖式详情抽屉、默认简体中文、UI 文案不得作为业务数据持久化） | 仓库根 `PRODUCT.md` 与 `DESIGN.md`；`../zwt-finance-ui-prototype/` 仅作历史原型参考 |
+
+### 已确认的前端设计方向
+
+- 业务页面使用 DM Sans + Noto Sans SC Variable，泰文使用 Sarabun。衬线字体仅允许
+  用于左上角品牌标识，不得用于业务标题、标签、按钮和数据。
+- 页面标题 24–26px，控件默认 32px，台账行 36–40px；金额右对齐，金额、编号、
+  税号、日期和汇率使用等宽数字。
+- WHT 与 TAX INV 统一为业务操作台、待处理、待出具、历史记录四个生命周期视图，
+  数据维护为平行辅助入口。
+- 台账默认占满可用宽度；详情使用覆盖式抽屉，不得在详情关闭、无选中记录或空数据
+  时预留右侧空列。
+- 色彩只表达主操作、选择、业务状态和风险。静态工作表面默认无宽阴影，不使用卡片
+  拼贴、装饰渐变、玻璃拟态或营销式文案。
+- WHT 的批量开具与历史迁移必须作为两个有说明的操作入口；批量勾选后在原表格工具条
+  位置显示批量动作，不另起 dashboard 卡片。
+- 签名图库属于数据维护并显示 WHT / TAX INV 适用范围；出票时必须让用户确认是否使用
+  签名及版本。BOT 多币种、接口自检和报价明细统一放在 TAX INV 数据维护视图。
 
 ### TAX INV 数字格式
 

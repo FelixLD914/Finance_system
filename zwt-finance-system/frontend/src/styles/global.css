@@ -65,8 +65,8 @@ select {
 }
 
 .thai-copy {
-  font-size: 1.28em;
-  line-height: 1.2;
+  font-size: 1em;
+  line-height: 1.4;
   letter-spacing: 0;
 }
 
@@ -276,15 +276,15 @@ select {
   gap: 16px;
   margin: 0;
   color: #1f1c19;
-  font-family: var(--font-display);
-  font-size: 48px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: -0.035em;
+  font-family: var(--font-ui);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
 }
 
 .page-heading h1 small {
-  font-family: "Noto Serif SC Variable", "Songti SC", "SimSun", serif;
+  font-family: var(--font-ui);
   font-size: 0.64em;
   letter-spacing: 0.02em;
 }
@@ -535,8 +535,8 @@ select {
 
 .module-placeholder h1 {
   margin: 16px 0 6px;
-  font-family: var(--font-display);
-  font-size: 30px;
+  font-family: var(--font-ui);
+  font-size: 24px;
 }
 
 .module-placeholder p {
@@ -551,7 +551,8 @@ select {
   padding: 12px 14px;
   color: #655a50;
   background: #f6f1ea;
-  border-left: 3px solid var(--camel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
   font-size: 13px;
   line-height: 1.6;
 }
@@ -789,16 +790,16 @@ select {
   gap: 14px;
   margin: 5px 0 7px;
   color: #1f1c19;
-  font-family: "Noto Serif SC Variable", "Songti SC", "SimSun", serif;
-  font-size: 29px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-family: var(--font-ui);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 .tax-workspace-header h1 span {
-  font-family: var(--font-display);
-  font-size: 42px;
-  letter-spacing: -0.035em;
+  font-family: var(--font-ui);
+  font-size: inherit;
+  letter-spacing: inherit;
 }
 
 .tax-workspace-header p {
@@ -932,8 +933,8 @@ select {
 
 .tax-ledger-summary strong {
   color: #352a22;
-  font-family: var(--font-display);
-  font-size: 25px;
+  font-family: var(--font-ui);
+  font-size: 18px;
 }
 
 .tax-ledger-summary span {
@@ -1116,8 +1117,8 @@ select {
 
 .tax-rule-banner h2 {
   margin: 3px 0 5px;
-  font-family: "Noto Serif SC Variable", serif;
-  font-size: 19px;
+  font-family: var(--font-ui);
+  font-size: 16px;
 }
 
 .tax-rule-banner p {
@@ -1198,8 +1199,8 @@ select {
 .tool-card-heading h2 {
   margin: 2px 0 3px;
   color: #2d2722;
-  font-family: "Noto Serif SC Variable", serif;
-  font-size: 18px;
+  font-family: var(--font-ui);
+  font-size: 16px;
 }
 
 .tool-card-heading p {
@@ -1329,7 +1330,8 @@ select {
 
 .rate-ledger-card h2 {
   margin: 3px 0 0;
-  font-family: "Noto Serif SC Variable", serif;
+  font-family: var(--font-ui);
+  font-size: 16px;
 }
 
 .date-field {
@@ -1459,7 +1461,7 @@ select {
 
 .login-title {
   margin-bottom: 4px !important;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   letter-spacing: 0.01em;
 }
 

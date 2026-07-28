@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WHT 开票页优化方案</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f5f2ed;
+      --surface: #fffefa;
+      --ink: #24211e;
+      --muted: #746c64;
+      --line: #ddd6cd;
+      --accent: #a86f43;
+      font-family: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #e9e4dd;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(180deg, #f1eee9 0, #e9e4dd 100%);
+    }
+
+    .page {
+      width: min(1500px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 34px 0 64px;
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 28px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    .intro h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    .intro p {
+      max-width: 840px;
+      margin: 0;
+      color: #655e57;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .root-cause {
+      max-width: 370px;
+      padding: 12px 15px;
+      color: #5d4737;
+      background: #f8eee5;
+      border: 1px solid #e4cdbb;
+      border-radius: 9px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .options {
+      display: grid;
+      gap: 22px;
+    }
+
+    .option {
+      overflow: hidden;
+      background: rgba(255,255,255,.86);
+      border: 1px solid #d8d1c9;
+      border-radius: 16px;
+      box-shadow: 0 14px 34px rgba(56, 46, 37, .07);
+      cursor: pointer;
+      transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+    }
+
+    .option:hover {
+      transform: translateY(-2px);
+      border-color: #bd9a7f;
+      box-shadow: 0 18px 40px rgba(56, 46, 37, .11);
+    }
+
+    .option.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(168, 111, 67, .16), 0 18px 40px rgba(56, 46, 37, .11);
+    }
+
+    .option-head {
+      display: grid;
+      grid-template-columns: 42px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 17px 19px;
+      border-bottom: 1px solid #e2dcd5;
+    }
+
+    .letter {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      color: #fff;
+      background: #2c2824;
+      border-radius: 10px;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .option-head h2 {
+      margin: 0 0 4px;
+      font-size: 18px;
+    }
+
+    .option-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .recommend {
+      padding: 6px 9px;
+      color: #754626;
+      background: #f6e7da;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      justify-content: flex-end;
+      max-width: 430px;
+    }
+
+    .metrics span {
+      padding: 5px 8px;
+      color: #615a53;
+      background: #f1eee9;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .mock-window {
+      min-height: 410px;
+      display: grid;
+      grid-template-columns: 152px minmax(0, 1fr);
+      background: #f6f3ee;
+    }
+
+    .side {
+      padding: 15px 10px;
+      background: #f2eee7;
+      border-right: 1px solid #ded7ce;
+    }
+
+    .brand {
+      margin: 0 8px 25px;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 21px;
+    }
+
+    .brand b {
+      color: #9a663e;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .nav-item {
+      margin: 3px 0;
+      padding: 9px 11px;
+      color: #615a53;
+      border-radius: 7px;
+      font-size: 11px;
+    }
+
+    .nav-item.active {
+      color: #2f2924;
+      background: #e8e2db;
+      font-weight: 700;
+    }
+
+    .app {
+      min-width: 0;
+      background: #f8f5f0;
+    }
+
+    .top {
+      height: 45px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      background: #fffdf9;
+      border-bottom: 1px solid #e0d9d0;
+      color: #625b54;
+      font-size: 10px;
+    }
+
+    .user {
+      color: #332f2b;
+      font-weight: 700;
+    }
+
+    .content {
+      min-width: 0;
+      padding: 17px 20px 20px;
+    }
+
+    .page-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 12px;
+    }
+
+    .title-line {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .title-line strong {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 30px;
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .title-line span {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 18px;
+      margin-top: 9px;
+      color: #716960;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .tabs b {
+      color: #6e4428;
+      border-bottom: 2px solid var(--accent);
+      padding-bottom: 5px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 8px 11px;
+      color: #38322d;
+      background: #fffefa;
+      border: 1px solid #d6cec4;
+      border-radius: 7px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .btn.primary {
+      color: #fff;
+      background: #a86f43;
+      border-color: #a86f43;
+    }
+
+    .filter {
+      display: grid;
+      grid-template-columns: 130px 130px 140px minmax(210px, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+      padding: 11px;
+      background: #fffefa;
+      border: 1px solid #ded7ce;
+      border-bottom: 0;
+      border-radius: 10px 10px 0 0;
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 5px;
+      color: #655d56;
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .input {
+      height: 31px;
+      display: flex;
+      align-items: center;
+      padding: 0 9px;
+      overflow: hidden;
+      color: #55504a;
+      background: #fffdfa;
+      border: 1px solid #dcd4ca;
+      border-radius: 6px;
+      font-size: 10px;
+      white-space: nowrap;
+    }
+
+    .table-shell {
+      overflow: hidden;
+      background: #fffefa;
+      border: 1px solid #ded7ce;
+      border-radius: 0 0 10px 10px;
+    }
+
+    .table-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 38px;
+      padding: 0 11px;
+      border-bottom: 1px solid #e5ded6;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 9px;
+    }
+
+    th {
+      height: 35px;
+      padding: 0 9px;
+      color: #665e56;
+      background: #f5f1eb;
+      text-align: left;
+      font-weight: 700;
+    }
+
+    td {
+      height: 39px;
+      padding: 0 9px;
+      overflow: hidden;
+      color: #38332f;
+      border-top: 1px solid #eee8e0;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .num {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 3px 6px;
+      color: #426037;
+      background: #edf4e9;
+      border-radius: 5px;
+      font-size: 8px;
+      font-weight: 700;
+    }
+
+    .status.pending {
+      color: #91591f;
+      background: #fff1df;
+    }
+
+    .behavior {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 19px 14px;
+      color: #655e57;
+      background: #faf8f5;
+      border-top: 1px solid #e2dcd5;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .behavior b { color: #352f2a; }
+
+    .behavior .tradeoff {
+      color: #8a5d3a;
+      text-align: right;
+    }
+
+    /* B: denser, all-sans ledger */
+    .compact .title-line strong {
+      font-family: inherit;
+      font-size: 23px;
+      letter-spacing: 0;
+    }
+
+    .compact .title-line span {
+      font-size: 16px;
+    }
+
+    .compact .content {
+      padding: 13px 16px 16px;
+    }
+
+    .compact .page-head {
+      margin-bottom: 9px;
+    }
+
+    .compact .filter {
+      grid-template-columns: 110px 110px 120px minmax(200px, 1fr) auto;
+      padding: 8px;
+    }
+
+    .compact .input { height: 27px; }
+    .compact .btn { padding: 6px 9px; }
+    .compact .table-bar { height: 31px; }
+    .compact th { height: 29px; }
+    .compact td { height: 31px; }
+
+    .drawer-indicator {
+      position: absolute;
+      top: 50px;
+      right: 0;
+      width: 7px;
+      height: calc(100% - 50px);
+      background: #b77b4b;
+      box-shadow: -3px 0 12px rgba(73, 52, 35, .16);
+    }
+
+    .compact .app {
+      position: relative;
+    }
+
+    /* C: inline detail */
+    .inline-detail td {
+      height: auto;
+      padding: 0;
+      background: #fbf6ef;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 11px 12px 12px 38px;
+      border-left: 3px solid #a86f43;
+    }
+
+    .detail-item {
+      min-width: 0;
+      color: #746b62;
+      font-size: 8px;
+    }
+
+    .detail-item b {
+      display: block;
+      margin-top: 3px;
+      overflow: hidden;
+      color: #312c28;
+      font-size: 9px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 1050px) {
+      .intro { grid-template-columns: 1fr; }
+      .root-cause { max-width: none; }
+      .mock-window { grid-template-columns: 110px minmax(0, 1fr); }
+      .side { padding-inline: 7px; }
+      .filter { grid-template-columns: repeat(3, minmax(90px, 1fr)); }
+      .field.search { grid-column: span 2; }
+      .metrics { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <div>
+        <h1>WHT 开票页：三种优化方向</h1>
+        <p>共同底线：没有可用详情时，台账必须铺满主工作区；标题、筛选控件和表格行高同时收敛，优先服务财务扫描、比对和查错。</p>
+      </div>
+      <div class="root-cause">
+        当前问题：0 条任务时仍预留 412px 详情列，详情组件却没有渲染，导致右侧空白、左侧表格被迫横向滚动。
+      </div>
+    </header>
+
+    <section class="options">
+      <article class="option" data-choice="a-balanced-docked" onclick="toggleSelect(this)">
+        <div class="option-head">
+          <div class="letter">A</div>
+          <div>
+            <h2>均衡审阅 · 自适应主表 + 停靠详情</h2>
+            <p>保持现有操作习惯，修正状态逻辑并收敛字号；适合多数日常开票与复核。</p>
+          </div>
+          <div class="metrics">
+            <span class="recommend">推荐</span>
+            <span>标题 30px</span>
+            <span>控件 36px</span>
+            <span>表格约 44px</span>
+          </div>
+        </div>
+        <div class="mock-window">
+          <aside class="side">
+            <div class="brand">ZWT <b>Finance</b></div>
+            <div class="nav-item">首页</div>
+            <div class="nav-item active">WHT 开票</div>
+            <div class="nav-item">TAX INV 开票</div>
+            <div class="nav-item">共享数据</div>
+            <div class="nav-item">系统管理</div>
+          </aside>
+          <div class="app">
+            <div class="top"><span>收起菜单</span><span class="user">系统管理员 · admin</span></div>
+            <div class="content">
+              <div class="page-head">
+                <div>
+                  <div class="title-line"><strong>WHT</strong><span>开票管理</span></div>
+                  <div class="tabs"><b>开票任务</b><span>收款方主数据</span><span>签名图片</span></div>
+                </div>
+                <div class="actions"><span class="btn">导入历史台账</span><span class="btn primary">新建 WHT 任务</span></div>
+              </div>
+              <div class="filter">
+                <div class="field"><label>期数</label><div class="input">2026-06</div></div>
+                <div class="field"><label>状态</label><div class="input">全部</div></div>
+                <div class="field"><label>册码</label><div class="input">全部册码</div></div>
+                <div class="field search"><label>公司</label><div class="input">搜索公司、税号或任务编号</div></div>
+                <span class="btn">更多筛选</span>
+              </div>
+              <div class="table-shell">
+                <div class="table-bar"><span>3 项任务</span><span>最后更新 11:26</span></div>
+                <table>
+                  <thead><tr><th>任务编号</th><th>册码</th><th>期数</th><th style="width:22%">公司名称</th><th>WHT 类型</th><th>状态</th><th>付款日期</th><th>更新时间</th></tr></thead>
+                  <tbody>
+                    <tr><td class="num">ZWT202606014</td><td>BK-02</td><td>2026-06</td><td>บริษัท เอเชีย โลจิสติกส์</td><td>PND 3</td><td><span class="status">已批准</span></td><td class="num">2026-06-26</td><td class="num">2026-07-28 10:42</td></tr>
+                    <tr><td class="num">ZWT202606015</td><td>BK-02</td><td>2026-06</td><td>บริษัท สยาม เซอร์วิส</td><td>PND 53</td><td><span class="status pending">待复核</span></td><td class="num">2026-06-27</td><td class="num">2026-07-28 10:18</td></tr>
+                    <tr><td class="num">待分配</td><td>BK-03</td><td>2026-06</td><td>บริษัท ไทย อินดัสเทรียล</td><td>PND 3</td><td><span class="status pending">草稿</span></td><td class="num">2026-06-28</td><td class="num">2026-07-28 09:54</td></tr>
+                    <tr><td colspan="8" style="height:56px;color:#8a8178;text-align:center">未选中记录时，表格占满全部可用宽度，不保留隐藏详情列</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="behavior">
+          <span><b>交互：</b>未选中或无数据时全宽；选中记录后，右侧详情停靠并适度压缩表格。</span>
+          <span class="tradeoff">取舍：实现成本最低，保留现有认知。</span>
+        </div>
+      </article>
+
+      <article class="option" data-choice="b-compact-drawer" onclick="toggleSelect(this)">
+        <div class="option-head">
+          <div class="letter">B</div>
+          <div>
+            <h2>高密度台账 · 全宽主表 + 覆盖式详情抽屉</h2>
+            <p>去掉展示型字体，缩短控件和行高，让 1080p 屏幕同时看到更多记录。</p>
+          </div>
+          <div class="metrics">
+            <span>标题 26px</span>
+            <span>控件 32px</span>
+            <span>表格约 36px</span>
+          </div>
+        </div>
+        <div class="mock-window compact">
+          <aside class="side">
+            <div class="brand">ZWT <b>Finance</b></div>
+            <div class="nav-item">首页</div>
+            <div class="nav-item active">WHT 开票</div>
+            <div class="nav-item">TAX INV 开票</div>
+            <div class="nav-item">共享数据</div>
+            <div class="nav-item">系统管理</div>
+          </aside>
+          <div class="app">
+            <div class="top"><span>收起菜单</span><span class="user">系统管理员 · admin</span></div>
+            <div class="content">
+              <div class="page-head">
+                <div>
+                  <div class="title-line"><strong>WHT 开票管理</strong></div>
+                  <div class="tabs"><b>开票任务</b><span>收款方主数据</span><span>签名图片</span></div>
+                </div>
+                <div class="actions"><span class="btn">导入台账</span><span class="btn primary">新建任务</span></div>
+              </div>
+              <div class="filter">
+                <div class="field"><label>期数</label><div class="input">2026-06</div></div>
+                <div class="field"><label>状态</label><div class="input">全部</div></div>
+                <div class="field"><label>册码</label><div class="input">全部册码</div></div>
+                <div class="field search"><label>快速查找</label><div class="input">公司 / 税号 / 任务编号</div></div>
+                <span class="btn">更多</span>
+              </div>
+              <div class="table-shell">
+                <div class="table-bar"><span>6 项任务 · 金额合计 2,847,520.00 THB</span><span>刷新</span></div>
+                <table>
+                  <thead><tr><th>任务编号</th><th>册码</th><th>期数</th><th style="width:22%">公司名称</th><th>类型</th><th>状态</th><th>付款日期</th><th>更新时间</th></tr></thead>
+                  <tbody>
+                    <tr><td class="num">ZWT202606014</td><td>BK-02</td><td>2026-06</td><td>บริษัท เอเชีย โลจิสติกส์</td><td>PND 3</td><td><span class="status">已批准</span></td><td class="num">06-26</td><td class="num">07-28 10:42</td></tr>
+                    <tr><td class="num">ZWT202606015</td><td>BK-02</td><td>2026-06</td><td>บริษัท สยาม เซอร์วิส</td><td>PND 53</td><td><span class="status pending">待复核</span></td><td class="num">06-27</td><td class="num">07-28 10:18</td></tr>
+                    <tr><td class="num">待分配</td><td>BK-03</td><td>2026-06</td><td>บริษัท ไทย อินดัสเทรียล</td><td>PND 3</td><td><span class="status pending">草稿</span></td><td class="num">06-28</td><td class="num">07-28 09:54</td></tr>
+                    <tr><td class="num">ZWT202606012</td><td>BK-01</td><td>2026-06</td><td>บริษัท โกลบอล พาร์ท</td><td>PND 53</td><td><span class="status">已批准</span></td><td class="num">06-25</td><td class="num">07-27 17:22</td></tr>
+                    <tr><td class="num">ZWT202606011</td><td>BK-01</td><td>2026-06</td><td>บริษัท เมโทร เทรดดิ้ง</td><td>PND 3</td><td><span class="status">已签发</span></td><td class="num">06-24</td><td class="num">07-27 16:45</td></tr>
+                    <tr><td class="num">待分配</td><td>BK-03</td><td>2026-06</td><td>บริษัท พรีเมียม ซัพพลาย</td><td>PND 3</td><td><span class="status pending">草稿</span></td><td class="num">06-29</td><td class="num">07-27 15:06</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <span class="drawer-indicator" title="选择记录后从此处打开覆盖式详情"></span>
+          </div>
+        </div>
+        <div class="behavior">
+          <span><b>交互：</b>表格始终保持全宽；点击记录时详情从右侧覆盖打开，关闭后回到原滚动位置。</span>
+          <span class="tradeoff">取舍：核对效率最高，但品牌感最弱。</span>
+        </div>
+      </article>
+
+      <article class="option" data-choice="c-inline-detail" onclick="toggleSelect(this)">
+        <div class="option-head">
+          <div class="letter">C</div>
+          <div>
+            <h2>连续核对 · 全宽主表 + 行内展开详情</h2>
+            <p>不再使用右侧面板，详情紧跟所选记录，适合逐条上下对照。</p>
+          </div>
+          <div class="metrics">
+            <span>标题 28px</span>
+            <span>控件 34px</span>
+            <span>表格约 40px</span>
+          </div>
+        </div>
+        <div class="mock-window">
+          <aside class="side">
+            <div class="brand">ZWT <b>Finance</b></div>
+            <div class="nav-item">首页</div>
+            <div class="nav-item active">WHT 开票</div>
+            <div class="nav-item">TAX INV 开票</div>
+            <div class="nav-item">共享数据</div>
+            <div class="nav-item">系统管理</div>
+          </aside>
+          <div class="app">
+            <div class="top"><span>收起菜单</span><span class="user">系统管理员 · admin</span></div>
+            <div class="content">
+              <div class="page-head">
+                <div>
+                  <div class="title-line"><strong>WHT</strong><span>开票管理</span></div>
+                  <div class="tabs"><b>开票任务</b><span>收款方主数据</span><span>签名图片</span></div>
+                </div>
+                <div class="actions"><span class="btn">导入历史台账</span><span class="btn primary">新建 WHT 任务</span></div>
+              </div>
+              <div class="filter">
+                <div class="field"><label>期数</label><div class="input">2026-06</div></div>
+                <div class="field"><label>状态</label><div class="input">全部</div></div>
+                <div class="field"><label>册码</label><div class="input">全部册码</div></div>
+                <div class="field search"><label>公司</label><div class="input">搜索公司、税号或任务编号</div></div>
+                <span class="btn">更多筛选</span>
+              </div>
+              <div class="table-shell">
+                <div class="table-bar"><span>3 项任务</span><span>最后更新 11:26</span></div>
+                <table>
+                  <thead><tr><th>任务编号</th><th>册码</th><th>期数</th><th style="width:22%">公司名称</th><th>类型</th><th>状态</th><th>付款日期</th><th>更新时间</th></tr></thead>
+                  <tbody>
+                    <tr><td class="num">ZWT202606014</td><td>BK-02</td><td>2026-06</td><td>บริษัท เอเชีย โลจิสติกส์</td><td>PND 3</td><td><span class="status">已批准</span></td><td class="num">2026-06-26</td><td class="num">07-28 10:42</td></tr>
+                    <tr class="inline-detail"><td colspan="8">
+                      <div class="detail-grid">
+                        <div class="detail-item">税号<b>0105561234567</b></div>
+                        <div class="detail-item">收入类型<b>ค่าบริการ</b></div>
+                        <div class="detail-item">付款金额<b class="num">248,600.00 THB</b></div>
+                        <div class="detail-item">预扣税率<b>3.00%</b></div>
+                        <div class="detail-item">预扣税额<b class="num">7,458.00 THB</b></div>
+                        <span class="btn primary">查看完整详情</span>
+                      </div>
+                    </td></tr>
+                    <tr><td class="num">ZWT202606015</td><td>BK-02</td><td>2026-06</td><td>บริษัท สยาม เซอร์วิส</td><td>PND 53</td><td><span class="status pending">待复核</span></td><td class="num">2026-06-27</td><td class="num">07-28 10:18</td></tr>
+                    <tr><td class="num">待分配</td><td>BK-03</td><td>2026-06</td><td>บริษัท ไทย อินดัสเทรียล</td><td>PND 3</td><td><span class="status pending">草稿</span></td><td class="num">2026-06-28</td><td class="num">07-28 09:54</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="behavior">
+          <span><b>交互：</b>点击记录，在该行下方展开关键金额、税号与动作；完整详情再进入独立弹窗。</span>
+          <span class="tradeoff">取舍：上下对照直观，但会改变表格纵向位置。</span>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
