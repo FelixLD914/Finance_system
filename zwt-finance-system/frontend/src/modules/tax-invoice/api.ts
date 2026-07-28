@@ -95,10 +95,15 @@ export function importSample(file: File): Promise<TaxInvoiceImportResult> {
   });
 }
 
-export function listExchangeRates(currency = "USD"): Promise<ExchangeRate[]> {
-  return request<ExchangeRate[]>(
-    `/v1/tax-invoice/exchange-rates?currency=${encodeURIComponent(currency)}`,
-  );
+export function listExchangeRates(
+  currency = "USD",
+  startDate?: string,
+  endDate?: string,
+): Promise<ExchangeRate[]> {
+  const params = new URLSearchParams({ currency });
+  if (startDate) params.set("startDate", startDate);
+  if (endDate) params.set("endDate", endDate);
+  return request<ExchangeRate[]>(`/v1/tax-invoice/exchange-rates?${params}`);
 }
 
 /** 台账里已有数据的币种，用于币种下拉。 */

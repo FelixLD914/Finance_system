@@ -1394,17 +1394,62 @@ select {
   font-size: 10px;
 }
 
-.rate-actions-card {
+/* 汇率中心内的「查询 / 入库」二级切换。查询只读高频、入库写库低频，
+   分开后查数的人不用面对同步/导入两个写按钮。 */
+.rate-tab-switch {
   display: flex;
-  align-items: center;
-  align-content: center;
+  gap: 4px;
+  max-width: 1320px;
+  margin: 0 auto 16px;
+  padding: 4px;
+  background: rgba(255, 253, 249, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  width: fit-content;
+}
+
+.rate-tab-switch button {
+  min-height: 32px;
+  padding: 0 18px;
+  color: #756a61;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rate-tab-switch button.is-active {
+  color: #342a23;
+  background: var(--surface);
+  box-shadow: 0 3px 10px rgba(61, 44, 31, 0.07);
+}
+
+/* 查询条件卡：币种 + 日期范围，纵向排。 */
+.rate-query-card {
+  display: flex;
+  flex-direction: column;
   justify-content: center;
-  flex-wrap: wrap;
   gap: 9px;
 }
 
-.rate-actions-card .ant-upload-list {
-  max-width: 220px;
+/* 入库页两张工具卡（BOT API 同步 / Excel 导入）并排。 */
+.rate-ingest-grid {
+  display: grid;
+  max-width: 1320px;
+  margin: 0 auto 18px;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.rate-ingest-grid .bot-status-alert {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.rate-ingest-grid .ant-upload-list {
+  max-width: 260px;
 }
 
 .rate-ledger-card {

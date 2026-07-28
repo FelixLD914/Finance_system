@@ -306,6 +306,11 @@ const resources = {
     "tax.qualityFobBody": "差异记录进入人工复核",
     "tax.qualityArchive": "源文件留档",
     "tax.qualityArchiveBody": "随每日附件备份保留",
+    "tax.rateQuery": "汇率查询",
+    "tax.rateIngest": "数据入库",
+    "tax.clearRange": "清除日期",
+    "tax.syncFromBotHint": "按币种和日期范围从泰国央行接口抓取，同一天重复同步会覆盖更新。",
+    "tax.pickBotExcelHint": "接口不可用时的后备方案：导入央行官网下载的汇率 Excel。",
     "tax.rateRecords": "{currency} 汇率记录",
     "tax.currency": "币种",
     "tax.noData": "无数据",
@@ -333,8 +338,6 @@ const resources = {
     "tax.botNotConfigured": "BOT API 密钥未配置，同步功能不可用",
     "tax.botNotConfiguredBody":
       "在服务器 {file} 中填入 {envVar}（泰国央行 API Portal 签发的 token），然后重启后端进程。在此之前请用「选择 BOT Excel」手工导入汇率。",
-    "tax.botConfigured": "BOT API 已配置",
-    "tax.botConfiguredBody": "{header} 请求头 · 密钥 {hint} · 端点 {endpoint}",
     "tax.editTitle": "编辑 TAX INV 复核资料",
     "tax.editSave": "保存复核资料",
     "tax.editHint": "开票日期必须填写报关单提交日期；汇率目标日和实际命中日请分别维护。",
@@ -686,6 +689,13 @@ const resources = {
     "tax.qualityFobBody": "Differences are routed to manual review",
     "tax.qualityArchive": "Source files archived",
     "tax.qualityArchiveBody": "Kept with the daily attachment backup",
+    "tax.rateQuery": "Rate lookup",
+    "tax.rateIngest": "Load rates",
+    "tax.clearRange": "Clear dates",
+    "tax.syncFromBotHint":
+      "Fetch by currency and date range from the Bank of Thailand API; re-syncing the same day overwrites it.",
+    "tax.pickBotExcelHint":
+      "Fallback when the API is unavailable: import the rate spreadsheet downloaded from the BOT website.",
     "tax.rateRecords": "{currency} rate records",
     "tax.currency": "Currency",
     "tax.noData": "no data",
@@ -714,8 +724,6 @@ const resources = {
     "tax.botNotConfigured": "BOT API key is not configured — sync is unavailable",
     "tax.botNotConfiguredBody":
       "Set {envVar} in the server {file} to the token issued by the Bank of Thailand API Portal, then restart the backend. Until then, import rates manually with Select BOT Excel.",
-    "tax.botConfigured": "BOT API is configured",
-    "tax.botConfiguredBody": "{header} header · key {hint} · endpoint {endpoint}",
     "tax.editTitle": "Edit TAX INV review data",
     "tax.editSave": "Save review data",
     "tax.editHint":
