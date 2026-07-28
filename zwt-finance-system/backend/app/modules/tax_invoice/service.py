@@ -57,6 +57,66 @@ class TaxInvoiceStateError(TaxInvoiceServiceError):
 # 塞进一个 openpyxl 工作簿，没有上限的话总有一天会把进程撑爆。
 MAX_EXPORT_INVOICES = 2000
 
+# 正式模板的物理容量。approve() 与批量导入认领已有编号时共用这个上限。
+APPROVAL_ITEM_LIMIT = 18
+
+
+@dataclass(frozen=True)
+class ApprovalReadiness:
+    """一张税票离「够格成为已批准」还差什么。"""
+
+    missing_fields: list[str]
+    too_many_items: bool
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing_fields and not self.too_many_items
+
+    def blockers(self) -> list[str]:
+        """给前端的稳定字段码，itemLimit 表示超出模板容量。"""
+        codes = list(self.missing_fields)
+        if self.too_many_items:
+            codes.append("itemLimit")
+        return codes
+
+
+def check_approval_readiness(
+    *,
+    invoice_date: date | None,
+    exchange_target_date: date | None,
+    exchange_rate: Decimal | None,
+    customer_name: str | None,
+    customer_address: str | None,
+    cdn: str | None,
+    item_count: int,
+) -> ApprovalReadiness:
+    """「可批准」的完整性口径，只有这一份。
+
+    approve() 走人工复核这条路，批量导入里带 DocumentNo 的行则绕过复核直接
+    落成 approved——两条路通向同一个状态，校验就必须是同一套。各写一套迟早
+    漂移，而漂移的后果是从导入这条缝里造出一张残缺的已批准税票：客户地址空着、
+    汇率没有，或者 19 条商品（超过模板容量，要等到生成文件时才炸，那时编号
+    早就发出去了）。
+    """
+    missing = [
+        name
+        for name, value in {
+            "invoiceDate": invoice_date,
+            "exchangeTargetDate": exchange_target_date,
+            "exchangeRate": exchange_rate,
+            "customerName": customer_name,
+            "customerAddress": customer_address,
+            "CDN": cdn,
+        }.items()
+        if value in (None, "")
+    ]
+    if item_count == 0:
+        missing.append("items")
+    return ApprovalReadiness(
+        missing_fields=missing,
+        too_many_items=item_count > APPROVAL_ITEM_LIMIT,
+    )
+
 
 @dataclass(frozen=True)
 class DailyRate:
@@ -316,6 +376,35 @@ class TaxInvoiceService:
             document_no = row.get("document_no")
             if not document_no:
                 continue
+
+            # 带编号的行会绕过人工复核直接落成 approved，所以这里必须先过一遍
+            # 与 approve() 完全相同的完整性校验。不合格就整批退回，而不是悄悄
+            # 把编号丢掉降级成草稿——那样历史迁移的原编号就没了，之后再批准会
+            # 发一个新号，对不上旧系统的账。让人把行补全或者把编号删掉。
+            readiness = check_approval_readiness(
+                invoice_date=row.get("invoice_date"),
+                exchange_target_date=row.get("exchange_target_date"),
+                exchange_rate=row.get("exchange_rate"),
+                customer_name=row.get("customer_name"),
+                customer_address=row.get("customer_address"),
+                cdn=row.get("cdn"),
+                item_count=len(row.get("items") or []),
+            )
+            if not readiness.ok:
+                issues.append(
+                    {
+                        "rows": source_rows,
+                        "key": document_no,
+                        "reason": "incomplete_for_number",
+                        "fields": readiness.blockers(),
+                        "detail": (
+                            f"row(s) carrying number {document_no} are booked as approved "
+                            "and must therefore pass the same checks as manual approval; "
+                            f"unmet: {', '.join(readiness.blockers())}"
+                        ),
+                    }
+                )
+
             if document_no in seen_document_numbers:
                 issues.append(
                     {
@@ -345,7 +434,8 @@ class TaxInvoiceService:
 
         if issues:
             raise TaxInvoiceConflictError(
-                f"the import was rejected: {len(issues)} conflict(s) found, nothing was imported",
+                f"the import was rejected: {len(issues)} problem(s) found, "
+                "nothing was imported",
                 issues=issues,
             )
 
@@ -525,28 +615,24 @@ class TaxInvoiceService:
                 )
             ).all()
         )
-        missing = [
-            name
-            for name, value in {
-                "invoiceDate": invoice.invoice_date,
-                "exchangeTargetDate": invoice.exchange_target_date,
-                "exchangeRate": invoice.exchange_rate,
-                "customerName": invoice.customer_name,
-                "customerAddress": invoice.customer_address,
-                "CDN": invoice.cdn,
-            }.items()
-            if value in (None, "")
-        ]
-        if not items:
-            missing.append("items")
-        if len(items) > 18:
+        readiness = check_approval_readiness(
+            invoice_date=invoice.invoice_date,
+            exchange_target_date=invoice.exchange_target_date,
+            exchange_rate=invoice.exchange_rate,
+            customer_name=invoice.customer_name,
+            customer_address=invoice.customer_address,
+            cdn=invoice.cdn,
+            item_count=len(items),
+        )
+        if readiness.too_many_items:
             raise TaxInvoiceStateError(
-                "this template supports 18 product lines; "
+                f"this template supports {APPROVAL_ITEM_LIMIT} product lines; "
                 "split or approve a multi-page design first"
             )
-        if missing:
+        if readiness.missing_fields:
             raise TaxInvoiceStateError(
-                f"invoice is incomplete; required fields: {', '.join(missing)}"
+                "invoice is incomplete; required fields: "
+                f"{', '.join(readiness.missing_fields)}"
             )
         has_warnings = (
             invoice.is_dap

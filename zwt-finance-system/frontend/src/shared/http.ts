@@ -28,6 +28,8 @@ export interface ApiIssue {
   reason: string;
   /** 后端给的英文说明，前端没有对应文案时兜底显示。 */
   detail: string;
+  /** 字段码，例如 customerAddress / itemLimit。只有部分 reason 会带。 */
+  fields?: string[];
 }
 
 export class ApiError extends Error {
