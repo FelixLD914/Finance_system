@@ -34,7 +34,6 @@ import {
   Progress,
   Select,
   Space,
-  Statistic,
   Table,
   Tag,
   Tooltip,
@@ -43,8 +42,8 @@ import {
 import type { UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
-import { useAuth } from "../../auth/AuthContext";
 import type { Locale, Translate } from "../../i18n";
+import { useAuth } from "../../auth/AuthContext";
 import { FinanceLifecycleTabs, type FinanceLifecyclePhase } from "../../ui";
 import { ThaiText } from "../../shared/ThaiText";
 // 签名图库是两个模块共用的，接口挂在 WHT 路由下。
@@ -62,23 +61,27 @@ import {
   getTaxInvoice,
   importDualFiles,
   importExchangeRates,
-  importMigration,
   importSample,
-  listExchangeRates,
   listRateCurrencies,
   listTaxInvoiceDocuments,
   listTaxInvoices,
   updateTaxInvoice,
   voidTaxInvoice,
 } from "./api";
+import {
+  classifyDualFile,
+  isReadyPair,
+  mergeDualFiles,
+  type DualPair,
+} from "./dualPairing";
 import type {
   BotApiStatus,
-  ExchangeRate,
   TaxInvoice,
   TaxInvoiceDocument,
   TaxInvoiceItem,
   TaxInvoiceStatus,
 } from "./types";
+import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
 type WorkspaceView = "ledger" | "recognition" | "batch" | "rates";
 
@@ -100,9 +103,6 @@ const SAMPLE_REQUIRED_COLUMNS = [
   "FOB Rev USD",
   "FOB Rev THB",
 ];
-
-/** 只有历史迁移能带这一列，常规批量开具填了会被整批退回。 */
-const MIGRATION_ONLY_COLUMNS = ["DocumentNo"];
 
 const SAMPLE_OPTIONAL_COLUMNS = [
   "C/I No.",
@@ -145,11 +145,6 @@ const CURRENCY_CHOICES = [
   "VND",
   "INR",
 ];
-
-/** 非交易日或 Excel 导入的行拿不到这几种报价，显示为 — 而不是 0.0000。 */
-function rateCell(value: string | null): string {
-  return value ? Number(value).toFixed(4) : "—";
-}
 
 /** 业务阶段 → 内部状态，与 WHT 侧同一套语义。 */
 const taxInvoicePhaseStatuses: Record<
@@ -215,66 +210,85 @@ function dateLabel(value: string | null): string {
   return value || "—";
 }
 
-type DualSlot = "invoice" | "customs";
-
-/** 一次拖入的一批文件按扩展名分派槽位，认不出的返回 null 由调用方提示。 */
-function classifyDualFile(file: File): DualSlot | null {
-  const name = file.name.toLocaleLowerCase();
-  if (name.endsWith(".xlsx") || name.endsWith(".xls")) return "invoice";
-  if (name.endsWith(".pdf")) return "customs";
-  return null;
+/** 一组导入的结果。成功失败都留一条，界面按原顺序全部列出来。 */
+interface DualImportOutcome {
+  key: string;
+  label: string;
+  invoiceFileName: string;
+  customsFileName: string;
+  ok: boolean;
+  invoiceCount: number;
+  itemCount: number;
+  needsReviewCount: number;
+  invoiceIds: string[];
+  /** 失败时的主提示；成功为 null。 */
+  error: string | null;
+  /** 后端逐条退回的明细，展开后显示。 */
+  details: string[];
 }
 
-/** 归位后的一个槽位。填上了就显示文件名和移除按钮，空着显示「待上传」。 */
-function DualFileSlot({
-  file,
-  hint,
-  icon,
-  label,
+/** 队列里的一组：两枚文件徽章 + 状态 + 移除。 */
+function DualPairRow({
+  index,
+  pair,
   t,
-  onClear,
+  onRemove,
 }: {
-  file: File | null;
-  hint: string;
-  icon: ReactNode;
-  label: string;
+  index: number;
+  pair: DualPair;
   t: Translate;
-  onClear: () => void;
+  onRemove: () => void;
 }) {
+  const ready = isReadyPair(pair);
   return (
-    <div className={`dual-slot${file ? " is-filled" : ""}`}>
-      {icon}
-      <span className="dual-slot-text">
-        <strong>{label}</strong>
-        {/* 空槽位显示这份文件是拿来干什么的，填上后换成文件名。 */}
-        <span title={file?.name ?? hint}>{file ? file.name : hint}</span>
+    <li className={`dual-pair-row${ready ? " is-ready" : ""}`}>
+      <span className="dual-pair-index">{index}</span>
+      <span className="dual-pair-name" title={pair.label}>
+        {pair.label}
       </span>
-      {file ? (
-        <Button
-          aria-label={t("tax.slotRemove", { slot: label })}
-          icon={<CloseOutlined />}
-          size="small"
-          type="text"
-          onClick={onClear}
+      <span className="dual-pair-files">
+        <DualFileChip
+          fileName={pair.invoiceFile?.name ?? null}
+          icon={<FileExcelOutlined />}
+          missingLabel={t("tax.pairMissingExcel")}
         />
-      ) : (
-        <span className="dual-slot-flag">{t("tax.slotPending")}</span>
-      )}
-    </div>
+        <DualFileChip
+          fileName={pair.customsFile?.name ?? null}
+          icon={<FilePdfOutlined />}
+          missingLabel={t("tax.pairMissingPdf")}
+        />
+      </span>
+      <Button
+        aria-label={t("tax.pairRemove", { name: pair.label })}
+        icon={<CloseOutlined />}
+        size="small"
+        type="text"
+        onClick={onRemove}
+      />
+    </li>
   );
 }
 
-/** 后端 check_approval_readiness 返回的字段码 → 界面上该字段的名字。 */
-const BLOCKER_LABELS: Record<string, Parameters<Translate>[0]> = {
-  invoiceDate: "tax.blocker.invoiceDate",
-  exchangeTargetDate: "tax.blocker.exchangeTargetDate",
-  exchangeRate: "tax.blocker.exchangeRate",
-  customerName: "tax.blocker.customerName",
-  customerAddress: "tax.blocker.customerAddress",
-  CDN: "tax.blocker.CDN",
-  items: "tax.blocker.items",
-  itemLimit: "tax.blocker.itemLimit",
-};
+/** 一枚文件徽章。缺失时显示缺的是什么，而不是留白。 */
+function DualFileChip({
+  fileName,
+  icon,
+  missingLabel,
+}: {
+  fileName: string | null;
+  icon: ReactNode;
+  missingLabel: string;
+}) {
+  return (
+    <span
+      className={`dual-file-chip${fileName ? "" : " is-missing"}`}
+      title={fileName ?? missingLabel}
+    >
+      {icon}
+      <span>{fileName ?? missingLabel}</span>
+    </span>
+  );
+}
 
 /**
  * 把后端的 reason 码翻成当前语言。认不出的码退回后端给的英文说明，
@@ -284,23 +298,11 @@ function conflictText(issue: ApiIssue, t: Translate): string {
   const keys: Record<string, Parameters<Translate>[0]> = {
     duplicate_in_file: "tax.issueDuplicateInFile",
     already_exists: "tax.issueAlreadyExists",
-    duplicate_number_in_file: "tax.issueDuplicateNumberInFile",
-    number_already_exists: "tax.issueNumberAlreadyExists",
-    incomplete_for_number: "tax.issueIncompleteForNumber",
     number_not_allowed: "tax.issueNumberNotAllowed",
   };
   const key = keys[issue.reason];
   if (!key) return issue.detail;
-  // 字段码翻成界面上那个字段的名字：财务同事认「客户地址」，不认
-  // customerAddress。用白名单而不是拼 key，后端加了新码也只是原样显示，
-  // 不会拿一个不存在的 key 去查表拿到 undefined。
-  const fields = (issue.fields ?? [])
-    .map((code) => {
-      const label = BLOCKER_LABELS[code];
-      return label ? t(label) : code;
-    })
-    .join("、");
-  return t(key, { key: issue.key, fields });
+  return t(key, { key: issue.key });
 }
 
 function warningCount(invoice: TaxInvoice): number {
@@ -368,7 +370,7 @@ function InvoiceInspector({
       {warnings > 0 && (
         <Alert
           className="tax-review-alert"
-          message={t("tax.warningCount", { count: warnings })}
+          title={t("tax.warningCount", { count: warnings })}
           description={t("tax.warningBody")}
           showIcon
           type="warning"
@@ -533,13 +535,13 @@ function InvoiceInspector({
 
 export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Locale }) {
   const { message, modal } = AntApp.useApp();
-  // 历史迁移是 admin 专属（invoice:migrate）。前端这道只是别让人白跑一趟：
+  // 汇率维护是写操作（invoice:write）。前端这道只是别让人白跑一趟：
   // 真正的拦截在后端，禁掉按钮拦不住直接调接口的人。
+  // canMigrate 随历史迁移 UI 一起摘掉了（见 main 上的「摘除清单」），别再加回来。
   const { can } = useAuth();
-  const canMigrate = can("invoice:migrate");
+  const canWriteRates = can("invoice:write");
   const [view, setView] = useState<WorkspaceView>("ledger");
   const [invoices, setInvoices] = useState<TaxInvoice[]>([]);
-  const [rates, setRates] = useState<ExchangeRate[]>([]);
   // 汇率中心可以看任何币种；出口税票取哪个汇率是另一回事，业务规则仍是
   // USD 的 buying transfer，不受这里的浏览选择影响。
   const [currency, setCurrency] = useState("USD");
@@ -548,7 +550,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // 想查个汇率的人要盯着"同步/导入"两个写操作按钮，误点代价还不小。
   // 入库在前：台账里的数据都是先同步/导入才有的，查询是它的下游。
   const [rateTab, setRateTab] = useState<"ingest" | "query">("ingest");
-  const [rateRange, setRateRange] = useState({ startDate: "", endDate: "" });
   const [botStatus, setBotStatus] = useState<BotApiStatus | null>(null);
   const [selected, setSelected] = useState<TaxInvoice | null>(null);
   const [documents, setDocuments] = useState<TaxInvoiceDocument[]>([]);
@@ -558,12 +559,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [status, setStatus] = useState<TaxInvoiceStatus | "all">("all");
   const [period, setPeriod] = useState("all");
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
-  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
-  const [customsFile, setCustomsFile] = useState<File | null>(null);
+  // 识别建单的待导入队列：一次可以拖进任意多组「同名 Excel + 同名 PDF」。
+  const [dualPairs, setDualPairs] = useState<DualPair[]>([]);
+  // 跑完一批的逐组结果。null 表示还没跑过，空数组不会出现。
+  const [dualResults, setDualResults] = useState<DualImportOutcome[] | null>(null);
+  const [dualProgress, setDualProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
+  // 结果清单展开哪几组。默认只展开失败的：成功的看一眼汇总就够了。
+  const [dualExpanded, setDualExpanded] = useState<string[]>([]);
   const [sampleFile, setSampleFile] = useState<File | null>(null);
-  // 批量导入拆成两种模式：常规开票（编号必须留空）和历史迁移（沿用旧编号）。
-  // 默认停在开票——迁移是一次性的，日常用的是前者。
-  const [batchMode, setBatchMode] = useState<"issue" | "migration">("issue");
   const [conflicts, setConflicts] = useState<ApiIssue[]>([]);
   const [rateFile, setRateFile] = useState<File | null>(null);
   const [fetchOpen, setFetchOpen] = useState(false);
@@ -590,23 +595,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   }, [message, t]);
 
-  const refreshRates = useCallback(
-    async (nextCurrency = currency) => {
-      try {
-        setRates(
-          await listExchangeRates(
-            nextCurrency,
-            rateRange.startDate || undefined,
-            rateRange.endDate || undefined,
-          ),
-        );
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : t("tax.rateLoadFailed"));
-      }
-    },
-    [currency, message, rateRange.endDate, rateRange.startDate, t],
-  );
-
   useEffect(() => {
     void refreshInvoices();
     // 配置自检和币种列表失败都不该打断页面：拿不到就退化，不弹错。
@@ -618,17 +606,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       .catch(() => setCurrencies(["USD"]));
   }, [refreshInvoices]);
 
-  useEffect(() => {
-    void refreshRates(currency);
-  }, [currency, refreshRates]);
+  // 汇率的拉取已随 UI 一起移进 ExchangeRateDirectory，这里不再有 refreshRates。
 
+  // 收 id 而不是整条记录：结果清单里只有 invoiceId，没有台账那份完整对象。
   const openInvoice = useCallback(
-    async (invoice: TaxInvoice) => {
+    async (invoiceId: string) => {
       setBusy(true);
       try {
         const [detail, nextDocuments] = await Promise.all([
-          getTaxInvoice(invoice.id),
-          listTaxInvoiceDocuments(invoice.id),
+          getTaxInvoice(invoiceId),
+          listTaxInvoiceDocuments(invoiceId),
         ]);
         setSelected(detail);
         setDocuments(nextDocuments);
@@ -664,16 +651,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
   }, [invoices, period, phase, query, status]);
-
-  // DocumentNo 只在历史迁移那一栏出现：开票模式下它是禁列，摆在「可选列」里
-  // 只会让人以为填了也行。
-  const optionalColumns = useMemo(
-    () =>
-      batchMode === "migration"
-        ? [...MIGRATION_ONLY_COLUMNS, ...SAMPLE_OPTIONAL_COLUMNS]
-        : SAMPLE_OPTIONAL_COLUMNS,
-    [batchMode],
-  );
 
   const lifecycleCounts = useMemo(
     () => ({
@@ -899,23 +876,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
    */
   const acceptDualFiles = useCallback(
     (files: File[]) => {
-      const unsupported: string[] = [];
-      const duplicated: string[] = [];
-      const picked: Partial<Record<DualSlot, File>> = {};
-
-      for (const file of files) {
-        const slot = classifyDualFile(file);
-        if (!slot) {
-          unsupported.push(file.name);
-        } else if (picked[slot]) {
-          duplicated.push(file.name);
-        } else {
-          picked[slot] = file;
-        }
-      }
-
-      if (picked.invoice) setInvoiceFile(picked.invoice);
-      if (picked.customs) setCustomsFile(picked.customs);
+      const { pairs, unsupported, duplicated } = mergeDualFiles(dualPairs, files);
+      setDualPairs(pairs);
       if (unsupported.length) {
         message.warning(t("tax.unsupportedFiles", { files: unsupported.join("、") }));
       }
@@ -923,36 +885,109 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         message.warning(t("tax.duplicateIgnored", { files: duplicated.join("、") }));
       }
     },
-    [message, t],
+    [dualPairs, message, t],
   );
 
+  const readyPairs = useMemo(() => dualPairs.filter(isReadyPair), [dualPairs]);
+  const incompletePairs = useMemo(
+    () => dualPairs.filter((pair) => !isReadyPair(pair)),
+    [dualPairs],
+  );
+
+  const dualSummary = useMemo(() => {
+    if (!dualResults) return null;
+    return {
+      ok: dualResults.filter((item) => item.ok).length,
+      failed: dualResults.filter((item) => !item.ok).length,
+      invoices: dualResults.reduce((sum, item) => sum + item.invoiceCount, 0),
+      items: dualResults.reduce((sum, item) => sum + item.itemCount, 0),
+      needsReview: dualResults.reduce((sum, item) => sum + item.needsReviewCount, 0),
+    };
+  }, [dualResults]);
+
+  /**
+   * 逐组导入。后端 /import/dual 一次只收一对文件，所以批量在前端串行展开。
+   *
+   * 串行而不是并发：每组是各自独立的事务，串行能保证结果清单的顺序和队列
+   * 顺序一致，也不会让二十来个 multipart 请求同时压上去。中途某组失败只记
+   * 一条错误继续往下跑——一份坏 PDF 不该把另外十八组一起废掉。
+   */
   const runDualImport = async () => {
-    if (!invoiceFile || !customsFile) {
+    if (!readyPairs.length) {
       message.warning(t("tax.dualFilesRequired"));
       return;
     }
     setBusy(true);
-    try {
-      const result = await importDualFiles(invoiceFile, customsFile);
+    setDualResults(null);
+    setDualProgress({ done: 0, total: readyPairs.length });
+    const outcomes: DualImportOutcome[] = [];
+    for (const pair of readyPairs) {
+      const base = {
+        key: pair.key,
+        label: pair.label,
+        invoiceFileName: pair.invoiceFile.name,
+        customsFileName: pair.customsFile.name,
+      };
+      try {
+        const result = await importDualFiles(pair.invoiceFile, pair.customsFile);
+        outcomes.push({
+          ...base,
+          ok: true,
+          invoiceCount: result.invoiceCount,
+          itemCount: result.itemCount,
+          needsReviewCount: result.needsReviewCount,
+          invoiceIds: result.invoiceIds,
+          error: null,
+          details: [],
+        });
+      } catch (error) {
+        outcomes.push({
+          ...base,
+          ok: false,
+          invoiceCount: 0,
+          itemCount: 0,
+          needsReviewCount: 0,
+          invoiceIds: [],
+          error: error instanceof Error ? error.message : t("tax.recognitionFailed"),
+          details: error instanceof TaxInvoiceApiError ? error.details : [],
+        });
+      }
+      setDualProgress({ done: outcomes.length, total: readyPairs.length });
+    }
+
+    const succeeded = new Set(
+      outcomes.filter((item) => item.ok).map((item) => item.key),
+    );
+    // 成功的从队列里摘掉，失败的留着——改完文件按原位重跑，不用重新选一遍。
+    setDualPairs((current) => current.filter((pair) => !succeeded.has(pair.key)));
+    setDualResults(outcomes);
+    // 默认只展开失败项：成功的看汇总就够了，出错的必须一眼看到原因。
+    setDualExpanded(outcomes.filter((item) => !item.ok).map((item) => item.key));
+    setDualProgress(null);
+    setBusy(false);
+
+    const failed = outcomes.length - succeeded.size;
+    if (failed) {
+      message.warning(
+        t("tax.batchDualPartial", { ok: succeeded.size, failed }),
+      );
+    } else {
       message.success(
-        t("tax.recognitionDone", {
-          invoices: result.invoiceCount,
-          items: result.itemCount,
+        t("tax.batchDualDone", {
+          groups: succeeded.size,
+          invoices: outcomes.reduce((sum, item) => sum + item.invoiceCount, 0),
+          items: outcomes.reduce((sum, item) => sum + item.itemCount, 0),
         }),
       );
-      setInvoiceFile(null);
-      setCustomsFile(null);
-      await refreshInvoices();
-      setView("ledger");
-      if (result.invoiceIds[0]) {
-        const detail = await getTaxInvoice(result.invoiceIds[0]);
-        await openInvoice(detail);
-      }
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t("tax.recognitionFailed"));
-    } finally {
-      setBusy(false);
     }
+    // 台账在后台刷新：结果清单留在本页，让人先把这一批核对完。
+    await refreshInvoices();
+  };
+
+  /** 从结果清单跳去台账看某一份税票。 */
+  const openInvoiceFromResult = async (invoiceId: string) => {
+    setView("ledger");
+    await openInvoice(invoiceId);
   };
 
   const runSampleImport = async () => {
@@ -962,10 +997,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
     setBusy(true);
     try {
-      const result =
-        batchMode === "migration"
-          ? await importMigration(sampleFile)
-          : await importSample(sampleFile);
+      const result = await importSample(sampleFile);
       message.success(
         t("tax.sampleDone", {
           invoices: result.invoiceCount,
@@ -1016,7 +1048,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         t("tax.rateImported", { created: result.created, updated: result.updated }),
       );
       setRateFile(null);
-      await refreshRates();
+      if (!currencies.includes(currency)) {
+        setCurrencies((current) => [...current, currency].sort());
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.rateImportFailed"));
     } finally {
@@ -1043,7 +1077,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       if (!currencies.includes(currency)) {
         setCurrencies((current) => [...current, currency].sort());
       }
-      await refreshRates();
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.botFailed"));
     } finally {
@@ -1207,7 +1240,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
               size="middle"
               onRow={(record) => ({
-                onClick: () => void openInvoice(record),
+                onClick: () => void openInvoice(record.id),
               })}
             />
           </main>
@@ -1296,37 +1329,217 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   {t("tax.dualPickFiles")}
                 </Button>
               </Upload.Dragger>
-              <div className="dual-slot-row">
-                <DualFileSlot
-                  file={invoiceFile}
-                  hint={t("tax.invoiceExcelHint")}
-                  icon={<FileExcelOutlined />}
-                  label={t("tax.invoiceExcel")}
-                  t={t}
-                  onClear={() => setInvoiceFile(null)}
-                />
-                <DualFileSlot
-                  file={customsFile}
-                  hint={t("tax.customsPdfHint")}
-                  icon={<FilePdfOutlined />}
-                  label={t("tax.customsPdf")}
-                  t={t}
-                  onClear={() => setCustomsFile(null)}
-                />
-              </div>
+              {dualPairs.length > 0 && (
+                <div className="dual-queue">
+                  <div className="dual-queue-head">
+                    <h3>
+                      {t("tax.pairQueue")}
+                      <span>{t("tax.pairQueueCount", { count: readyPairs.length })}</span>
+                    </h3>
+                    <Button size="small" type="text" onClick={() => setDualPairs([])}>
+                      {t("tax.pairClearAll")}
+                    </Button>
+                  </div>
+                  {incompletePairs.length > 0 && (
+                    <Alert
+                      title={t("tax.pairIncomplete", {
+                        count: incompletePairs.length,
+                      })}
+                      description={t("tax.pairIncompleteBody")}
+                      showIcon
+                      type="warning"
+                    />
+                  )}
+                  {/* 队列可能有二十来组，给个高度上限自己滚，别把按钮顶出首屏。 */}
+                  <ol className="dual-pair-list">
+                    {dualPairs.map((pair, index) => (
+                      <DualPairRow
+                        index={index + 1}
+                        key={pair.key}
+                        pair={pair}
+                        t={t}
+                        onRemove={() =>
+                          setDualPairs((current) =>
+                            current.filter((item) => item.key !== pair.key),
+                          )
+                        }
+                      />
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {dualProgress && (
+                <div className="dual-progress">
+                  <Progress
+                    percent={Math.round((dualProgress.done / dualProgress.total) * 100)}
+                    size="small"
+                    status="active"
+                  />
+                  <span>
+                    {t("tax.pairProgress", {
+                      done: dualProgress.done,
+                      total: dualProgress.total,
+                    })}
+                  </span>
+                </div>
+              )}
               <Button
                 block
+                disabled={!readyPairs.length}
                 icon={<FileSearchOutlined />}
                 loading={busy}
                 size="large"
                 type="primary"
                 onClick={() => void runDualImport()}
               >
-                {t("tax.startRecognition")}
+                {readyPairs.length > 1
+                  ? t("tax.startRecognitionBatch", { count: readyPairs.length })
+                  : t("tax.startRecognition")}
               </Button>
             </section>
 
           </div>
+
+          {dualResults && dualSummary && (
+            <section className="tax-tool-card dual-result-card">
+              <div className="tool-card-heading">
+                <div className="tool-card-icon ink">
+                  <FileDoneOutlined />
+                </div>
+                <div>
+                  <span>{t("tax.resultEyebrow")}</span>
+                  <h2>{t("tax.resultTitle", { count: dualResults.length })}</h2>
+                  <p>{t("tax.resultHint")}</p>
+                </div>
+                <div className="dual-result-actions">
+                  <Button
+                    size="small"
+                    onClick={() => setDualExpanded(dualResults.map((item) => item.key))}
+                  >
+                    {t("tax.expandAll")}
+                  </Button>
+                  <Button size="small" onClick={() => setDualExpanded([])}>
+                    {t("tax.collapseAll")}
+                  </Button>
+                  <Button size="small" type="text" onClick={() => setDualResults(null)}>
+                    {t("common.close")}
+                  </Button>
+                </div>
+              </div>
+              <div className="dual-result-summary">
+                <div>
+                  <strong>{dualSummary.ok}</strong>
+                  <span>{t("tax.resultOk")}</span>
+                </div>
+                <div className={dualSummary.failed ? "is-alert" : ""}>
+                  <strong>{dualSummary.failed}</strong>
+                  <span>{t("tax.resultFailed")}</span>
+                </div>
+                <div>
+                  <strong>{dualSummary.invoices}</strong>
+                  <span>{t("tax.countInvoices")}</span>
+                </div>
+                <div>
+                  <strong>{dualSummary.items}</strong>
+                  <span>{t("tax.resultItems")}</span>
+                </div>
+                <div>
+                  <strong>{dualSummary.needsReview}</strong>
+                  <span>{t("tax.countNeedsReview")}</span>
+                </div>
+              </div>
+              {/* 逐组一行、按导入顺序编号，点标题行展开看这一组的两份源文件
+                  和生成结果；失败的默认就是展开的。 */}
+              <Table<DualImportOutcome>
+                className="dual-result-table"
+                columns={[
+                  {
+                    title: "#",
+                    dataIndex: "key",
+                    width: 52,
+                    render: (_value, _record, index) => index + 1,
+                  },
+                  {
+                    title: t("tax.resultGroup"),
+                    dataIndex: "label",
+                    ellipsis: true,
+                    render: (value: string) => (
+                      <span className="dual-result-name">{value}</span>
+                    ),
+                  },
+                  {
+                    title: t("tax.colStatus"),
+                    dataIndex: "ok",
+                    width: 108,
+                    render: (ok: boolean) => (
+                      <Tag className={`status-tag ${ok ? "status-issued" : "status-voided"}`}>
+                        {ok ? t("tax.resultOk") : t("tax.resultFailed")}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: t("tax.countInvoices"),
+                    dataIndex: "invoiceCount",
+                    width: 88,
+                    align: "right",
+                  },
+                  {
+                    title: t("tax.resultItems"),
+                    dataIndex: "itemCount",
+                    width: 88,
+                    align: "right",
+                  },
+                ]}
+                dataSource={dualResults}
+                expandable={{
+                  expandedRowKeys: dualExpanded,
+                  onExpandedRowsChange: (keys) =>
+                    setDualExpanded(keys.map((key) => String(key))),
+                  expandedRowRender: (record) => (
+                    <div className="dual-result-detail">
+                      <dl>
+                        <dt>{t("tax.invoiceExcel")}</dt>
+                        <dd>{record.invoiceFileName}</dd>
+                        <dt>{t("tax.customsPdf")}</dt>
+                        <dd>{record.customsFileName}</dd>
+                      </dl>
+                      {record.ok ? (
+                        <div className="dual-result-links">
+                          {record.invoiceIds.map((invoiceId, index) => (
+                            <Button
+                              key={invoiceId}
+                              size="small"
+                              onClick={() => void openInvoiceFromResult(invoiceId)}
+                            >
+                              {t("tax.resultOpen", { index: index + 1 })}
+                            </Button>
+                          ))}
+                        </div>
+                      ) : (
+                        <Alert
+                          title={record.error}
+                          description={
+                            record.details.length ? (
+                              <ul>
+                                {record.details.map((detail) => (
+                                  <li key={detail}>{detail}</li>
+                                ))}
+                              </ul>
+                            ) : undefined
+                          }
+                          showIcon
+                          type="error"
+                        />
+                      )}
+                    </div>
+                  ),
+                }}
+                pagination={false}
+                rowKey="key"
+                size="small"
+              />
+            </section>
+          )}
 
           <section className="tax-quality-strip">
             <div>
@@ -1361,30 +1574,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             <span>{t("tax.batchRuleNote")}</span>
           </p>
 
-          {/* 两种模式的编号口径正好相反，必须先让人选定再上传，不能靠一句
-              提示分辨——选错了后端会整批退回，但那已经浪费一次往返。 */}
-          <nav className="rate-tab-switch" aria-label={t("tax.batchNav")}>
-            <button
-              className={batchMode === "issue" ? "is-active" : ""}
-              type="button"
-              onClick={() => setBatchMode("issue")}
-            >
-              {t("tax.batchModeIssue")}
-            </button>
-            {/* 没权限的人也让他看见这个模式存在、并知道该找谁要——直接藏掉会
-                让人以为功能没做。 */}
-            <Tooltip title={canMigrate ? "" : t("tax.batchMigrationNoPermission")}>
-              <button
-                className={batchMode === "migration" ? "is-active" : ""}
-                disabled={!canMigrate}
-                type="button"
-                onClick={() => setBatchMode("migration")}
-              >
-                {t("tax.batchModeMigration")}
-              </button>
-            </Tooltip>
-          </nav>
-
           <div className="tax-batch-grid">
             <section className="tax-tool-card">
               <div className="tool-card-heading">
@@ -1393,16 +1582,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <div>
                   <span>{t("tax.migration")}</span>
-                  <h2>
-                    {batchMode === "migration"
-                      ? t("tax.batchMigrationTitle")
-                      : t("tax.batchIssueTitle")}
-                  </h2>
-                  <p>
-                    {batchMode === "migration"
-                      ? t("tax.batchMigrationHint")
-                      : t("tax.batchIssueHint")}
-                  </p>
+                  <h2>{t("tax.batchIssueTitle")}</h2>
+                  <p>{t("tax.batchIssueHint")}</p>
                 </div>
               </div>
               <Upload.Dragger
@@ -1424,12 +1605,15 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 <p className="ant-upload-text">{t("tax.pickSample")}</p>
                 <p className="ant-upload-hint">{t("tax.samplePickHint")}</p>
               </Upload.Dragger>
-              <Alert
-                message={t("tax.sampleWarning")}
-                description={t("tax.sampleWarningBody")}
-                showIcon
-                type="warning"
-              />
+              {/* 这条原来也是一块 Alert，和右栏那块并排像两个错误提示在抢注意力。
+                  它其实是"导进来之后会怎样"的说明，不是警告，压成一条内联注记。 */}
+              <p className="tax-inline-note">
+                <WarningOutlined />
+                <span>
+                  <strong>{t("tax.sampleWarning")}</strong>
+                  {t("tax.sampleWarningBody")}
+                </span>
+              </p>
               <Button
                 block
                 disabled={!sampleFile}
@@ -1454,21 +1638,13 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   <p>{t("tax.batchColumnsHint")}</p>
                 </div>
               </div>
-              {/* 两种模式对 DocumentNo 的态度相反：开票一律拒绝，迁移是全系统
-                  唯一能指定编号的入口。这条差异必须写在最显眼的位置。 */}
+              {/* DocumentNo 一律拒收，没有例外——这是编号只在批准事务里生成
+                  这条规则最容易被文件绕过的地方，必须写在最显眼的位置。 */}
               <Alert
-                message={
-                  batchMode === "migration"
-                    ? t("tax.batchMigrationScope")
-                    : t("tax.batchNumberForbidden")
-                }
-                description={
-                  batchMode === "migration"
-                    ? t("tax.batchMigrationScopeBody")
-                    : t("tax.batchNumberForbiddenBody")
-                }
+                title={t("tax.batchNumberForbidden")}
+                description={t("tax.batchNumberForbiddenBody")}
                 showIcon
-                type={batchMode === "migration" ? "warning" : "info"}
+                type="info"
               />
               <div className="column-group">
                 <h3>
@@ -1486,18 +1662,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               <div className="column-group">
                 <h3>
                   {t("tax.batchOptional")}
-                  <span>{optionalColumns.length}</span>
+                  <span>{SAMPLE_OPTIONAL_COLUMNS.length}</span>
                 </h3>
                 <div className="column-tags">
-                  {optionalColumns.map((name) => (
-                    <code
-                      className={
-                        MIGRATION_ONLY_COLUMNS.includes(name) ? "is-migration" : ""
-                      }
-                      key={name}
-                    >
-                      {name}
-                    </code>
+                  {SAMPLE_OPTIONAL_COLUMNS.map((name) => (
+                    <code key={name}>{name}</code>
                   ))}
                 </div>
               </div>
@@ -1536,7 +1705,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   className="bot-status-alert"
                   showIcon
                   type="warning"
-                  message={t("tax.botNotConfigured")}
+                  title={t("tax.botNotConfigured")}
                   description={t("tax.botNotConfiguredBody", {
                     envVar: botStatus?.envVar ?? "ZWT_BOT_API_KEY",
                     file: "zwt-finance-system/.env",
@@ -1556,7 +1725,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <Button
                   block
-                  disabled={botUnconfigured}
+                  disabled={botUnconfigured || !canWriteRates}
                   icon={<ApiOutlined />}
                   size="large"
                   type="primary"
@@ -1578,6 +1747,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <Upload
                   accept=".xlsx,.xls"
+                  disabled={!canWriteRates}
                   beforeUpload={(file) => {
                     setRateFile(file);
                     return false;
@@ -1593,7 +1763,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   </Button>
                 </Upload>
                 <Button
-                  disabled={!rateFile}
+                  disabled={!rateFile || !canWriteRates}
                   loading={busy}
                   size="large"
                   onClick={() => void runRateImport()}
@@ -1605,154 +1775,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           )}
 
           {rateTab === "query" && (
-            <div className="rate-stat-grid">
-              <section>
-                <Statistic
-                  title={t("tax.rateRecords", { currency })}
-                  value={rates.length}
-                  suffix={t("tax.days")}
-                />
-                <Progress
-                  percent={Math.min(100, Math.round((rates.length / 366) * 100))}
-                  showInfo={false}
-                  strokeColor="#a87349"
-                />
-                <small>{t("tax.rateListLimit")}</small>
-              </section>
-              <section>
-                <Statistic
-                  precision={4}
-                  title={t("tax.latestBuyingTransfer")}
-                  value={Number(rates[0]?.buyingTransfer ?? 0)}
-                />
-                <small>
-                  {rates[0]?.rateDate ?? t("tax.notImported")} · {rates[0]?.source ?? "—"}
-                </small>
-              </section>
-              <section className="rate-query-card">
-                <label className="rate-currency-field">
-                  <span>{t("tax.currency")}</span>
-                  <Select
-                    options={CURRENCY_CHOICES.map((code) => ({
-                      value: code,
-                      label: currencies.includes(code)
-                        ? code
-                        : `${code} · ${t("tax.noData")}`,
-                    }))}
-                    showSearch
-                    value={currency}
-                    onChange={setCurrency}
-                  />
-                </label>
-                <label className="rate-currency-field">
-                  <span>{t("tax.startDate")}</span>
-                  <Input
-                    type="date"
-                    value={rateRange.startDate}
-                    onChange={(event) =>
-                      setRateRange((current) => ({
-                        ...current,
-                        startDate: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="rate-currency-field">
-                  <span>{t("tax.endDate")}</span>
-                  <Input
-                    type="date"
-                    value={rateRange.endDate}
-                    onChange={(event) =>
-                      setRateRange((current) => ({
-                        ...current,
-                        endDate: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                {(rateRange.startDate || rateRange.endDate) && (
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => setRateRange({ startDate: "", endDate: "" })}
-                  >
-                    {t("tax.clearRange")}
-                  </Button>
-                )}
-              </section>
-            </div>
-          )}
-
-          {rateTab === "query" && (
-          <section className="rate-ledger-card">
-            <div className="section-title-row">
-              <div>
-                <span className="workspace-kicker">{t("tax.rateLedgerKicker")}</span>
-                <h2>{t("tax.rateLedger")}</h2>
-              </div>
-              <Button icon={<ReloadOutlined />} onClick={() => void refreshRates()}>
-                {t("common.refresh")}
-              </Button>
-            </div>
-            {rates.length ? (
-              <Table
-                columns={[
-                  { title: t("tax.colCurrency"), dataIndex: "currency", width: 90 },
-                  { title: t("tax.colRateDay"), dataIndex: "rateDate", width: 120 },
-                  {
-                    // 出口税票取的就是这一列，加粗与其余三种区分开。
-                    title: `Buying Transfer · ${t("tax.rateUsedForInvoice")}`,
-                    dataIndex: "buyingTransfer",
-                    width: 190,
-                    align: "right",
-                    render: (value: string) => <strong>{Number(value).toFixed(4)}</strong>,
-                  },
-                  {
-                    title: "Buying Sight",
-                    dataIndex: "buyingSight",
-                    width: 130,
-                    align: "right",
-                    render: rateCell,
-                  },
-                  {
-                    title: "Selling",
-                    dataIndex: "selling",
-                    width: 120,
-                    align: "right",
-                    render: rateCell,
-                  },
-                  {
-                    title: "Mid Rate",
-                    dataIndex: "midRate",
-                    width: 120,
-                    align: "right",
-                    render: rateCell,
-                  },
-                  {
-                    title: t("tax.colSource"),
-                    dataIndex: "source",
-                    width: 150,
-                    render: (value: string) => (
-                      <Tag>{value === "bot_api" ? "BOT API" : "BOT Excel"}</Tag>
-                    ),
-                  },
-                  { title: t("tax.colSourceFile"), dataIndex: "sourceFileName", ellipsis: true },
-                  {
-                    title: t("tax.colUpdatedAt"),
-                    dataIndex: "updatedAt",
-                    width: 190,
-                    render: (value: string) => dateTime(value, locale),
-                  },
-                ]}
-                dataSource={rates}
-                pagination={{ pageSize: 15, showSizeChanger: false }}
-                rowKey={(record) => `${record.currency}-${record.rateDate}`}
-                scroll={{ x: 1100 }}
-              />
-            ) : (
-              <Empty description={t("tax.noRates")} />
-            )}
-          </section>
+            <ExchangeRateDirectory
+              canWrite={canWriteRates}
+              currencies={currencies}
+              currency={currency}
+              locale={locale}
+              t={t}
+              onCurrencyChange={setCurrency}
+            />
           )}
         </main>
       )}
@@ -1765,7 +1795,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         width={680}
         onCancel={() => setConflicts([])}
       >
-        <Alert message={t("tax.conflictIntro")} showIcon type="error" />
+        <Alert title={t("tax.conflictIntro")} showIcon type="error" />
         <ol className="conflict-list">
           {conflicts.map((issue, index) => (
             <li key={`${issue.reason}-${issue.key}-${index}`}>
@@ -1840,7 +1870,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         onCancel={() => setEditOpen(false)}
         onOk={() => void saveEdit()}
       >
-        <Alert message={t("tax.editHint")} showIcon type="info" />
+        <Alert title={t("tax.editHint")} showIcon type="info" />
         <Form form={editForm} layout="vertical">
           <div className="tax-edit-grid">
             <Form.Item
@@ -1973,7 +2003,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         onOk={() => void runWorkflowAction()}
       >
         <Alert
-          message={
+          title={
             workflowAction === "void" ? t("tax.voidWarning") : t("tax.correctionWarning")
           }
           showIcon

@@ -419,6 +419,8 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     createTask,
     transitionTask,
     persistPayee,
+    removePayee,
+    recoverPayee,
     uploadPayees,
     uploadHistoricalTasks,
     uploadBatchTasks,
@@ -800,7 +802,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           className="workspace-alert"
           showIcon
           type="error"
-          message={t("common.loadFailed")}
+          title={t("common.loadFailed")}
           description={error}
           action={
             <Button size="small" onClick={() => void reload()}>
@@ -994,7 +996,9 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         payees={payees}
         pending={mutationPending}
         t={t}
+        onDelete={removePayee}
         onImport={uploadPayees}
+        onRestore={recoverPayee}
         onSave={persistPayee}
       />
     </section>
@@ -1056,7 +1060,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           className="import-intro"
           showIcon
           type={importKind === "history" ? "warning" : "info"}
-          message={
+          title={
             importKind === "history"
               ? t("wht.historyImportIntro")
               : t("wht.batchImportIntro")

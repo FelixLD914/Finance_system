@@ -39,7 +39,7 @@ export function LoginScreen() {
         </Typography.Paragraph>
 
         {error !== null && (
-          <Alert type="error" showIcon message={error} className="login-error" />
+          <Alert type="error" showIcon title={error} className="login-error" />
         )}
 
         <Form<LoginFormValues>

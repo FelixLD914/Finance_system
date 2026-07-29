@@ -30,10 +30,14 @@ from app.modules.tax_invoice.recognition import (
     parse_sample_workbook,
 )
 from app.modules.tax_invoice.schemas import (
+    MONTH_PATTERN,
     BotApiStatus,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
+    ExchangeRateMonth,
     ExchangeRateResponse,
+    ExchangeRateUpdate,
+    ExchangeRateUpsert,
     TaxInvoiceApproveRequest,
     TaxInvoiceCorrectionRequest,
     TaxInvoiceDocumentGenerateRequest,
@@ -329,53 +333,90 @@ async def import_existing_sample(
     return await service.import_sample(rows=rows, file_name=file_name, content=content)
 
 
-# 与 /import/sample 读同一种表格，区别只在编号口径：这里允许沿用旧系统已经
-# 开出的 DocumentNo，那边一律拒绝。做成独立端点而不是一个 mode 参数，是为了
-# 让权限能只收紧这一条——这是全系统唯一能由外部指定税票编号的入口。
-#
-# 【一次性通道：历史迁移跑完后整个删掉】
-# 迁移一辈子只做一次，做完之后这个端点就是纯风险敞口、没有任何业务收益。
-# 摘除清单（含一条「不要把 import_mode 的 CHECK 约束收窄回去」的坑）见
-# docs/windows-deployment.md 的「上线后必须摘掉的一次性通道」。
-@router.post(
-    "/import/migration",
-    response_model=TaxInvoiceImportResponse,
-    # 两个都要：invoice:write 是导入这个动作本身，invoice:migrate 是"允许沿用
-    # 外部编号"这项额外授权。分开挂着，将来收回迁移权不会连带影响日常导入。
-    dependencies=[
-        Depends(require_permission("invoice:write")),
-        Depends(require_permission("invoice:migrate")),
-    ],
-)
-async def import_historical_migration(
-    service: ServiceDependency,
-    file: Annotated[UploadFile, File(description="Legacy TAX INV ledger .xlsx")],
-) -> TaxInvoiceImportResponse:
-    content, file_name = await _read_upload(file, (".xlsx", ".xls"))
-    try:
-        rows = parse_sample_workbook(content, file_name)
-    except TaxInvoiceRecognitionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await service.import_migration(
-        rows=rows,
-        file_name=file_name,
-        content=content,
-    )
-
-
 @router.get("/exchange-rates", response_model=list[ExchangeRateResponse])
 async def list_exchange_rates(
     service: ServiceDependency,
     currency: str = Query(default="USD", min_length=3, max_length=3),
     start_date: Annotated[date | None, Query(alias="startDate")] = None,
     end_date: Annotated[date | None, Query(alias="endDate")] = None,
+    month: str | None = Query(default=None, pattern=MONTH_PATTERN),
+    deleted: bool = Query(default=False, description="true 返回回收站列表"),
 ) -> list[ExchangeRateResponse]:
     rows = await service.list_exchange_rates(
         currency=currency,
         start_date=start_date,
         end_date=end_date,
+        month=month,
+        deleted=deleted,
     )
     return [ExchangeRateResponse.model_validate(row) for row in rows]
+
+
+# 字面量路径统一排在 /exchange-rates/{rate_id} 这类参数路径之前。这里目前不会
+# 真的撞上（months 是 GET，带 rate_id 的只有 PATCH/DELETE），但一旦以后有人加
+# 一个 GET /exchange-rates/{rate_id}，"months" 就会被当成整数 rate_id 解析成
+# 422 —— 本仓已经在 /tasks/batch-template 上踩过一次同样的坑。
+@router.get("/exchange-rates/months", response_model=list[ExchangeRateMonth])
+async def list_exchange_rate_months(
+    service: ServiceDependency,
+    currency: str = Query(default="USD", min_length=3, max_length=3),
+) -> list[ExchangeRateMonth]:
+    """按月汇总。汇率维护以月为单位，列表先出月份，点进去再看每日明细。"""
+    return await service.list_exchange_rate_months(currency=currency)
+
+
+@router.post(
+    "/exchange-rates",
+    response_model=ExchangeRateResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def upsert_exchange_rate(
+    payload: ExchangeRateUpsert,
+    service: ServiceDependency,
+) -> ExchangeRateResponse:
+    """手工录入某一天的汇率；该币种该日期已有在用记录时覆盖它。"""
+    return ExchangeRateResponse.model_validate(await service.upsert_exchange_rate(payload))
+
+
+@router.patch(
+    "/exchange-rates/{rate_id}",
+    response_model=ExchangeRateResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def update_exchange_rate(
+    rate_id: int,
+    payload: ExchangeRateUpdate,
+    service: ServiceDependency,
+) -> ExchangeRateResponse:
+    """行内编辑，含停用/启用（is_active）。停用的汇率不再参与税票计价。"""
+    return ExchangeRateResponse.model_validate(
+        await service.update_exchange_rate(rate_id, payload)
+    )
+
+
+@router.delete(
+    "/exchange-rates/{rate_id}",
+    response_model=ExchangeRateResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def delete_exchange_rate(
+    rate_id: int,
+    service: ServiceDependency,
+) -> ExchangeRateResponse:
+    return ExchangeRateResponse.model_validate(await service.delete_exchange_rate(rate_id))
+
+
+@router.post(
+    "/exchange-rates/{rate_id}/restore",
+    response_model=ExchangeRateResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def restore_exchange_rate(
+    rate_id: int,
+    service: ServiceDependency,
+) -> ExchangeRateResponse:
+    """从回收站恢复。同币种同日期已有在用汇率时返回 409。"""
+    return ExchangeRateResponse.model_validate(await service.restore_exchange_rate(rate_id))
 
 
 @router.post(

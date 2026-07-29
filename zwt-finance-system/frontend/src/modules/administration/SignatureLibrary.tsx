@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircleOutlined,
+  DeleteOutlined,
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
   TagsOutlined,
+  UndoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import {
@@ -25,7 +27,13 @@ import type { ColumnsType } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
 
 import type { Translate } from "../../i18n";
-import { listSignatures, updateSignature, uploadSignature } from "../wht/api";
+import {
+  deleteSignature,
+  listSignatures,
+  restoreSignature,
+  updateSignature,
+  uploadSignature,
+} from "../wht/api";
 import type { SignatureAsset, SignatureUsage } from "../wht/types";
 
 interface SignatureLibraryProps {
@@ -39,8 +47,9 @@ const usageColors: Record<SignatureUsage, string> = {
 };
 
 export function SignatureLibrary({ t }: SignatureLibraryProps) {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,21 +65,21 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     { value: "salary_advance", label: t("wht.usage.salary_advance") },
   ];
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setSignatures(await listSignatures(true));
+      setSignatures(await listSignatures(true, undefined, showDeleted));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
     } finally {
       setLoading(false);
     }
-  };
+  }, [showDeleted]);
 
   useEffect(() => {
     void reload();
-  }, []);
+  }, [reload]);
 
   const submitUpload = async () => {
     try {
@@ -131,6 +140,53 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     }
   };
 
+  const remove = (signature: SignatureAsset) => {
+    modal.confirm({
+      title: t("wht.deleteSignatureTitle"),
+      content: t("wht.deleteSignatureHint", {
+        name: signature.name,
+        version: signature.version,
+      }),
+      okText: t("common.moveToRecycleBin"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          setPending(true);
+          await deleteSignature(signature.id);
+          message.success(t("wht.signatureDeleted"));
+          await reload();
+        } catch (deleteError) {
+          message.error(
+            deleteError instanceof Error
+              ? deleteError.message
+              : t("common.unknownError"),
+          );
+          throw deleteError;
+        } finally {
+          setPending(false);
+        }
+      },
+    });
+  };
+
+  const restore = async (signature: SignatureAsset) => {
+    try {
+      setPending(true);
+      await restoreSignature(signature.id);
+      message.success(t("wht.signatureRestored"));
+      await reload();
+    } catch (restoreError) {
+      message.error(
+        restoreError instanceof Error
+          ? restoreError.message
+          : t("common.unknownError"),
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
   const columns: ColumnsType<SignatureAsset> = [
     {
       title: t("wht.signatureName"),
@@ -159,23 +215,49 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         </Space>
       ),
     },
-    {
-      title: t("wht.active"),
-      dataIndex: "status",
-      width: 110,
-      render: (status: SignatureAsset["status"]) => (
-        <Tag color={status === "active" ? "green" : "default"}>
-          {status === "active" ? t("wht.enabled") : t("wht.disabled")}
-        </Tag>
-      ),
-    },
-    {
-      title: t("wht.defaultSignature"),
-      dataIndex: "isDefault",
-      width: 120,
-      render: (isDefault: boolean) =>
-        isDefault ? <Tag color="gold">{t("wht.defaultSignature")}</Tag> : "—",
-    },
+    ...(showDeleted
+      ? [
+          {
+            title: t("common.deletedAt"),
+            dataIndex: "deletedAt",
+            width: 190,
+            render: (_: string | null, signature: SignatureAsset) => (
+              <div className="audit-cell">
+                <span>
+                  {signature.deletedAt
+                    ? new Date(signature.deletedAt).toLocaleString("zh-CN", {
+                        hour12: false,
+                      })
+                    : "—"}
+                </span>
+                <small>{signature.deletedByName ?? "—"}</small>
+              </div>
+            ),
+          },
+        ]
+      : [
+          {
+            title: t("wht.active"),
+            dataIndex: "status",
+            width: 110,
+            render: (status: SignatureAsset["status"]) => (
+              <Tag color={status === "active" ? "green" : "default"}>
+                {status === "active" ? t("wht.enabled") : t("wht.disabled")}
+              </Tag>
+            ),
+          },
+          {
+            title: t("wht.defaultSignature"),
+            dataIndex: "isDefault",
+            width: 120,
+            render: (isDefault: boolean) =>
+              isDefault ? (
+                <Tag color="gold">{t("wht.defaultSignature")}</Tag>
+              ) : (
+                "—"
+              ),
+          },
+        ]),
     {
       title: t("wht.updatedAt"),
       dataIndex: "updatedAt",
@@ -185,53 +267,105 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     {
       title: t("common.edit"),
       key: "actions",
-      width: 330,
-      render: (_, signature) => (
-        <div className="table-row-actions">
+      width: showDeleted ? 110 : 380,
+      render: (_, signature) =>
+        showDeleted ? (
           <Button
             disabled={pending}
-            icon={<TagsOutlined />}
+            icon={<UndoOutlined />}
             size="small"
-            onClick={() => {
-              scopeForm.setFieldsValue({ usage: signature.usage });
-              setScopeTarget(signature);
-            }}
+            onClick={() => void restore(signature)}
           >
-            {t("wht.signatureUsage")}
+            {t("common.restore")}
           </Button>
-          {!signature.isDefault && signature.status === "active" && (
+        ) : (
+          <div className="table-row-actions">
             <Button
               disabled={pending}
-              icon={<CheckCircleOutlined />}
+              icon={<TagsOutlined />}
               size="small"
-              onClick={() => void mutate(signature, { isDefault: true })}
+              onClick={() => {
+                scopeForm.setFieldsValue({ usage: signature.usage });
+                setScopeTarget(signature);
+              }}
             >
-              {t("wht.setDefault")}
+              {t("wht.signatureUsage")}
             </Button>
-          )}
+            {!signature.isDefault && signature.status === "active" && (
+              <Button
+                disabled={pending}
+                icon={<CheckCircleOutlined />}
+                size="small"
+                onClick={() => void mutate(signature, { isDefault: true })}
+              >
+                {t("wht.setDefault")}
+              </Button>
+            )}
+            <Button
+              disabled={pending}
+              icon={
+                signature.status === "active" ? (
+                  <StopOutlined />
+                ) : (
+                  <CheckCircleOutlined />
+                )
+              }
+              size="small"
+              onClick={() =>
+                void mutate(signature, {
+                  status:
+                    signature.status === "active" ? "inactive" : "active",
+                })
+              }
+            >
+              {signature.status === "active"
+                ? t("wht.disableSignature")
+                : t("wht.enableSignature")}
+            </Button>
           <Button
+            danger
             disabled={pending}
-            icon={signature.status === "active" ? <StopOutlined /> : <CheckCircleOutlined />}
+            icon={<DeleteOutlined />}
             size="small"
-            onClick={() =>
-              void mutate(signature, {
-                status: signature.status === "active" ? "inactive" : "active",
-              })
-            }
+            onClick={() => remove(signature)}
           >
-            {signature.status === "active" ? t("wht.disableSignature") : t("wht.enableSignature")}
+            {t("common.delete")}
           </Button>
-        </div>
-      ),
+          </div>
+        ),
     },
   ];
 
   return (
     <section className="directory-surface">
+      <nav className="directory-view-switch" aria-label={t("common.dataView")}>
+        <button
+          className={!showDeleted ? "is-active" : ""}
+          type="button"
+          onClick={() => setShowDeleted(false)}
+        >
+          {t("common.activeRecords")}
+        </button>
+        <button
+          className={showDeleted ? "is-active" : ""}
+          type="button"
+          onClick={() => setShowDeleted(true)}
+        >
+          {t("common.recycleBin")}
+        </button>
+      </nav>
       <div className="master-toolbar">
         <div>
-          <strong>{t("wht.signatureCount", { count: signatures.length })}</strong>
-          <p>{t("wht.signatureHint")}</p>
+          <strong>
+            {showDeleted
+              ? t("wht.signatureRecycleCount", { count: signatures.length })
+              : t("wht.signatureCount", { count: signatures.length })}
+          </strong>
+          <p>
+            {showDeleted
+              ? t("wht.signatureRecycleHint")
+              : t("wht.signatureHint")}
+          </p>
         </div>
         <div className="page-actions">
           <Button
@@ -240,9 +374,15 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
             loading={loading}
             onClick={() => void reload()}
           />
-          <Button icon={<PlusOutlined />} type="primary" onClick={() => setUploadOpen(true)}>
-            {t("wht.uploadSignature")}
-          </Button>
+          {!showDeleted && (
+            <Button
+              icon={<PlusOutlined />}
+              type="primary"
+              onClick={() => setUploadOpen(true)}
+            >
+              {t("wht.uploadSignature")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -250,7 +390,7 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         <Alert
           showIcon
           type="error"
-          message={t("common.loadFailed")}
+          title={t("common.loadFailed")}
           description={error}
           action={
             <Button size="small" onClick={() => void reload()}>

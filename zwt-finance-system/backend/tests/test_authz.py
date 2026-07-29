@@ -55,8 +55,9 @@ def test_every_declared_role_uses_only_known_permissions() -> None:
 
 # --- 策略锁定 -----------------------------------------------------------------
 #
-# 以下三条对应 2026-07-26 业务方确认的职责分离决定。它们不是实现细节，
-# 改动前需要重新走业务确认 —— 所以用测试钉住，而不是只写在注释里。
+# 下面的 test_confirmed_* 四条对应 2026-07-26 业务方确认的职责分离决定。它们不是
+# 实现细节，改动前需要重新走业务确认 —— 所以用测试钉住，而不是只写在注释里。
+# 末尾另有一条钉住"编号不得由导入带入"的终态，来历见该测试自身的 docstring。
 
 
 def _roles_with(permission: str) -> set[str]:
@@ -106,25 +107,22 @@ def test_confirmed_signature_management_is_admin_only() -> None:
     assert "salary_advance:template_manage" not in ALL_PERMISSIONS
 
 
-def test_confirmed_migration_is_admin_only() -> None:
-    """已确认：历史迁移只有 admin 能做，approver 也不行。
+def test_numbers_are_never_supplied_by_import() -> None:
+    """税票编号只由批准事务生成，没有任何角色能从文件里带一个进来。
 
-    迁移能凭一份 Excel 直接写出「已批准」税票、沿用外部指定的编号并推进编号
-    计数器，等于绕开全部复核——破坏力在 invoice:approve 之上。能批准一张税票，
-    不等于能凭空造出一张已批准的票，所以它比 _APPROVE 更高一档。
+    这条取代了原先的 `test_confirmed_migration_is_admin_only` 与
+    `test_migrate_is_strictly_narrower_than_approve`：一次性历史迁移通道
+    （`POST /import/migration` + `invoice:migrate`）已于 2026-07-29 摘除，
+    因为常规批量开具本来就能开以前月份的票——编号取自行里的 invoice_date，
+    汇率取自文件的 FX 列，两处都不看"今天"。
+
+    钉住的是终态而不是当时那个"仅 admin"的口径：`invoice:migrate` 不该以任何
+    形式回来。真要再开一条能由外部指定编号的路，得先让这条测试失败，也就等于
+    强制重新走一次业务确认。
     """
-    assert _roles_with("invoice:migrate") == {"admin"}
-    assert not role_has("approver", "invoice:migrate")
-    assert not role_has("operator", "invoice:migrate")
-
-
-def test_migrate_is_strictly_narrower_than_approve() -> None:
-    """迁移权必须比批准权更窄。
-
-    写成集合包含关系而不是列举角色：日后新增角色时，只要有人给了一个能迁移
-    但不能批准的角色，这条就会失败。
-    """
-    assert _roles_with("invoice:migrate") < _roles_with("invoice:approve")
+    assert "invoice:migrate" not in ALL_PERMISSIONS
+    for role in ROLE_PERMISSIONS:
+        assert not any(perm.endswith(":migrate") for perm in permissions_for(role)), role
 
 
 def test_principal_require_raises_for_missing_permission() -> None:

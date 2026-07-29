@@ -27,6 +27,7 @@ from app.modules.wht.schemas import (
     IncomeTypeOptionResponse,
     IncomeTypeRate,
     PayeeCreate,
+    PayeeDeletePreview,
     PayeeListResponse,
     PayeeResponse,
     PayeeUpdate,
@@ -347,8 +348,12 @@ async def list_payees(
     service: WhtServiceDependency,
     query: str | None = None,
     active_only: bool = Query(default=True, alias="activeOnly"),
+    deleted: bool = Query(
+        default=False,
+        description="true 返回回收站（已删除）列表，false 返回在用列表。两者互斥。",
+    ),
 ) -> PayeeListResponse:
-    payees, total = await service.list_payees(query, active_only)
+    payees, total = await service.list_payees(query, active_only, deleted)
     return PayeeListResponse(
         items=[PayeeResponse.model_validate(payee) for payee in payees],
         total=total,
@@ -381,6 +386,55 @@ async def update_payee(
     return PayeeResponse.model_validate(await service.update_payee(payee_id, payload))
 
 
+@router.get(
+    "/payees/{payee_id}/delete-preview",
+    response_model=PayeeDeletePreview,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def preview_payee_deletion(
+    payee_id: uuid.UUID,
+    service: WhtServiceDependency,
+) -> PayeeDeletePreview:
+    """删除确认框用的影响面预览。只读，不改任何东西。"""
+    payee = await service.get_payee(payee_id)
+    return PayeeDeletePreview(
+        payee_id=payee.id,
+        tax_id=payee.tax_id,
+        name_th=payee.name_th,
+        referencing_tasks=await service.count_payee_references(payee_id),
+    )
+
+
+@router.delete(
+    "/payees/{payee_id}",
+    response_model=PayeeResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def delete_payee(
+    payee_id: uuid.UUID,
+    service: WhtServiceDependency,
+) -> PayeeResponse:
+    """移入回收站（软删除）。没有物理删除端点——回收站是终点，只能恢复。
+
+    权限沿用 wht:write 而不是新设权限点：删除一条收款方主数据的破坏力不高于
+    改掉它的名称和地址（两者都会立刻影响后续开票），而且删除可恢复、改名不可。
+    """
+    return PayeeResponse.model_validate(await service.delete_payee(payee_id))
+
+
+@router.post(
+    "/payees/{payee_id}/restore",
+    response_model=PayeeResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def restore_payee(
+    payee_id: uuid.UUID,
+    service: WhtServiceDependency,
+) -> PayeeResponse:
+    """从回收站恢复。税号已被别人占用时返回 409。"""
+    return PayeeResponse.model_validate(await service.restore_payee(payee_id))
+
+
 @router.post(
     "/payees/import",
     response_model=ImportResult,
@@ -403,9 +457,10 @@ async def list_signatures(
     service: WhtDocumentServiceDependency,
     include_inactive: bool = Query(default=False, alias="includeInactive"),
     usage: Literal["wht", "tax_inv", "salary_advance"] | None = Query(default=None),
+    deleted: bool = Query(default=False, description="true 返回回收站列表"),
 ) -> list[SignatureAssetResponse]:
     """usage 过滤返回适用范围包含该模块的签名；不传则返回整个图库。"""
-    signatures = await service.list_signatures(include_inactive, usage)
+    signatures = await service.list_signatures(include_inactive, usage, deleted)
     return [SignatureAssetResponse.model_validate(signature) for signature in signatures]
 
 
@@ -459,6 +514,32 @@ async def update_signature(
 ) -> SignatureAssetResponse:
     signature = await service.update_signature(signature_id, payload)
     return SignatureAssetResponse.model_validate(signature)
+
+
+@router.delete(
+    "/signatures/{signature_id}",
+    response_model=SignatureAssetResponse,
+    dependencies=[Depends(require_permission("signature:manage"))],
+)
+async def delete_signature(
+    signature_id: uuid.UUID,
+    service: WhtDocumentServiceDependency,
+) -> SignatureAssetResponse:
+    """移入回收站。图片文件保留在磁盘上（已签发 PDF 的溯源依据）。"""
+    signature = await service.delete_signature(signature_id)
+    return SignatureAssetResponse.model_validate(signature)
+
+
+@router.post(
+    "/signatures/{signature_id}/restore",
+    response_model=SignatureAssetResponse,
+    dependencies=[Depends(require_permission("signature:manage"))],
+)
+async def restore_signature(
+    signature_id: uuid.UUID,
+    service: WhtDocumentServiceDependency,
+) -> SignatureAssetResponse:
+    return SignatureAssetResponse.model_validate(await service.restore_signature(signature_id))
 
 
 @router.get("/signatures/{signature_id}/content")

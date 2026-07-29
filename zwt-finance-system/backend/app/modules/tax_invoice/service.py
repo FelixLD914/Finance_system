@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,7 +21,6 @@ from app.modules.tax_invoice.models import (
     TaxInvoice,
     TaxInvoiceEvent,
     TaxInvoiceImportBatch,
-    TaxInvoiceIssueCounter,
     TaxInvoiceItem,
 )
 from app.modules.tax_invoice.number_service import assign_tax_invoice_number
@@ -31,8 +29,12 @@ from app.modules.tax_invoice.schemas import (
     BotApiStatus,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
+    ExchangeRateMonth,
+    ExchangeRateUpdate,
+    ExchangeRateUpsert,
     TaxInvoiceImportResponse,
     TaxInvoiceUpdate,
+    month_bounds,
 )
 from app.modules.wht.service import WhtServiceError
 
@@ -57,7 +59,7 @@ class TaxInvoiceStateError(TaxInvoiceServiceError):
 # 塞进一个 openpyxl 工作簿，没有上限的话总有一天会把进程撑爆。
 MAX_EXPORT_INVOICES = 2000
 
-# 正式模板的物理容量。approve() 与批量导入认领已有编号时共用这个上限。
+# 正式模板的物理容量。超过就必须拒绝批准，不得截断。
 APPROVAL_ITEM_LIMIT = 18
 
 
@@ -92,11 +94,11 @@ def check_approval_readiness(
 ) -> ApprovalReadiness:
     """「可批准」的完整性口径，只有这一份。
 
-    approve() 走人工复核这条路，批量导入里带 DocumentNo 的行则绕过复核直接
-    落成 approved——两条路通向同一个状态，校验就必须是同一套。各写一套迟早
-    漂移，而漂移的后果是从导入这条缝里造出一张残缺的已批准税票：客户地址空着、
-    汇率没有，或者 19 条商品（超过模板容量，要等到生成文件时才炸，那时编号
-    早就发出去了）。
+    历史迁移那条能绕过复核直接落成 approved 的通道摘掉之后，approve() 是通往
+    approved 的唯一入口，这里也就成了唯一的守门人。口径留在这个独立函数里而不是
+    内联进 approve()：前端要靠它预判哪些字段还差，两处判断必须同源，各写一套迟早
+    漂移，而漂移的后果是发出一张残缺的已批准税票——客户地址空着、汇率没有，或者
+    19 条商品（超过模板容量，要等到生成文件时才炸，那时编号早就发出去了）。
     """
     missing = [
         name
@@ -286,6 +288,10 @@ class TaxInvoiceService:
                                 submission_date - timedelta(days=9),
                                 submission_date,
                             ),
+                            # 停用或已删的汇率不参与计价。这是「停用」在汇率上
+                            # 唯一有业务后果的地方：查得到、但不再被税票取用。
+                            ExchangeRate.is_active.is_(True),
+                            ExchangeRate.deleted_at.is_(None),
                         )
                     )
                 ).all()
@@ -314,41 +320,20 @@ class TaxInvoiceService:
         file_name: str,
         content: bytes,
     ) -> TaxInvoiceImportResponse:
-        """常规批量开具：编号只能由批准时的事务生成，文件里带编号一律退回。"""
+        """常规批量开具：编号只能由批准时的事务生成，文件里带编号一律退回。
+
+        补开以前月份的税票也走这条路：编号取自行里的 invoice_date（见
+        `assign_tax_invoice_number`），汇率取自文件的 FX Date / FX Rate 列，
+        两处都不看"今天"，所以回填历史月份不需要任何额外通道。
+        """
         return await self._create_import(
             rows=rows,
             import_mode="sample",
             source_names=[file_name],
             source_files=[(file_name, content)],
-            allow_existing_numbers=False,
         )
 
-    async def import_migration(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        file_name: str,
-        content: bytes,
-    ) -> TaxInvoiceImportResponse:
-        """历史迁移：旧系统已经正式开出的票，必须沿用原编号搬进来。
-
-        这是全系统唯一允许外部指定税票编号的入口，因此单独一个方法、单独一个
-        端点——好让权限、审计和校验都能只针对它收紧，而不牵连日常批量开票。
-        """
-        return await self._create_import(
-            rows=rows,
-            import_mode="migration",
-            source_names=[file_name],
-            source_files=[(file_name, content)],
-            allow_existing_numbers=True,
-        )
-
-    async def _assert_importable(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        allow_existing_numbers: bool = False,
-    ) -> None:
+    async def _assert_importable(self, rows: list[dict[str, Any]]) -> None:
         """把整份文件的冲突一次查完，全部收进 issues 再抛。
 
         以前是查到第一条就抛，用户改一行再导一次、再撞下一条，一份几十行的
@@ -359,7 +344,6 @@ class TaxInvoiceService:
         """
         issues: list[dict[str, object]] = []
         seen_business_keys: dict[tuple[str, str | None], list[int]] = {}
-        seen_document_numbers: dict[str, list[int]] = {}
 
         def locate(row: dict[str, Any]) -> list[int]:
             # 双文件识别那条链路没有源行号，缺了就只报业务键。
@@ -404,78 +388,23 @@ class TaxInvoiceService:
             if not document_no:
                 continue
 
-            # 只有历史迁移能带编号。常规批量开票带了就直接退回——这是全系统
-            # 「编号由批准时的数据库事务生成」这条规则的实际执行点，界面上的
-            # 提示只是提示，拦不住手工改过的表。
-            if not allow_existing_numbers:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "number_not_allowed",
-                        "detail": (
-                            f"document number {document_no} was supplied by the file; "
-                            "numbers are assigned on approval. Clear the DocumentNo "
-                            "column, or use the historical migration import instead."
-                        ),
-                    }
-                )
-                continue
-
-            # 带编号的行会绕过人工复核直接落成 approved，所以这里必须先过一遍
-            # 与 approve() 完全相同的完整性校验。不合格就整批退回，而不是悄悄
-            # 把编号丢掉降级成草稿——那样历史迁移的原编号就没了，之后再批准会
-            # 发一个新号，对不上旧系统的账。让人把行补全或者把编号删掉。
-            readiness = check_approval_readiness(
-                invoice_date=row.get("invoice_date"),
-                exchange_target_date=row.get("exchange_target_date"),
-                exchange_rate=row.get("exchange_rate"),
-                customer_name=row.get("customer_name"),
-                customer_address=row.get("customer_address"),
-                cdn=row.get("cdn"),
-                item_count=len(row.get("items") or []),
+            # 文件里带编号一律退回，没有例外——这是全系统「编号只由批准时的数据库
+            # 事务生成」这条规则的实际执行点，界面上的提示只是提示，拦不住手工改过
+            # 的表。历史迁移那条允许沿用旧编号的一次性通道已经摘掉；补开以前月份的
+            # 票不需要它，把 Invoice Date 填成当时的报关提交日即可，编号会按那一天发。
+            issues.append(
+                {
+                    "rows": source_rows,
+                    "key": document_no,
+                    "reason": "number_not_allowed",
+                    "detail": (
+                        f"document number {document_no} was supplied by the file; "
+                        "numbers are assigned on approval. Clear the DocumentNo "
+                        "column — to issue an invoice dated to an earlier month, "
+                        "set Invoice Date to that date and the number will follow it."
+                    ),
+                }
             )
-            if not readiness.ok:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "incomplete_for_number",
-                        "fields": readiness.blockers(),
-                        "detail": (
-                            f"row(s) carrying number {document_no} are booked as approved "
-                            "and must therefore pass the same checks as manual approval; "
-                            f"unmet: {', '.join(readiness.blockers())}"
-                        ),
-                    }
-                )
-
-            if document_no in seen_document_numbers:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "duplicate_number_in_file",
-                        "detail": (
-                            f"document number {document_no} also appears at row(s) "
-                            f"{seen_document_numbers[document_no] or '-'} of this file"
-                        ),
-                    }
-                )
-                continue
-            seen_document_numbers[document_no] = source_rows
-            existing_document = await self.session.scalar(
-                select(TaxInvoice.id).where(TaxInvoice.document_no == document_no)
-            )
-            if existing_document is not None:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "number_already_exists",
-                        "detail": f"document number {document_no} already exists",
-                    }
-                )
 
         if issues:
             raise TaxInvoiceConflictError(
@@ -491,14 +420,10 @@ class TaxInvoiceService:
         import_mode: str,
         source_names: list[str],
         source_files: list[tuple[str, bytes]],
-        allow_existing_numbers: bool = False,
     ) -> TaxInvoiceImportResponse:
         if not rows:
             raise TaxInvoiceStateError("the import file contains no invoice records")
-        await self._assert_importable(
-            rows,
-            allow_existing_numbers=allow_existing_numbers,
-        )
+        await self._assert_importable(rows)
 
         batch = TaxInvoiceImportBatch(
             import_mode=import_mode,
@@ -532,27 +457,23 @@ class TaxInvoiceService:
                 status = self._review_status(row, len(item_rows))
                 if status == "needs_review":
                     needs_review_count += 1
-                document_no = row.pop("document_no", None)
+                # _assert_importable 已经把带编号的行整批拦下了，这里只是把键摘掉
+                # 免得落进 TaxInvoice(**row)。导入永远产出未批准记录，编号统一由
+                # approve() 里的 assign_tax_invoice_number 发。
+                row.pop("document_no", None)
                 invoice = TaxInvoice(
                     **row,
                     batch_id=batch.id,
-                    document_no=document_no,
-                    status="approved" if document_no else status,
+                    status=status,
                     source_invoice_file_name=source_names[0],
                     source_customs_file_name=(
                         source_names[1] if len(source_names) > 1 else None
                     ),
                     created_by_name=self.actor_name,
                     updated_by_name=self.actor_name,
-                    approved_at=datetime.now(UTC) if document_no else None,
                 )
                 self.session.add(invoice)
                 await self.session.flush()
-                if document_no:
-                    await self._advance_counter_for_existing_number(
-                        document_no,
-                        invoice.invoice_date,
-                    )
                 for item in item_rows:
                     self.session.add(TaxInvoiceItem(invoice_id=invoice.id, **item))
                 self.session.add(
@@ -848,8 +769,23 @@ class TaxInvoiceService:
         currency: str,
         start_date: date | None,
         end_date: date | None,
+        month: str | None = None,
+        deleted: bool = False,
     ) -> list[ExchangeRate]:
-        filters = [ExchangeRate.currency == currency.upper()]
+        """某币种的每日汇率。month（YYYY-MM）是 start/end 的便捷写法。
+
+        月份边界故意放在服务端算：闰年和月末天数交给前端算，迟早会有人用
+        `new Date(y, m, 31)` 把 2 月溢出到 3 月，而汇率查错一天就是税票金额错。
+        """
+        filters: list[Any] = [
+            ExchangeRate.currency == currency.upper(),
+            ExchangeRate.deleted_at.is_not(None)
+            if deleted
+            else ExchangeRate.deleted_at.is_(None),
+        ]
+        if month:
+            first, last = month_bounds(month)
+            filters.extend([ExchangeRate.rate_date >= first, ExchangeRate.rate_date <= last])
         if start_date:
             filters.append(ExchangeRate.rate_date >= start_date)
         if end_date:
@@ -865,16 +801,163 @@ class TaxInvoiceService:
             ).all()
         )
 
+    async def list_exchange_rate_months(self, *, currency: str) -> list[ExchangeRateMonth]:
+        """按月汇总，供「先看月份、点进去再看每天」的两级界面用。
+
+        汇总在 SQL 里做而不是把整年日行拉回来在 Python 里 group：一个币种攒几年
+        就是上千行，而月份列表只需要每月一行。to_char 是 PG 专有，与本模块其它
+        地方（JSONB、ON CONFLICT）的取舍一致。
+        """
+        month_expr = func.to_char(ExchangeRate.rate_date, "YYYY-MM").label("month")
+        rows = (
+            await self.session.execute(
+                select(
+                    month_expr,
+                    func.count().label("day_count"),
+                    func.count()
+                    .filter(ExchangeRate.is_active.is_(False))
+                    .label("inactive_count"),
+                    func.min(ExchangeRate.buying_transfer).label("min_rate"),
+                    func.max(ExchangeRate.buying_transfer).label("max_rate"),
+                    func.max(ExchangeRate.rate_date).label("latest_date"),
+                    func.max(ExchangeRate.updated_at).label("updated_at"),
+                )
+                .where(
+                    ExchangeRate.currency == currency.upper(),
+                    ExchangeRate.deleted_at.is_(None),
+                )
+                .group_by(month_expr)
+                .order_by(month_expr.desc())
+            )
+        ).all()
+        return [
+            ExchangeRateMonth(
+                currency=currency.upper(),
+                month=row.month,
+                day_count=row.day_count,
+                inactive_count=row.inactive_count,
+                min_rate=row.min_rate,
+                max_rate=row.max_rate,
+                latest_date=row.latest_date,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
     async def list_rate_currencies(self) -> list[str]:
         return list(
             (
                 await self.session.scalars(
                     select(ExchangeRate.currency)
                     .distinct()
+                    .where(ExchangeRate.deleted_at.is_(None))
                     .order_by(ExchangeRate.currency)
                 )
             ).all()
         )
+
+    async def upsert_exchange_rate(self, payload: ExchangeRateUpsert) -> ExchangeRate:
+        """手工录入/覆盖某一天的汇率。
+
+        与 Excel/BOT 导入的区别只在 source='manual' 和「四个价位一律按传入值写」：
+        导入路径用 coalesce 保护另外三种价位不被单来源的表抹掉，而手工录入是人
+        当面填的完整一行，填空就是要清空。
+        """
+        existing = await self.session.scalar(
+            select(ExchangeRate)
+            .where(
+                ExchangeRate.currency == payload.currency,
+                ExchangeRate.rate_date == payload.rate_date,
+                ExchangeRate.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if existing is None:
+            existing = ExchangeRate(
+                currency=payload.currency,
+                rate_date=payload.rate_date,
+                source="manual",
+            )
+            self.session.add(existing)
+        existing.buying_transfer = payload.buying_transfer
+        existing.buying_sight = payload.buying_sight
+        existing.selling = payload.selling
+        existing.mid_rate = payload.mid_rate
+        existing.source = "manual"
+        existing.source_file_name = None
+        existing.is_active = payload.is_active
+        existing.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(existing)
+        return existing
+
+    async def update_exchange_rate(
+        self,
+        rate_id: int,
+        payload: ExchangeRateUpdate,
+    ) -> ExchangeRate:
+        rate = await self._load_exchange_rate(rate_id, for_update=True)
+        for name, value in payload.model_dump(by_alias=False, exclude_unset=True).items():
+            setattr(rate, name, value)
+        rate.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(rate)
+        return rate
+
+    async def delete_exchange_rate(self, rate_id: int) -> ExchangeRate:
+        """移入回收站。不动 is_active，恢复时还原成删除前的样子。"""
+        rate = await self._load_exchange_rate(rate_id, for_update=True)
+        rate.deleted_at = datetime.now(UTC)
+        rate.deleted_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(rate)
+        return rate
+
+    async def restore_exchange_rate(self, rate_id: int) -> ExchangeRate:
+        """从回收站恢复。
+
+        (currency, rate_date) 在删除时就释放了，期间完全可能有人重新导入或手工
+        录了同一天的汇率，所以恢复前必须复查。撞车时报 409 —— 自动覆盖在用的
+        那条等于用一份被人主动删掉的数据悄悄改掉税票计价依据。
+        """
+        rate = await self._load_exchange_rate(rate_id, for_update=True, include_deleted=True)
+        if rate.deleted_at is None:
+            raise TaxInvoiceStateError("exchange rate is not in the recycle bin")
+        occupied = await self.session.scalar(
+            select(ExchangeRate.id).where(
+                ExchangeRate.currency == rate.currency,
+                ExchangeRate.rate_date == rate.rate_date,
+                ExchangeRate.deleted_at.is_(None),
+            )
+        )
+        if occupied is not None:
+            raise TaxInvoiceConflictError(
+                f"{rate.currency} {rate.rate_date.isoformat()} already has an active rate; "
+                f"delete that one before restoring this record"
+            )
+        rate.deleted_at = None
+        rate.deleted_by_name = None
+        rate.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(rate)
+        return rate
+
+    async def _load_exchange_rate(
+        self,
+        rate_id: int,
+        *,
+        for_update: bool = False,
+        include_deleted: bool = False,
+    ) -> ExchangeRate:
+        statement = select(ExchangeRate).where(ExchangeRate.id == rate_id)
+        if not include_deleted:
+            statement = statement.where(ExchangeRate.deleted_at.is_(None))
+        if for_update:
+            statement = statement.with_for_update()
+        rate = await self.session.scalar(statement)
+        if rate is None:
+            raise TaxInvoiceNotFoundError("exchange rate was not found")
+        return rate
 
     async def import_exchange_rates(
         self,
@@ -894,6 +977,7 @@ class TaxInvoiceService:
                 select(ExchangeRate.id).where(
                     ExchangeRate.currency == currency.upper(),
                     ExchangeRate.rate_date == rate_date,
+                    ExchangeRate.deleted_at.is_(None),
                 )
             )
             statement = insert(ExchangeRate).values(
@@ -907,8 +991,16 @@ class TaxInvoiceService:
                 source_file_name=source_file_name,
                 updated_by_name=self.actor_name,
             )
+            # 冲突目标必须按「索引元素 + 索引条件」指定，不能再按约束名。
+            # 20260729_0013 把 uq_core_exchange_rates_currency_date 换成了部分唯一
+            # 索引（只约束 deleted_at IS NULL 的行），而 PG 的 ON CONFLICT ON
+            # CONSTRAINT 只接受真正的约束，引用部分索引会直接报错。
+            #
+            # 语义上这也正是想要的：命中的只可能是「在用」的那一行，回收站里的
+            # 同币种同日期记录不参与 upsert，重导会正常插入一条新的生效行。
             statement = statement.on_conflict_do_update(
-                constraint="uq_core_exchange_rates_currency_date",
+                index_elements=[ExchangeRate.currency, ExchangeRate.rate_date],
+                index_where=ExchangeRate.deleted_at.is_(None),
                 set_={
                     "buying_transfer": statement.excluded.buying_transfer,
                     # coalesce 而不是直接覆盖：API 同步过四种汇率之后再导一次
@@ -1101,36 +1193,6 @@ class TaxInvoiceService:
         except ValueError as exc:
             raise TaxInvoiceStateError("attachment path escaped the configured root") from exc
         return path
-
-    async def _advance_counter_for_existing_number(
-        self,
-        document_no: str,
-        invoice_date: date | None,
-    ) -> None:
-        match = re.fullmatch(r"ZWT-IV(\d{8})-(\d{2,})", document_no)
-        if match is None or invoice_date is None:
-            return
-        if match.group(1) != invoice_date.strftime("%Y%m%d"):
-            raise TaxInvoiceStateError(
-                f"document number {document_no} does not match its invoice date"
-            )
-        next_sequence = int(match.group(2)) + 1
-        statement = insert(TaxInvoiceIssueCounter).values(
-            invoice_date=invoice_date,
-            next_sequence=next_sequence,
-        )
-        await self.session.execute(
-            statement.on_conflict_do_update(
-                constraint="uq_tax_invoice_issue_counter_date",
-                set_={
-                    "next_sequence": func.greatest(
-                        TaxInvoiceIssueCounter.next_sequence,
-                        statement.excluded.next_sequence,
-                    ),
-                    "updated_at": func.now(),
-                },
-            )
-        )
 
 
 def _currency(item: dict[str, Any]) -> str:

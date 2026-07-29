@@ -70,46 +70,17 @@ TAX INV 的 PDF 底版是由该 Excel 模板一次性制版得到的静态三联
 `scripts\build_tax_inv_underlay.py`（生产机不需要、也不应安装 Excel）。
 坐标表头部记录了生成时所用模板的 sha256，可用于核对是否已过期。
 
-## 上线后必须摘掉的一次性通道：TAX INV 历史迁移
+## TAX INV 历史迁移通道已摘除
 
-`POST /api/v1/tax-invoice/import/migration` 是**全系统唯一能由调用方指定税票
-编号的入口**。它凭一份 Excel 直接写出状态为 `approved` 的税票、沿用文件里的
-`DocumentNo`、并把编号计数器推到该编号之后——绕过人工复核这一整层。
+`POST /api/v1/tax-invoice/import/migration`、`invoice:migrate` 权限和前端入口已于
+2026-07-29 删除。任何 TAX INV 导入路径都拒绝文件里的 `DocumentNo`；税票编号只在
+批准事务中生成。补开以前月份的税票仍走 `/import/sample`：把 `Invoice Date` 填成
+当时的报关提交日，并提供相应的 `FX Date` / `FX Rate`，编号和汇率均不依赖导入当天。
 
-它只为一件事存在：把旧系统已经正式开出的票搬进来。**这件事一辈子只做一次。**
-做完之后它就是纯风险敞口，没有任何业务收益。
-
-现有三层防护（都到位，但都拦不住有权限的人误用）：
-
-- 权限：`invoice:migrate`，仅 admin（见 `backend/app/core/authz.py` 第 5 条决定）
-- 完整性：带编号的行必须过与人工批准完全相同的校验（`check_approval_readiness`）
-- 常规批量开具（`/import/sample`）已经**一律拒绝**文件里的编号
-
-### 迁移完成后的摘除清单
-
-按此顺序删，删完跑 `python -m ruff check .` 与 `python -m pytest`：
-
-1. `backend/app/modules/tax_invoice/router.py` —— 整个 `import_historical_migration`
-   端点。
-2. `backend/app/modules/tax_invoice/service.py` —— `import_migration()` 方法；
-   `_create_import` / `_assert_importable` 的 `allow_existing_numbers` 参数
-   （去掉参数后 `number_not_allowed` 分支变成无条件生效，这正是想要的终态）。
-3. `backend/app/core/authz.py` —— `Permission` 里的 `invoice:migrate` 与第 5 条决定注释。
-4. 测试：`test_authz.py` 的 `test_confirmed_migration_is_admin_only` 与
-   `test_migrate_is_strictly_narrower_than_approve`；`test_auth_enforcement.py` 的
-   `MUTATING_ENDPOINTS` 对应行与 `test_migration_import_needs_more_than_plain_write`；
-   `test_tax_invoice_ledger_export.py` 里以 `allow_existing_numbers=True` 为前提的用例。
-5. 前端：`modules/tax-invoice/api.ts` 的 `importMigration`；`TaxInvoiceWorkspace.tsx`
-   的 `batchMode` 切换与 `canMigrate`；i18n 的 `tax.batchMode*` / `tax.batchMigration*`。
-   **`tax.issueNumberNotAllowed` 要留着**——摘掉迁移后它反而成了常态提示。
-
-### 不要做的一件事
-
-**不要写迁移把 `import_batches.import_mode` 的 CHECK 约束收窄回 `('dual','sample')`。**
-
-刚跑完的那批迁移在 `import_batches` 里留下的正是 `import_mode = 'migration'` 的
-审计行。收窄约束会让这些历史行违反约束、迁移直接失败；强行清掉它们则等于抹掉
-「这批票是迁移进来的」这一事实。**枚举值留着，只把写入路径拿掉。**
+保留 `import_batches.import_mode` CHECK 约束中的 `'migration'`。它是旧版本的审计
+兼容值，不代表仍有可用写入路径；收窄约束可能让已部署环境中的历史审计行违反约束。
+终态由测试锁定：迁移路由返回 404、权限全集不含 `invoice:migrate`、文件携带编号时
+整批返回 `number_not_allowed`。
 
 ## HTTPS 与内部 CA
 

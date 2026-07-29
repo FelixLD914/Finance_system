@@ -4,12 +4,14 @@ import {
   batchCreateTasks,
   batchTransitionTasks,
   createWhtTask,
+  deletePayee,
   getWhtTask,
   importHistoricalTasks,
   importPayees,
   listIncomeTypes,
   listPayees,
   listWhtTasks,
+  restorePayee,
   savePayee,
   transitionWhtTask,
 } from "./api";
@@ -142,6 +144,28 @@ export function useWhtData() {
     [],
   );
 
+  const removePayee = useCallback(async (payeeId: string) => {
+    setMutationPending(true);
+    try {
+      const deleted = await deletePayee(payeeId);
+      setPayees((current) => current.filter((payee) => payee.id !== payeeId));
+      return deleted;
+    } finally {
+      setMutationPending(false);
+    }
+  }, []);
+
+  const recoverPayee = useCallback(async (payeeId: string) => {
+    setMutationPending(true);
+    try {
+      const restored = await restorePayee(payeeId);
+      setPayees((current) => [restored, ...current]);
+      return restored;
+    } finally {
+      setMutationPending(false);
+    }
+  }, []);
+
   const uploadHistoricalTasks = useCallback(async (file: File) => {
     setMutationPending(true);
     try {
@@ -194,6 +218,8 @@ export function useWhtData() {
     createTask,
     transitionTask,
     persistPayee,
+    removePayee,
+    recoverPayee,
     uploadPayees,
     uploadHistoricalTasks,
     uploadBatchTasks,
