@@ -218,7 +218,7 @@ function RecordDrawer({
             className="salary-issue-alert"
             showIcon
             type={record.validationErrors.length ? "error" : "warning"}
-            message={t("salary.issueSummary", {
+            title={t("salary.issueSummary", {
               errors: record.validationErrors.length,
               warnings: record.validationWarnings.length,
             })}
@@ -1014,7 +1014,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           className="salary-modal-alert"
           showIcon
           type="info"
-          message={t("salary.importSafety")}
+          title={t("salary.importSafety")}
         />
         <Form form={importForm} layout="vertical">
           <Form.Item

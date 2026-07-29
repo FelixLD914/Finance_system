@@ -318,7 +318,7 @@ export function PayeeDirectory({
 
   return (
     <section className="directory-surface">
-      {error && <Alert showIcon type="error" message={t("common.loadFailed")} description={error} />}
+      {error && <Alert showIcon type="error" title={t("common.loadFailed")} description={error} />}
       <nav className="directory-view-switch" aria-label={t("common.dataView")}>
         <button
           className={view === "active" ? "is-active" : ""}
