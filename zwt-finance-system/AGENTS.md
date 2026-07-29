@@ -93,6 +93,12 @@ BOM、空行、幂等替换）。**语法检查和肉眼审查不算验证**，�
 - **改 `backend/requirements.lock` 会改变发布包内容** ——
   `deploy/windows/Build-ZwtRelease.ps1` 会校验它存在并取 SHA-256。测试工具不要
   加进这份 lock。
+- **`POST /v1/tax-invoice/import/migration` 是一次性通道，历史迁移跑完后必须整个
+  删掉**。它是全系统唯一能由调用方指定税票编号的入口：直接写出 `approved` 记录
+  并推进编号计数器，绕过人工复核。摘除清单见
+  [docs/windows-deployment.md](docs/windows-deployment.md)「上线后必须摘掉的一次性
+  通道」。**摘的时候不要收窄 `import_batches.import_mode` 的 CHECK 约束**——迁移
+  留下的审计行正是 `'migration'`，收窄会让它们违反约束。
 
 ## 目录职责
 
