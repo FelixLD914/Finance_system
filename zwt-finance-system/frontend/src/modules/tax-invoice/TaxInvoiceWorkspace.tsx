@@ -71,6 +71,12 @@ import {
   updateTaxInvoice,
   voidTaxInvoice,
 } from "./api";
+import {
+  classifyDualFile,
+  isReadyPair,
+  mergeDualFiles,
+  type DualPair,
+} from "./dualPairing";
 import type {
   BotApiStatus,
   ExchangeRate,
@@ -215,52 +221,83 @@ function dateLabel(value: string | null): string {
   return value || "—";
 }
 
-type DualSlot = "invoice" | "customs";
-
-/** 一次拖入的一批文件按扩展名分派槽位，认不出的返回 null 由调用方提示。 */
-function classifyDualFile(file: File): DualSlot | null {
-  const name = file.name.toLocaleLowerCase();
-  if (name.endsWith(".xlsx") || name.endsWith(".xls")) return "invoice";
-  if (name.endsWith(".pdf")) return "customs";
-  return null;
+/** 一组导入的结果。成功失败都留一条，界面按原顺序全部列出来。 */
+interface DualImportOutcome {
+  key: string;
+  label: string;
+  invoiceFileName: string;
+  customsFileName: string;
+  ok: boolean;
+  invoiceCount: number;
+  itemCount: number;
+  needsReviewCount: number;
+  invoiceIds: string[];
+  /** 失败时的主提示；成功为 null。 */
+  error: string | null;
+  /** 后端逐条退回的明细，展开后显示。 */
+  details: string[];
 }
 
-/** 归位后的一个槽位。填上了就显示文件名和移除按钮，空着显示「待上传」。 */
-function DualFileSlot({
-  file,
-  hint,
-  icon,
-  label,
+/** 队列里的一组：两枚文件徽章 + 状态 + 移除。 */
+function DualPairRow({
+  index,
+  pair,
   t,
-  onClear,
+  onRemove,
 }: {
-  file: File | null;
-  hint: string;
-  icon: ReactNode;
-  label: string;
+  index: number;
+  pair: DualPair;
   t: Translate;
-  onClear: () => void;
+  onRemove: () => void;
+}) {
+  const ready = isReadyPair(pair);
+  return (
+    <li className={`dual-pair-row${ready ? " is-ready" : ""}`}>
+      <span className="dual-pair-index">{index}</span>
+      <span className="dual-pair-name" title={pair.label}>
+        {pair.label}
+      </span>
+      <span className="dual-pair-files">
+        <DualFileChip
+          fileName={pair.invoiceFile?.name ?? null}
+          icon={<FileExcelOutlined />}
+          missingLabel={t("tax.pairMissingExcel")}
+        />
+        <DualFileChip
+          fileName={pair.customsFile?.name ?? null}
+          icon={<FilePdfOutlined />}
+          missingLabel={t("tax.pairMissingPdf")}
+        />
+      </span>
+      <Button
+        aria-label={t("tax.pairRemove", { name: pair.label })}
+        icon={<CloseOutlined />}
+        size="small"
+        type="text"
+        onClick={onRemove}
+      />
+    </li>
+  );
+}
+
+/** 一枚文件徽章。缺失时显示缺的是什么，而不是留白。 */
+function DualFileChip({
+  fileName,
+  icon,
+  missingLabel,
+}: {
+  fileName: string | null;
+  icon: ReactNode;
+  missingLabel: string;
 }) {
   return (
-    <div className={`dual-slot${file ? " is-filled" : ""}`}>
+    <span
+      className={`dual-file-chip${fileName ? "" : " is-missing"}`}
+      title={fileName ?? missingLabel}
+    >
       {icon}
-      <span className="dual-slot-text">
-        <strong>{label}</strong>
-        {/* 空槽位显示这份文件是拿来干什么的，填上后换成文件名。 */}
-        <span title={file?.name ?? hint}>{file ? file.name : hint}</span>
-      </span>
-      {file ? (
-        <Button
-          aria-label={t("tax.slotRemove", { slot: label })}
-          icon={<CloseOutlined />}
-          size="small"
-          type="text"
-          onClick={onClear}
-        />
-      ) : (
-        <span className="dual-slot-flag">{t("tax.slotPending")}</span>
-      )}
-    </div>
+      <span>{fileName ?? missingLabel}</span>
+    </span>
   );
 }
 
@@ -558,8 +595,15 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [status, setStatus] = useState<TaxInvoiceStatus | "all">("all");
   const [period, setPeriod] = useState("all");
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
-  const [invoiceFile, setInvoiceFile] = useState<File | null>(null);
-  const [customsFile, setCustomsFile] = useState<File | null>(null);
+  // 识别建单的待导入队列：一次可以拖进任意多组「同名 Excel + 同名 PDF」。
+  const [dualPairs, setDualPairs] = useState<DualPair[]>([]);
+  // 跑完一批的逐组结果。null 表示还没跑过，空数组不会出现。
+  const [dualResults, setDualResults] = useState<DualImportOutcome[] | null>(null);
+  const [dualProgress, setDualProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
+  // 结果清单展开哪几组。默认只展开失败的：成功的看一眼汇总就够了。
+  const [dualExpanded, setDualExpanded] = useState<string[]>([]);
   const [sampleFile, setSampleFile] = useState<File | null>(null);
   // 批量导入拆成两种模式：常规开票（编号必须留空）和历史迁移（沿用旧编号）。
   // 默认停在开票——迁移是一次性的，日常用的是前者。
@@ -622,13 +666,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     void refreshRates(currency);
   }, [currency, refreshRates]);
 
+  // 收 id 而不是整条记录：结果清单里只有 invoiceId，没有台账那份完整对象。
   const openInvoice = useCallback(
-    async (invoice: TaxInvoice) => {
+    async (invoiceId: string) => {
       setBusy(true);
       try {
         const [detail, nextDocuments] = await Promise.all([
-          getTaxInvoice(invoice.id),
-          listTaxInvoiceDocuments(invoice.id),
+          getTaxInvoice(invoiceId),
+          listTaxInvoiceDocuments(invoiceId),
         ]);
         setSelected(detail);
         setDocuments(nextDocuments);
@@ -899,60 +944,120 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
    */
   const acceptDualFiles = useCallback(
     (files: File[]) => {
-      const unsupported: string[] = [];
-      const duplicated: string[] = [];
-      const picked: Partial<Record<DualSlot, File>> = {};
-
-      for (const file of files) {
-        const slot = classifyDualFile(file);
-        if (!slot) {
-          unsupported.push(file.name);
-        } else if (picked[slot]) {
-          duplicated.push(file.name);
-        } else {
-          picked[slot] = file;
+      setDualPairs((current) => {
+        const { pairs, unsupported, duplicated } = mergeDualFiles(current, files);
+        if (unsupported.length) {
+          message.warning(t("tax.unsupportedFiles", { files: unsupported.join("、") }));
         }
-      }
-
-      if (picked.invoice) setInvoiceFile(picked.invoice);
-      if (picked.customs) setCustomsFile(picked.customs);
-      if (unsupported.length) {
-        message.warning(t("tax.unsupportedFiles", { files: unsupported.join("、") }));
-      }
-      if (duplicated.length) {
-        message.warning(t("tax.duplicateIgnored", { files: duplicated.join("、") }));
-      }
+        if (duplicated.length) {
+          message.warning(t("tax.duplicateIgnored", { files: duplicated.join("、") }));
+        }
+        return pairs;
+      });
     },
     [message, t],
   );
 
+  const readyPairs = useMemo(() => dualPairs.filter(isReadyPair), [dualPairs]);
+  const incompletePairs = useMemo(
+    () => dualPairs.filter((pair) => !isReadyPair(pair)),
+    [dualPairs],
+  );
+
+  const dualSummary = useMemo(() => {
+    if (!dualResults) return null;
+    return {
+      ok: dualResults.filter((item) => item.ok).length,
+      failed: dualResults.filter((item) => !item.ok).length,
+      invoices: dualResults.reduce((sum, item) => sum + item.invoiceCount, 0),
+      items: dualResults.reduce((sum, item) => sum + item.itemCount, 0),
+      needsReview: dualResults.reduce((sum, item) => sum + item.needsReviewCount, 0),
+    };
+  }, [dualResults]);
+
+  /**
+   * 逐组导入。后端 /import/dual 一次只收一对文件，所以批量在前端串行展开。
+   *
+   * 串行而不是并发：每组是各自独立的事务，串行能保证结果清单的顺序和队列
+   * 顺序一致，也不会让二十来个 multipart 请求同时压上去。中途某组失败只记
+   * 一条错误继续往下跑——一份坏 PDF 不该把另外十八组一起废掉。
+   */
   const runDualImport = async () => {
-    if (!invoiceFile || !customsFile) {
+    if (!readyPairs.length) {
       message.warning(t("tax.dualFilesRequired"));
       return;
     }
     setBusy(true);
-    try {
-      const result = await importDualFiles(invoiceFile, customsFile);
+    setDualResults(null);
+    setDualProgress({ done: 0, total: readyPairs.length });
+    const outcomes: DualImportOutcome[] = [];
+    for (const pair of readyPairs) {
+      const base = {
+        key: pair.key,
+        label: pair.label,
+        invoiceFileName: pair.invoiceFile.name,
+        customsFileName: pair.customsFile.name,
+      };
+      try {
+        const result = await importDualFiles(pair.invoiceFile, pair.customsFile);
+        outcomes.push({
+          ...base,
+          ok: true,
+          invoiceCount: result.invoiceCount,
+          itemCount: result.itemCount,
+          needsReviewCount: result.needsReviewCount,
+          invoiceIds: result.invoiceIds,
+          error: null,
+          details: [],
+        });
+      } catch (error) {
+        outcomes.push({
+          ...base,
+          ok: false,
+          invoiceCount: 0,
+          itemCount: 0,
+          needsReviewCount: 0,
+          invoiceIds: [],
+          error: error instanceof Error ? error.message : t("tax.recognitionFailed"),
+          details: error instanceof TaxInvoiceApiError ? error.details : [],
+        });
+      }
+      setDualProgress({ done: outcomes.length, total: readyPairs.length });
+    }
+
+    const succeeded = new Set(
+      outcomes.filter((item) => item.ok).map((item) => item.key),
+    );
+    // 成功的从队列里摘掉，失败的留着——改完文件按原位重跑，不用重新选一遍。
+    setDualPairs((current) => current.filter((pair) => !succeeded.has(pair.key)));
+    setDualResults(outcomes);
+    // 默认只展开失败项：成功的看汇总就够了，出错的必须一眼看到原因。
+    setDualExpanded(outcomes.filter((item) => !item.ok).map((item) => item.key));
+    setDualProgress(null);
+    setBusy(false);
+
+    const failed = outcomes.length - succeeded.size;
+    if (failed) {
+      message.warning(
+        t("tax.batchDualPartial", { ok: succeeded.size, failed }),
+      );
+    } else {
       message.success(
-        t("tax.recognitionDone", {
-          invoices: result.invoiceCount,
-          items: result.itemCount,
+        t("tax.batchDualDone", {
+          groups: succeeded.size,
+          invoices: outcomes.reduce((sum, item) => sum + item.invoiceCount, 0),
+          items: outcomes.reduce((sum, item) => sum + item.itemCount, 0),
         }),
       );
-      setInvoiceFile(null);
-      setCustomsFile(null);
-      await refreshInvoices();
-      setView("ledger");
-      if (result.invoiceIds[0]) {
-        const detail = await getTaxInvoice(result.invoiceIds[0]);
-        await openInvoice(detail);
-      }
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : t("tax.recognitionFailed"));
-    } finally {
-      setBusy(false);
     }
+    // 台账在后台刷新：结果清单留在本页，让人先把这一批核对完。
+    await refreshInvoices();
+  };
+
+  /** 从结果清单跳去台账看某一份税票。 */
+  const openInvoiceFromResult = async (invoiceId: string) => {
+    setView("ledger");
+    await openInvoice(invoiceId);
   };
 
   const runSampleImport = async () => {
@@ -1207,7 +1312,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
               size="middle"
               onRow={(record) => ({
-                onClick: () => void openInvoice(record),
+                onClick: () => void openInvoice(record.id),
               })}
             />
           </main>
@@ -1296,37 +1401,217 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   {t("tax.dualPickFiles")}
                 </Button>
               </Upload.Dragger>
-              <div className="dual-slot-row">
-                <DualFileSlot
-                  file={invoiceFile}
-                  hint={t("tax.invoiceExcelHint")}
-                  icon={<FileExcelOutlined />}
-                  label={t("tax.invoiceExcel")}
-                  t={t}
-                  onClear={() => setInvoiceFile(null)}
-                />
-                <DualFileSlot
-                  file={customsFile}
-                  hint={t("tax.customsPdfHint")}
-                  icon={<FilePdfOutlined />}
-                  label={t("tax.customsPdf")}
-                  t={t}
-                  onClear={() => setCustomsFile(null)}
-                />
-              </div>
+              {dualPairs.length > 0 && (
+                <div className="dual-queue">
+                  <div className="dual-queue-head">
+                    <h3>
+                      {t("tax.pairQueue")}
+                      <span>{t("tax.pairQueueCount", { count: readyPairs.length })}</span>
+                    </h3>
+                    <Button size="small" type="text" onClick={() => setDualPairs([])}>
+                      {t("tax.pairClearAll")}
+                    </Button>
+                  </div>
+                  {incompletePairs.length > 0 && (
+                    <Alert
+                      message={t("tax.pairIncomplete", {
+                        count: incompletePairs.length,
+                      })}
+                      description={t("tax.pairIncompleteBody")}
+                      showIcon
+                      type="warning"
+                    />
+                  )}
+                  {/* 队列可能有二十来组，给个高度上限自己滚，别把按钮顶出首屏。 */}
+                  <ol className="dual-pair-list">
+                    {dualPairs.map((pair, index) => (
+                      <DualPairRow
+                        index={index + 1}
+                        key={pair.key}
+                        pair={pair}
+                        t={t}
+                        onRemove={() =>
+                          setDualPairs((current) =>
+                            current.filter((item) => item.key !== pair.key),
+                          )
+                        }
+                      />
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {dualProgress && (
+                <div className="dual-progress">
+                  <Progress
+                    percent={Math.round((dualProgress.done / dualProgress.total) * 100)}
+                    size="small"
+                    status="active"
+                  />
+                  <span>
+                    {t("tax.pairProgress", {
+                      done: dualProgress.done,
+                      total: dualProgress.total,
+                    })}
+                  </span>
+                </div>
+              )}
               <Button
                 block
+                disabled={!readyPairs.length}
                 icon={<FileSearchOutlined />}
                 loading={busy}
                 size="large"
                 type="primary"
                 onClick={() => void runDualImport()}
               >
-                {t("tax.startRecognition")}
+                {readyPairs.length > 1
+                  ? t("tax.startRecognitionBatch", { count: readyPairs.length })
+                  : t("tax.startRecognition")}
               </Button>
             </section>
 
           </div>
+
+          {dualResults && dualSummary && (
+            <section className="tax-tool-card dual-result-card">
+              <div className="tool-card-heading">
+                <div className="tool-card-icon ink">
+                  <FileDoneOutlined />
+                </div>
+                <div>
+                  <span>{t("tax.resultEyebrow")}</span>
+                  <h2>{t("tax.resultTitle", { count: dualResults.length })}</h2>
+                  <p>{t("tax.resultHint")}</p>
+                </div>
+                <div className="dual-result-actions">
+                  <Button
+                    size="small"
+                    onClick={() => setDualExpanded(dualResults.map((item) => item.key))}
+                  >
+                    {t("tax.expandAll")}
+                  </Button>
+                  <Button size="small" onClick={() => setDualExpanded([])}>
+                    {t("tax.collapseAll")}
+                  </Button>
+                  <Button size="small" type="text" onClick={() => setDualResults(null)}>
+                    {t("common.close")}
+                  </Button>
+                </div>
+              </div>
+              <div className="dual-result-summary">
+                <div>
+                  <strong>{dualSummary.ok}</strong>
+                  <span>{t("tax.resultOk")}</span>
+                </div>
+                <div className={dualSummary.failed ? "is-alert" : ""}>
+                  <strong>{dualSummary.failed}</strong>
+                  <span>{t("tax.resultFailed")}</span>
+                </div>
+                <div>
+                  <strong>{dualSummary.invoices}</strong>
+                  <span>{t("tax.countInvoices")}</span>
+                </div>
+                <div>
+                  <strong>{dualSummary.items}</strong>
+                  <span>{t("tax.resultItems")}</span>
+                </div>
+                <div>
+                  <strong>{dualSummary.needsReview}</strong>
+                  <span>{t("tax.countNeedsReview")}</span>
+                </div>
+              </div>
+              {/* 逐组一行、按导入顺序编号，点标题行展开看这一组的两份源文件
+                  和生成结果；失败的默认就是展开的。 */}
+              <Table<DualImportOutcome>
+                className="dual-result-table"
+                columns={[
+                  {
+                    title: "#",
+                    dataIndex: "key",
+                    width: 52,
+                    render: (_value, _record, index) => index + 1,
+                  },
+                  {
+                    title: t("tax.resultGroup"),
+                    dataIndex: "label",
+                    ellipsis: true,
+                    render: (value: string) => (
+                      <span className="dual-result-name">{value}</span>
+                    ),
+                  },
+                  {
+                    title: t("tax.colStatus"),
+                    dataIndex: "ok",
+                    width: 108,
+                    render: (ok: boolean) => (
+                      <Tag className={`status-tag ${ok ? "status-issued" : "status-voided"}`}>
+                        {ok ? t("tax.resultOk") : t("tax.resultFailed")}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: t("tax.countInvoices"),
+                    dataIndex: "invoiceCount",
+                    width: 88,
+                    align: "right",
+                  },
+                  {
+                    title: t("tax.resultItems"),
+                    dataIndex: "itemCount",
+                    width: 88,
+                    align: "right",
+                  },
+                ]}
+                dataSource={dualResults}
+                expandable={{
+                  expandedRowKeys: dualExpanded,
+                  onExpandedRowsChange: (keys) =>
+                    setDualExpanded(keys.map((key) => String(key))),
+                  expandedRowRender: (record) => (
+                    <div className="dual-result-detail">
+                      <dl>
+                        <dt>{t("tax.invoiceExcel")}</dt>
+                        <dd>{record.invoiceFileName}</dd>
+                        <dt>{t("tax.customsPdf")}</dt>
+                        <dd>{record.customsFileName}</dd>
+                      </dl>
+                      {record.ok ? (
+                        <div className="dual-result-links">
+                          {record.invoiceIds.map((invoiceId, index) => (
+                            <Button
+                              key={invoiceId}
+                              size="small"
+                              onClick={() => void openInvoiceFromResult(invoiceId)}
+                            >
+                              {t("tax.resultOpen", { index: index + 1 })}
+                            </Button>
+                          ))}
+                        </div>
+                      ) : (
+                        <Alert
+                          message={record.error}
+                          description={
+                            record.details.length ? (
+                              <ul>
+                                {record.details.map((detail) => (
+                                  <li key={detail}>{detail}</li>
+                                ))}
+                              </ul>
+                            ) : undefined
+                          }
+                          showIcon
+                          type="error"
+                        />
+                      )}
+                    </div>
+                  ),
+                }}
+                pagination={false}
+                rowKey="key"
+                size="small"
+              />
+            </section>
+          )}
 
           <section className="tax-quality-strip">
             <div>
@@ -1424,12 +1709,15 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 <p className="ant-upload-text">{t("tax.pickSample")}</p>
                 <p className="ant-upload-hint">{t("tax.samplePickHint")}</p>
               </Upload.Dragger>
-              <Alert
-                message={t("tax.sampleWarning")}
-                description={t("tax.sampleWarningBody")}
-                showIcon
-                type="warning"
-              />
+              {/* 这条原来也是一块 Alert，和右栏那块并排像两个错误提示在抢注意力。
+                  它其实是"导进来之后会怎样"的说明，不是警告，压成一条内联注记。 */}
+              <p className="tax-inline-note">
+                <WarningOutlined />
+                <span>
+                  <strong>{t("tax.sampleWarning")}</strong>
+                  {t("tax.sampleWarningBody")}
+                </span>
+              </p>
               <Button
                 block
                 disabled={!sampleFile}

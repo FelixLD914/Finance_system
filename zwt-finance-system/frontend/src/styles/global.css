@@ -1221,11 +1221,39 @@ select {
   padding: 18px 22px 24px;
 }
 
+/* 识别建单 / 表格批量导入 / 汇率中心三页共用的排版尺度。
+   这几页原来是逐条手写 9px、9.5px、10px、10.5px、11px、11.5px……同一屏上
+   出现七八档字号，看着就是"没排过版"。收敛成四档：正文 / 次要说明 / 角标 /
+   卡片标题，任何新元素都从这四个变量里取，不要再写字面量。
+   下限定在 11px：更小的字在 1366×768 的办公机上已经不好认了。 */
 .tax-tool-page {
+  /* 卡片标题固定 16px：ui/finance-ui.css 把 .tool-card-heading h2 和
+     .section-title-row h2 等一起钉在 16px，那份样式最后加载，本文件写多少都
+     没用。这里跟着写同一个值，是让这套尺度如实反映页面上真实的字号。 */
+  --tax-fs-title: 16px;
+  --tax-fs-body: 13px; /* 正文、文件名、表格 */
+  --tax-fs-meta: 12px; /* 次要说明、卡片副标题 */
+  --tax-fs-micro: 11px; /* 计数徽章、眉标 */
+  --tax-card-gap: 16px;
+
   min-height: 0;
   overflow: auto;
   flex: 1;
   padding: 22px 30px 32px;
+}
+
+/* 三页的内容宽度是同一条：卡片、提示条、结果清单都对齐到这个栏宽，
+   否则每块自己写一次 max-width，改一次要找七八处。 */
+.tax-rule-note,
+.tax-import-grid,
+.tax-batch-grid,
+.dual-result-card,
+.tax-quality-strip,
+.rate-ingest-grid,
+.rate-stat-grid,
+.rate-ledger-card {
+  max-width: 1320px;
+  margin-inline: auto;
 }
 
 /* 原来的 DATE GOVERNANCE 深色横幅（标题 + 正文 + 流程图）占掉首屏近三分之一，
@@ -1234,15 +1262,14 @@ select {
   display: flex;
   align-items: baseline;
   gap: 9px;
-  max-width: 1320px;
-  margin: 0 auto 16px;
-  padding: 9px 14px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
   color: #6d6259;
   background: rgba(255, 253, 249, 0.72);
   border: 1px solid var(--line);
   border-left: 3px solid var(--camel);
   border-radius: 8px;
-  font-size: 11.5px;
+  font-size: var(--tax-fs-meta);
   line-height: 1.65;
 }
 
@@ -1250,65 +1277,112 @@ select {
   color: var(--camel);
 }
 
-/* Sample 批量导入搬去独立页后，识别开票是这一页唯一的事，独占整幅。 */
-.tax-import-grid {
-  max-width: 1320px;
-  margin: 0 auto 18px;
+/* 卡片内部的注记。和 .tax-rule-note 同一种语气，但不占整幅页宽：
+   用来放"导进来之后会怎样"这类说明，避免一页上并排两块 antd Alert
+   ——两块彩色告警并排，谁都不显眼。 */
+.tax-inline-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--finance-warning-bg);
+  border: 1px solid #ecd9bb;
+  border-radius: 8px;
+  font-size: var(--tax-fs-meta);
+  line-height: 1.6;
 }
 
-/* 批量导入页：左边投放 + 导入，右边表头要求。表头清单是照着后端
-   parse_sample_workbook 抄的，缺一列整份文件都进不来，得给足篇幅。 */
+.tax-inline-note .anticon {
+  margin-top: 2px;
+  flex: none;
+  color: var(--finance-warning-text);
+}
+
+.tax-inline-note span {
+  display: grid;
+  gap: 2px;
+  color: #6d6259;
+}
+
+.tax-inline-note strong {
+  color: var(--finance-warning-text);
+}
+
+/* Sample 批量导入搬去独立页后，识别开票是这一页唯一的事，独占整幅。 */
+.tax-import-grid {
+  margin-bottom: 18px;
+}
+
+/* 批量导入页：左边投放 + 导入，右边表头要求。
+   两栏原来是 1fr/1fr + align-items:start，左卡只有投放区和一个按钮、右卡是
+   二十几枚表头标签，两边高度差出小半屏，看着就是"比例失调"。
+   改成动作栏略宽 + stretch 对齐：左栏是这一页真正要做的事，右栏是照抄用的
+   参考表，等高之后按钮也稳定落在卡片底部。 */
 .tax-batch-grid {
   display: grid;
-  max-width: 1320px;
-  margin: 0 auto;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+}
+
+@media (max-width: 1180px) {
+  .tax-batch-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .sample-drop-zone .ant-upload-drag {
-  min-height: 168px;
+  min-height: 176px;
   background: #fcfaf7;
   border-color: #dcd2c7;
 }
 
 .sample-drop-zone .ant-upload-drag-icon .anticon {
   color: var(--camel) !important;
-  font-size: 28px !important;
+  font-size: 30px !important;
 }
 
 .sample-drop-zone .ant-upload-text {
-  font-size: 13px !important;
+  font-size: var(--tax-fs-body) !important;
   font-weight: 700;
 }
 
 .sample-drop-zone .ant-upload-hint {
-  font-size: 10px !important;
+  font-size: var(--tax-fs-meta) !important;
 }
 
 .tax-column-card {
-  gap: 14px;
+  gap: var(--tax-card-gap);
+}
+
+/* 表头清单可能有二十多枚标签，卡片等高之后交给它自己滚，
+   不要把右栏撑高再回头把左栏也拉长。 */
+.tax-column-card .column-group {
+  min-height: 0;
 }
 
 .column-group h3 {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 0 0 8px;
+  margin: 0 0 9px;
   color: #4a4038;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--tax-fs-micro);
+  font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .column-group h3 span {
-  padding: 1px 6px;
+  padding: 1px 7px;
   color: var(--muted);
   background: #efe9e1;
   border-radius: 20px;
-  font-size: 9.5px;
+  font-size: var(--tax-fs-micro);
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .column-tags {
@@ -1325,7 +1399,8 @@ select {
   border: 1px solid var(--line);
   border-radius: 6px;
   font-family: var(--font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
-  font-size: 10.5px;
+  font-size: var(--tax-fs-micro);
+  line-height: 1.7;
 }
 
 /* 只有历史迁移能用的列，跟普通可选列区分开。 */
@@ -1345,10 +1420,10 @@ select {
 
 .tax-tool-card {
   display: flex;
-  min-height: 355px;
+  min-height: 340px;
   flex-direction: column;
-  gap: 18px;
-  padding: 24px;
+  gap: var(--tax-card-gap);
+  padding: 22px 24px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -1363,12 +1438,21 @@ select {
   display: flex;
   align-items: center;
   gap: 13px;
+  padding-bottom: 2px;
+}
+
+/* 眉标全站共用（.workspace-kicker / .record-eyebrow），那条规则不动；
+   工具卡里的这一档跟着本页的尺度走，别让 10px 的全站值把这几页拖回去。 */
+.tax-tool-page .tool-card-heading > div > span {
+  font-size: var(--tax-fs-micro);
+  letter-spacing: 0.12em;
 }
 
 .tool-card-icon {
   display: grid;
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
+  flex: none;
   border-radius: 11px;
   place-items: center;
   font-size: 18px;
@@ -1384,17 +1468,20 @@ select {
   background: #2e2925;
 }
 
+/* font-size / font-family / letter-spacing 由 ui/finance-ui.css 统一给
+   （那份最后加载，写在这里的会被盖掉）。这里只补它没管的那几项。 */
 .tool-card-heading h2 {
-  margin: 2px 0 3px;
+  margin: 3px 0 4px;
   color: #2d2722;
-  font-family: var(--font-ui);
-  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .tool-card-heading p {
   margin: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--tax-fs-meta);
+  line-height: 1.55;
 }
 
 /* 单一投放区：Excel 和 PDF 一次拖进来，按扩展名归位到下面两个槽位。 */
@@ -1427,14 +1514,14 @@ select {
 }
 
 .dual-drop-zone .ant-upload-text {
-  font-size: 13px !important;
+  font-size: var(--tax-fs-body) !important;
   font-weight: 700;
 }
 
 .dual-drop-zone .ant-upload-hint {
-  max-width: 460px;
+  max-width: 520px;
   margin: 0 auto !important;
-  font-size: 10px !important;
+  font-size: var(--tax-fs-meta) !important;
   line-height: 1.65 !important;
 }
 
@@ -1442,64 +1529,235 @@ select {
   margin-top: 12px;
 }
 
-.dual-slot-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* 待导入队列：一次可以是二十来组，所以是一条可滚的清单，不是两个定死的槽位。 */
+.dual-queue {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dual-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
-.dual-slot {
+.dual-queue-head h3 {
   display: flex;
-  min-width: 0;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 7px;
+  margin: 0;
+  color: #4a4038;
+  font-family: var(--font-ui);
+  font-size: var(--tax-fs-micro);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dual-queue-head h3 span {
+  padding: 1px 7px;
+  color: var(--muted);
+  background: #efe9e1;
+  border-radius: 20px;
+  font-size: var(--tax-fs-micro);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* 高度上限约六行：再多就自己滚，别把「开始识别」按钮顶出首屏。 */
+.dual-pair-list {
+  display: flex;
+  max-height: 268px;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  gap: 6px;
+  list-style: none;
+}
+
+.dual-pair-row {
+  display: grid;
+  align-items: center;
+  padding: 8px 10px;
   background: #fdfbf8;
   border: 1px solid var(--line);
   border-radius: 9px;
+  gap: 0 10px;
+  grid-template-columns: 22px minmax(96px, 0.9fr) minmax(0, 2fr) auto;
 }
 
-.dual-slot.is-filled {
+/* 配齐的一组才会真的发出去，底色跟着变，扫一眼就知道哪几组会跑。 */
+.dual-pair-row.is-ready {
   background: #f6efe5;
   border-color: #cdb99f;
 }
 
-.dual-slot > .anticon {
-  color: #a0855f;
-  font-size: 16px;
-}
-
-.dual-slot-text {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
-.dual-slot-text strong {
-  color: #3a322b;
-  font-size: 11px;
-}
-
-/* 文件名可能很长，槽位是定宽的，超出直接省略号。 */
-.dual-slot-text span {
-  overflow: hidden;
+.dual-pair-index {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--tax-fs-micro);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.dual-pair-name {
+  overflow: hidden;
+  color: #3a322b;
+  font-size: var(--tax-fs-body);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dual-slot-flag {
-  margin-left: auto;
+.dual-pair-files {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.dual-file-chip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
   color: var(--muted);
-  font-size: 9px;
-  text-align: right;
+  font-size: var(--tax-fs-micro);
+}
+
+.dual-file-chip .anticon {
+  flex: none;
+  color: #a0855f;
+}
+
+.dual-file-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dual-slot .ant-btn {
-  margin-left: auto;
+/* 缺的那一份用警示色写明缺什么，比留白强。 */
+.dual-file-chip.is-missing,
+.dual-file-chip.is-missing .anticon {
+  color: var(--finance-danger-text);
+}
+
+.dual-pair-row .ant-btn {
   color: #9a8b7c;
+}
+
+.dual-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dual-progress .ant-progress {
+  flex: 1;
+  margin: 0;
+}
+
+.dual-progress > span {
+  color: var(--muted);
+  font-size: var(--tax-fs-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 本次导入的逐组结果。整批跑完留在页面上，让人先把这一批核对完再走。 */
+.dual-result-card {
+  min-height: 0;
+  margin-top: 18px;
+}
+
+.dual-result-actions {
+  display: flex;
+  margin-left: auto;
+  gap: 8px;
+}
+
+.dual-result-summary {
+  display: grid;
+  overflow: hidden;
+  background: #f7f3ed;
+  border: 1px solid #e3dad0;
+  border-radius: 10px;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.dual-result-summary > div {
+  display: grid;
+  padding: 12px 16px;
+  gap: 2px;
+}
+
+.dual-result-summary > div + div {
+  border-left: 1px solid #e3dad0;
+}
+
+.dual-result-summary strong {
+  color: #3a322b;
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dual-result-summary span {
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+}
+
+/* 有失败才把这一格标红：零失败时一片红色反而干扰。 */
+.dual-result-summary > div.is-alert strong {
+  color: var(--finance-danger-text);
+}
+
+/* 表格字号不在这里改：antd 的 token 是 14px，全站台账都用这一档，
+   单独把这一张压到 13px 只会跟别的表格不一致。 */
+.dual-result-name {
+  font-weight: 600;
+}
+
+.dual-result-detail {
+  display: grid;
+  gap: 10px;
+  padding: 4px 2px;
+}
+
+.dual-result-detail dl {
+  display: grid;
+  align-items: baseline;
+  margin: 0;
+  gap: 4px 14px;
+  grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
+}
+
+.dual-result-detail dt {
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+}
+
+.dual-result-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #3a322b;
+  font-size: var(--tax-fs-meta);
+}
+
+.dual-result-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dual-result-detail .ant-alert ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
 }
 
 /* 批量导入的冲突清单。行数可能几十条，给个上限自己滚，别把弹窗顶穿。 */
@@ -1530,8 +1788,7 @@ select {
 
 .tax-quality-strip {
   display: grid;
-  max-width: 1320px;
-  margin: 0 auto;
+  margin-top: 18px;
   overflow: hidden;
   background: #eee7de;
   border: 1px solid #ded4c9;
@@ -1543,7 +1800,7 @@ select {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 18px;
+  padding: 15px 18px;
 }
 
 .tax-quality-strip > div + div {
@@ -1551,26 +1808,27 @@ select {
 }
 
 .tax-quality-strip .anticon {
+  flex: none;
   color: #93643f;
   font-size: 17px;
 }
 
 .tax-quality-strip span {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--tax-fs-micro);
+  line-height: 1.5;
 }
 
 .tax-quality-strip strong {
   color: #403831;
-  font-size: 11px;
+  font-size: var(--tax-fs-meta);
 }
 
 .rate-stat-grid {
   display: grid;
-  max-width: 1320px;
-  margin: 0 auto 18px;
+  margin-bottom: 18px;
   grid-template-columns: 1fr 1fr 1.25fr;
   gap: 14px;
 }
@@ -1588,21 +1846,26 @@ select {
   display: block;
   margin-top: 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--tax-fs-micro);
 }
 
-/* 汇率中心内的「查询 / 入库」二级切换。查询只读高频、入库写库低频，
-   分开后查数的人不用面对同步/导入两个写按钮。 */
+/* 汇率中心内的「查询 / 入库」二级切换，表格批量导入页的「开具 / 迁移」也用它。
+   原来是 width:fit-content + margin:0 auto，在窄于 1320px 的屏上会居中悬在
+   左对齐的卡片上方。改成跟卡片同一条 1320px 栏、贴左边起：它是这一页的模式
+   开关，和下面的卡片是同一根轴。 */
 .rate-tab-switch {
   display: flex;
-  gap: 4px;
+  width: fit-content;
   max-width: 1320px;
-  margin: 0 auto 16px;
+  /* 窄栏时 (100% - 1320px)/2 是负数，max 兜回 0 → 贴左；宽到卡片被居中时，
+     它正好等于居中留白，开关跟着挪到那一栏的左边缘。比媒体查询准：真正决定
+     栏宽的是侧栏收没收起，不是视口宽度。 */
+  margin: 0 0 16px max(0px, calc((100% - 1320px) / 2));
   padding: 4px;
+  gap: 4px;
   background: rgba(255, 253, 249, 0.8);
   border: 1px solid var(--line);
   border-radius: 10px;
-  width: fit-content;
 }
 
 .rate-tab-switch button {
@@ -1613,7 +1876,7 @@ select {
   border: 0;
   border-radius: 7px;
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--tax-fs-body);
   font-weight: 600;
 }
 
@@ -1640,8 +1903,7 @@ select {
 /* 入库页两张工具卡（BOT API 同步 / Excel 导入）并排。 */
 .rate-ingest-grid {
   display: grid;
-  max-width: 1320px;
-  margin: 0 auto 18px;
+  margin-bottom: 18px;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
@@ -1656,8 +1918,8 @@ select {
 }
 
 .rate-ledger-card {
-  max-width: 1320px;
-  margin: 0 auto;
+  /* 栏宽与居中由 .tax-tool-page 那条共用规则统一给。 */
+  min-height: 0;
 }
 
 .rate-ledger-card > .section-title-row {
