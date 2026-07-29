@@ -56,6 +56,11 @@ export interface WhtTaskCreateInput {
   dueDate?: string | null;
   whtRate: number;
   totalAmount: number;
+  /**
+   * 税率偏离收入类型目录法定值时必填的理由，服务端写进建单事件的 note。
+   * 偏离与否由服务端按目录自己判定，前端的必填只是把话说在前面。
+   */
+  rateOverrideNote?: string | null;
 }
 
 export interface Payee {

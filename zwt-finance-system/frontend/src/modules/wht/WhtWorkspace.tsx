@@ -17,18 +17,14 @@ import {
 import {
   Alert,
   App as AntApp,
-  AutoComplete,
   Button,
   Checkbox,
-  DatePicker,
   Descriptions,
   Dropdown,
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
-  Radio,
   Select,
   Steps,
   Table,
@@ -48,14 +44,14 @@ import {
   listSignatures,
   listWhtDocuments,
 } from "./api";
+import { IssuanceConsole } from "./IssuanceConsole";
 import { PayeeDirectory } from "./PayeeDirectory";
 import type {
-  IncomeTypeOption,
   SignatureAsset,
   WhtDocument,
   WhtStatus,
   WhtTask,
-  WhtType,
+  WhtTaskCreateInput,
 } from "./types";
 import { useWhtData } from "./useWhtData";
 
@@ -73,6 +69,9 @@ interface Filters {
 
 /** 两种导入长得像但语义相反，用不同的入口和不同的引导文案分开。 */
 type ImportKind = "history" | "batch";
+
+/** 台账、开票操作、收款方主数据是模块内的三个平行视图。 */
+type WorkspaceView = "tasks" | "compose" | "payees";
 
 /** 业务阶段 → 内部状态。财务同事按"手上要做什么"找单，不是按状态机找。 */
 const whtPhaseStatuses: Record<
@@ -112,6 +111,39 @@ function StatusTag({ status, t }: { status: WhtStatus; t: Translate }) {
     <Tag className={`status-tag ${statusClass[status]}`}>
       {statusLabel(status, t)}
     </Tag>
+  );
+}
+
+/** 三个平行视图共用一组页签，免得每个视图各写一份、状态还容易写漏。 */
+function ViewSwitch({
+  active,
+  t,
+  onChange,
+}: {
+  active: WorkspaceView;
+  t: Translate;
+  onChange: (view: WorkspaceView) => void;
+}) {
+  const tabs: Array<{ key: WorkspaceView; label: string }> = [
+    { key: "tasks", label: t("wht.taskLedger") },
+    { key: "compose", label: t("wht.issuanceConsole") },
+    { key: "payees", label: t("wht.payeeMaster") },
+  ];
+  return (
+    <div className="workspace-view-switch" role="tablist">
+      {tabs.map((tab) => (
+        <button
+          aria-selected={tab.key === active}
+          className={tab.key === active ? "is-active" : ""}
+          key={tab.key}
+          role="tab"
+          type="button"
+          onClick={() => onChange(tab.key)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -221,7 +253,30 @@ function DetailPanel({
               label: t("wht.company"),
               children: <ThaiText>{task.companyName}</ThaiText>,
             },
+            {
+              key: "companyEn",
+              label: t("wht.payeeNameEn"),
+              children: value(task.companyNameEn),
+            },
             { key: "tax", label: t("wht.taxId"), children: value(task.taxId) },
+            // 这三项会原样印到正式凭证上，之前一项都没显示，出票前无从核对。
+            {
+              key: "address",
+              label: t("wht.address"),
+              children: task.payeeAddress ? (
+                <ThaiText>{task.payeeAddress}</ThaiText>
+              ) : (
+                "—"
+              ),
+            },
+            {
+              key: "issuance",
+              label: t("wht.issuanceType"),
+              children:
+                task.issuanceType === "supplement"
+                  ? `${t("wht.supplement")} · ${task.supplementRun}`
+                  : t("wht.normal"),
+            },
             { key: "type", label: t("wht.type"), children: value(task.whtType) },
             {
               key: "income",
@@ -371,10 +426,11 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     uploadBatchTasks,
     runBatchTransition,
   } = useWhtData();
-  const [view, setView] = useState<"tasks" | "payees">("tasks");
+  // 「开票操作」是模块内的平行视图，不是弹窗：正式凭证上要打印的每一项
+  // （泰文名、税号、泰文地址、收入类型）都得摊开在一页里核对完再提交。
+  const [view, setView] = useState<WorkspaceView>("tasks");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(true);
-  const [createOpen, setCreateOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [importKind, setImportKind] = useState<ImportKind | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -384,11 +440,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   // 默认停在「待处理」：进页面最常见的诉求是"我还有什么没做完"。
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
-  const [rateHint, setRateHint] = useState<string | null>(null);
-  const [form] = Form.useForm();
   const [generateForm] = Form.useForm();
-  const issuanceType = Form.useWatch("issuanceType", form);
-  const payeeId = Form.useWatch("payeeId", form);
   const includeSignature = Form.useWatch("includeSignature", generateForm);
   const [filters, setFilters] = useState<Filters>({
     period: "2026-06",
@@ -447,48 +499,12 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   );
 
   const selectedTask = tasks.find((task) => task.id === selectedId);
-  const selectedPayee = payees.find((payee) => payee.id === payeeId);
   const checkedTasks = useMemo(
     () => tasks.filter((task) => checkedIds.includes(task.id)),
     [checkedIds, tasks],
   );
   const draftChecked = checkedTasks.filter((task) => task.status === "draft");
   const reviewChecked = checkedTasks.filter((task) => task.status === "pending_review");
-
-  /** 目录按收款方的 PND 类型过滤：同一收入类型在两张表下税率可能不同。 */
-  const incomeTypeOptions = useMemo(() => {
-    const label = (option: IncomeTypeOption) =>
-      locale === "en-US" ? option.labelEn : option.labelZh;
-    const rateOf = (option: IncomeTypeOption, whtType: WhtType | undefined) =>
-      option.rates.find((entry) => entry.whtType === whtType)?.rate;
-    const applicable = incomeTypes.filter(
-      (option) =>
-        !selectedPayee || option.rates.some((r) => r.whtType === selectedPayee.whtType),
-    );
-    const toOption = (option: IncomeTypeOption) => {
-      const rate = rateOf(option, selectedPayee?.whtType);
-      return {
-        value: option.labelTh,
-        label: (
-          <span className="income-type-option">
-            <ThaiText>{option.labelTh}</ThaiText>
-            <small>{label(option)}</small>
-            {rate && <Tag>{`${Number(rate) * 100}%`}</Tag>}
-          </span>
-        ),
-      };
-    };
-    return [
-      {
-        label: t("wht.incomeTypeInUse"),
-        options: applicable.filter((option) => option.inUse).map(toOption),
-      },
-      {
-        label: t("wht.incomeTypeCatalogue"),
-        options: applicable.filter((option) => !option.inUse).map(toOption),
-      },
-    ].filter((group) => group.options.length > 0);
-  }, [incomeTypes, locale, selectedPayee, t]);
 
   useEffect(() => {
     if (!selectedTask || !["approved", "issued"].includes(selectedTask.status)) {
@@ -547,47 +563,16 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     },
   ];
 
-  const applyIncomeType = (value: string) => {
-    const option = incomeTypes.find((entry) => entry.labelTh === value);
-    const rate = option?.rates.find(
-      (entry) => entry.whtType === selectedPayee?.whtType,
-    )?.rate;
-    if (!option || !rate) {
-      setRateHint(null);
-      return;
-    }
-    const percent = Number(rate) * 100;
-    form.setFieldValue("whtRate", percent);
-    setRateHint(
-      t("wht.rateFromCatalogue", {
-        label: locale === "en-US" ? option.labelEn : option.labelZh,
-        rate: `${percent}%`,
-      }),
-    );
-  };
-
-  const createDraft = async () => {
-    try {
-      const values = await form.validateFields();
-      const task = await createTask({
-        period: values.period,
-        issuanceType: values.issuanceType,
-        supplementRun: values.issuanceType === "supplement" ? values.supplementRun : 0,
-        payeeId: values.payeeId,
-        incomeType: values.incomeType,
-        paymentDate: values.paymentDate.format("YYYY-MM-DD"),
-        whtRate: values.whtRate / 100,
-        totalAmount: values.totalAmount,
-      });
-      setSelectedId(task.id);
-      setInspectorOpen(true);
-      setCreateOpen(false);
-      setRateHint(null);
-      form.resetFields();
-      message.success(t("common.createDraft"));
-    } catch (createError) {
-      if (createError instanceof Error) message.error(createError.message);
-    }
+  /**
+   * 建完直接回台账并选中新草稿：操作页是「录一条」的入口，不是停留的地方，
+   * 留在原地反而让人以为还要再点一次保存。
+   */
+  const createFromConsole = async (input: WhtTaskCreateInput) => {
+    const task = await createTask(input);
+    setSelectedId(task.id);
+    setInspectorOpen(true);
+    setView("tasks");
+    return task;
   };
 
   const handleAction = async (
@@ -762,22 +747,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             <span>WHT</span>
             <small>{t("wht.title")}</small>
           </h1>
-          <div className="workspace-view-switch" role="tablist">
-            <button
-              className={view === "tasks" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("tasks")}
-            >
-              {t("wht.taskLedger")}
-            </button>
-            <button
-              className={view === "payees" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("payees")}
-            >
-              {t("wht.payeeMaster")}
-            </button>
-          </div>
+          <ViewSwitch active="tasks" t={t} onChange={setView} />
         </div>
         <div className="page-actions">
           <Dropdown
@@ -821,7 +791,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
               {t("wht.importMenu")} <DownOutlined />
             </Button>
           </Dropdown>
-          <Button icon={<PlusOutlined />} type="primary" onClick={() => setCreateOpen(true)}>
+          <Button icon={<PlusOutlined />} type="primary" onClick={() => setView("compose")}>
             {t("wht.newTask")}
           </Button>
         </div>
@@ -1017,14 +987,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             <span>WHT</span>
             <small>{t("wht.payeeMaster")}</small>
           </h1>
-          <div className="workspace-view-switch" role="tablist">
-            <button type="button" onClick={() => setView("tasks")}>
-              {t("wht.taskLedger")}
-            </button>
-            <button className="is-active" type="button" onClick={() => setView("payees")}>
-              {t("wht.payeeMaster")}
-            </button>
-          </div>
+          <ViewSwitch active="payees" t={t} onChange={setView} />
         </div>
       </div>
       <PayeeDirectory
@@ -1041,6 +1004,20 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     </section>
   );
 
+  const composeView = (
+    <IssuanceConsole
+      defaultPeriod={filters.period === "all" ? periodOptions[0]?.value : filters.period}
+      incomeTypes={incomeTypes}
+      locale={locale}
+      payees={payees}
+      pending={mutationPending}
+      periodOptions={periodOptions}
+      t={t}
+      viewSwitch={<ViewSwitch active="compose" t={t} onChange={setView} />}
+      onCancel={() => setView("tasks")}
+      onCreate={createFromConsole}
+    />
+  );
 
   // 只有明细面板真的会渲染时才让出那一列。以前 inspectorOpen 默认 true，
   // 台账为空时右边留着 412px 的空档，表格被挤到左边并出现横向滚动条。
@@ -1048,7 +1025,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
 
   return (
     <div className={`workspace ${showInspector ? "with-inspector" : ""}`}>
-      {view === "tasks" ? taskView : payeeView}
+      {view === "tasks" ? taskView : view === "compose" ? composeView : payeeView}
 
       {showInspector && selectedTask && (
         <DetailPanel
@@ -1062,124 +1039,6 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           onGenerate={() => void openDocumentGenerator()}
         />
       )}
-
-      <Modal
-        destroyOnHidden
-        open={createOpen}
-        title={t("wht.newTask")}
-        okText={t("common.createDraft")}
-        cancelText={t("common.cancel")}
-        confirmLoading={mutationPending}
-        width={620}
-        onCancel={() => setCreateOpen(false)}
-        onOk={createDraft}
-      >
-        <p className="modal-intro">{t("wht.numberHint")}</p>
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{
-            period: "2026-06",
-            issuanceType: "normal",
-            supplementRun: 1,
-            whtRate: 3,
-          }}
-        >
-          <div className="task-form-grid">
-            <Form.Item name="period" label={t("wht.period")} rules={[{ required: true }]}>
-              <Select options={periodOptions} />
-            </Form.Item>
-            <Form.Item
-              name="issuanceType"
-              label={t("wht.issuanceType")}
-              rules={[{ required: true }]}
-            >
-              <Radio.Group
-                options={[
-                  { value: "normal", label: t("wht.normal") },
-                  { value: "supplement", label: t("wht.supplement") },
-                ]}
-              />
-            </Form.Item>
-          </div>
-          {issuanceType === "supplement" && (
-            <Form.Item
-              name="supplementRun"
-              label={t("wht.supplementRun")}
-              rules={[{ required: true }]}
-            >
-              <InputNumber min={1} max={9} precision={0} />
-            </Form.Item>
-          )}
-          <Form.Item name="payeeId" label={t("wht.payee")} rules={[{ required: true }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder={t("wht.selectPayee")}
-              options={payees
-                .filter((payee) => payee.isActive)
-                .map((payee) => ({
-                  value: payee.id,
-                  label: `${payee.nameTh} · ${payee.taxId}`,
-                }))}
-              onChange={() => {
-                // 换收款方就可能换 PND 表，原来选的收入类型未必还适用。
-                form.setFieldValue("incomeType", undefined);
-                setRateHint(null);
-              }}
-            />
-          </Form.Item>
-          <div className="task-form-grid">
-            <Form.Item
-              name="paymentDate"
-              label={t("wht.paymentDate")}
-              rules={[{ required: true }]}
-            >
-              <DatePicker format="YYYY-MM-DD" />
-            </Form.Item>
-            <Form.Item
-              name="incomeType"
-              label={
-                selectedPayee
-                  ? `${t("wht.incomeType")} · ${selectedPayee.whtType}`
-                  : t("wht.incomeType")
-              }
-              extra={!selectedPayee ? t("wht.selectPayeeFirst") : undefined}
-              rules={[{ required: true }]}
-            >
-              <AutoComplete
-                className="thai-input"
-                options={incomeTypeOptions}
-                placeholder={t("wht.incomeTypeSelect")}
-                filterOption={(input, option) => {
-                  // 选项是分组结构，回调拿到的是组内条目；label 是 JSX，
-                  // 只能按 value（泰文原文）过滤。
-                  const value = (option as { value?: string } | undefined)?.value ?? "";
-                  return value.toLowerCase().includes(input.toLowerCase());
-                }}
-                onSelect={applyIncomeType}
-              />
-            </Form.Item>
-          </div>
-          <div className="task-form-grid">
-            <Form.Item
-              name="totalAmount"
-              label={t("wht.totalAmount")}
-              rules={[{ required: true }]}
-            >
-              <InputNumber min={0.01} precision={2} />
-            </Form.Item>
-            <Form.Item
-              name="whtRate"
-              label={t("wht.ratePercent")}
-              extra={rateHint}
-              rules={[{ required: true }]}
-            >
-              <InputNumber min={0.01} max={100} precision={2} suffix="%" />
-            </Form.Item>
-          </div>
-        </Form>
-      </Modal>
 
       <Modal
         destroyOnHidden

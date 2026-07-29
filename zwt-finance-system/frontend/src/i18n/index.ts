@@ -216,13 +216,40 @@ const resources = {
     "wht.incomeTypeInUse": "常用",
     "wht.incomeTypeCatalogue": "目录",
     "wht.incomeTypeCustom": "自定义",
-    "wht.rateFromCatalogue": "已按「{label}」带出 {rate} 法定税率，可手工覆盖。",
     "wht.selectPayeeFirst": "请先选择收款方，收入类型按其 PND3 / PND53 类型过滤。",
     "wht.emptyTasks": "本期还没有开票任务",
     "wht.emptyTasksHint": "点右上角「新建 WHT 任务」逐条录入，或用「批量开具」一次导入多条。",
     "wht.emptyFiltered": "没有符合筛选条件的任务",
     "wht.emptyFilteredHint": "换一个期数或状态再试，或清空公司搜索框。",
     "wht.selectTaskHint": "在左侧列表中选择一条任务查看明细",
+
+    // 开票操作页：正式凭证上要打印的每一项都必须在提交前可见、可核对。
+    // 收款方档案里的泰文名、税号、泰文地址会被快照进任务，之后原样印到凭证上，
+    // 所以它们分行列出，不再挤成一个下拉标签。
+    "wht.issuanceConsole": "开票操作",
+    "wht.issuanceConsoleSub": "开具信息录入",
+    "wht.backToLedger": "返回台账",
+    "wht.stepPayee": "收款方",
+    "wht.stepIssuance": "开具信息",
+    "wht.stepSettlement": "金额核对",
+    "wht.payeeProfile": "收款方档案",
+    "wht.payeeProfileHint":
+      "以下字段会在创建时快照进任务，并原样打印到正式凭证上。发现有误请先到「收款方主数据」改档案，再回来开票。",
+    "wht.payeeNotChosen": "尚未选择收款方",
+    "wht.payeeNotChosenHint": "选定后会在此展开泰文名称、英文名称、税号、泰文地址与申报表类型。",
+    "wht.payeeSearchInline": "搜索泰文/英文名称、税号或别名",
+    "wht.declarationForm": "申报表类型",
+    "wht.noAliases": "无别名",
+    "wht.netPayable": "实付净额",
+    "wht.settlementHint": "预扣税额按 ROUND_HALF_UP 保留两位，与服务器算法一致；创建后以服务器结果为准。",
+    "wht.rateOverridden": "已手工改为 {rate}，与「{label}」的法定税率 {statutory} 不一致。",
+    "wht.rateStatutory": "与「{label}」的 {statutory} 法定税率一致。",
+    "wht.rateOverrideNote": "改用非法定税率的理由",
+    "wht.rateOverrideNoteRequired": "税率偏离法定值时必须填写理由",
+    "wht.rateOverrideNotePlaceholder": "例如：合同约定 5%，见 2026-06 补充协议",
+    "wht.rateOverrideNoteHint":
+      "这条理由会连同实际税率与法定税率一起写进建单记录，供事后审计追溯。服务端会按收入类型目录自行判定是否偏离，填不填不由前端说了算。",
+    "wht.createdGoLedger": "草稿已创建，已返回台账并选中该条。",
 
     "status.approved": "已批准",
     "status.pendingReview": "待复核",
@@ -817,8 +844,6 @@ const resources = {
     "wht.incomeTypeInUse": "In use",
     "wht.incomeTypeCatalogue": "Catalogue",
     "wht.incomeTypeCustom": "Custom",
-    "wht.rateFromCatalogue":
-      "Filled the statutory {rate} rate for “{label}”. You can still override it.",
     "wht.selectPayeeFirst":
       "Select a payee first — income types are filtered by their PND3 / PND53 type.",
     "wht.emptyTasks": "No issuance tasks in this period yet",
@@ -827,6 +852,34 @@ const resources = {
     "wht.emptyFiltered": "No task matches these filters",
     "wht.emptyFilteredHint": "Try another period or status, or clear the company search box.",
     "wht.selectTaskHint": "Select a task on the left to see its details",
+
+    "wht.issuanceConsole": "Issuance Console",
+    "wht.issuanceConsoleSub": "Certificate details entry",
+    "wht.backToLedger": "Back to ledger",
+    "wht.stepPayee": "Payee",
+    "wht.stepIssuance": "Certificate details",
+    "wht.stepSettlement": "Amount check",
+    "wht.payeeProfile": "Payee record",
+    "wht.payeeProfileHint":
+      "These fields are snapshotted onto the task at creation and printed verbatim on the certificate. If anything is wrong, fix the record in Payee Master Data first, then come back.",
+    "wht.payeeNotChosen": "No payee selected yet",
+    "wht.payeeNotChosenHint":
+      "Once selected, the Thai name, English name, tax ID, Thai address and PND form appear here.",
+    "wht.payeeSearchInline": "Search Thai/English name, tax ID or alias",
+    "wht.declarationForm": "PND form",
+    "wht.noAliases": "No aliases",
+    "wht.netPayable": "Net payable",
+    "wht.settlementHint":
+      "WHT is rounded ROUND_HALF_UP to two decimals, matching the server. The server's result is authoritative once created.",
+    "wht.rateOverridden":
+      "Manually set to {rate}, which differs from the {statutory} statutory rate for “{label}”.",
+    "wht.rateStatutory": "Matches the {statutory} statutory rate for “{label}”.",
+    "wht.rateOverrideNote": "Reason for the non-statutory rate",
+    "wht.rateOverrideNoteRequired": "A reason is required when the rate deviates",
+    "wht.rateOverrideNotePlaceholder": "e.g. contract stipulates 5% — see the 2026-06 addendum",
+    "wht.rateOverrideNoteHint":
+      "The reason is recorded on the creation event together with both the entered and the statutory rate, for audit. The server decides whether the rate deviates from its own catalogue — the client's word is not taken for it.",
+    "wht.createdGoLedger": "Draft created — back on the ledger with it selected.",
 
     "status.approved": "Approved",
     "status.pendingReview": "Pending Review",

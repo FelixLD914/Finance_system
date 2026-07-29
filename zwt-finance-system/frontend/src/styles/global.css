@@ -900,16 +900,271 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.payee-form-grid,
-.task-form-grid {
+.payee-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
 
-.task-form-grid .ant-picker,
-.task-form-grid .ant-input-number {
+/* ── WHT 开票操作页 ────────────────────────────────────────────────────────
+   一个工作表面里分三段，用发丝线分隔而不是拼卡片（见 DESIGN.md：不使用卡片
+   拼贴）。收款方档案是只读区，视觉上要明确区别于可编辑的表单字段。 */
+
+.issuance-console {
+  max-width: 1040px;
+  padding: 0;
+}
+
+.issuance-intro {
+  margin: 0;
+  padding: 14px 24px;
+  color: #655a50;
+  background: #f6f1ea;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.issuance-block {
+  padding: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.issuance-block-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 18px;
+  color: #2e2823;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.issuance-step {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  color: var(--surface);
+  background: var(--camel);
+  border-radius: 50%;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 收款方下拉：泰文名一行、税号/表种/英文名一行。收起来的框只显示泰文名
+   （optionLabelProp="title"），把税号挤进同一行正是原来看不见地址的起点。 */
+.payee-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.payee-option small {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.payee-option small .numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.payee-option small em {
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payee-option .ant-tag {
+  margin-inline-end: 0;
+}
+
+.issuance-profile {
+  margin-top: 4px;
+  padding: 18px 20px;
+  background: var(--finance-surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--finance-radius-md);
+}
+
+.issuance-profile.is-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+}
+
+.issuance-profile.is-empty strong {
+  color: #5a5149;
+  font-size: 13px;
+}
+
+.issuance-profile.is-empty span {
+  font-size: 12.5px;
+}
+
+.issuance-profile-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.issuance-profile-title h3 {
+  margin: 0;
+  color: #5a5149;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.issuance-profile-title .ant-tag {
+  margin-inline-end: 0;
+}
+
+.issuance-profile-grid {
+  display: grid;
+  margin: 0;
+  gap: 14px 28px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.issuance-profile-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.issuance-profile-field dt {
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.issuance-profile-field dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.issuance-profile-field dd .numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.issuance-profile-hint {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.issuance-grid {
+  display: grid;
+  gap: 0 20px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.issuance-grid .issuance-span-2 {
+  grid-column: span 2;
+}
+
+.issuance-grid .issuance-span-3 {
+  grid-column: 1 / -1;
+}
+
+.issuance-grid .ant-picker,
+.issuance-grid .ant-input-number,
+.issuance-grid .ant-select {
   width: 100%;
+}
+
+.rate-note.is-warning {
+  color: var(--finance-warning-text);
+}
+
+/* 金额一行摊平：总额 − 预扣 = 净额，让人一眼核对，不用心算。 */
+.issuance-settlement {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.settlement-cell {
+  display: flex;
+  min-width: 150px;
+  flex: 1 1 150px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--finance-surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--finance-radius-md);
+}
+
+.settlement-cell span {
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.settlement-cell strong {
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.settlement-cell.is-withheld strong {
+  color: var(--finance-warning-text);
+}
+
+.settlement-cell.is-net {
+  background: var(--finance-selected);
+  border-color: #e0cebf;
+}
+
+.settlement-operator {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 17px;
+}
+
+.issuance-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 20px 24px;
+}
+
+.issuance-footer .ant-btn {
+  min-width: 116px;
+}
+
+@media (max-width: 1120px) {
+  .issuance-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .issuance-grid .issuance-span-2 {
+    grid-column: span 1;
+  }
+
+  .issuance-profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @keyframes surface-enter {

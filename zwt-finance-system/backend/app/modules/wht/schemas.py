@@ -48,6 +48,9 @@ class WhtTaskCreate(ApiSchema):
     wht_rate: Decimal | None = Field(default=None, gt=0, le=1)
     total_amount: Decimal = Field(default=Decimal("0"), ge=0)
     wht_amount: Decimal | None = Field(default=None, ge=0)
+    # 税率偏离收入类型目录的法定值时必填的理由，落进建单事件的 note 留痕。
+    # 是否真的偏离由服务端按目录自己判定，不信客户端的说法。
+    rate_override_note: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_issue_scope_and_payee(self) -> "WhtTaskCreate":
