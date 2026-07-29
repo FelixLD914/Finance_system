@@ -898,18 +898,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
    */
   const acceptDualFiles = useCallback(
     (files: File[]) => {
-      setDualPairs((current) => {
-        const { pairs, unsupported, duplicated } = mergeDualFiles(current, files);
-        if (unsupported.length) {
-          message.warning(t("tax.unsupportedFiles", { files: unsupported.join("、") }));
-        }
-        if (duplicated.length) {
-          message.warning(t("tax.duplicateIgnored", { files: duplicated.join("、") }));
-        }
-        return pairs;
-      });
+      const { pairs, unsupported, duplicated } = mergeDualFiles(dualPairs, files);
+      setDualPairs(pairs);
+      if (unsupported.length) {
+        message.warning(t("tax.unsupportedFiles", { files: unsupported.join("、") }));
+      }
+      if (duplicated.length) {
+        message.warning(t("tax.duplicateIgnored", { files: duplicated.join("、") }));
+      }
     },
-    [message, t],
+    [dualPairs, message, t],
   );
 
   const readyPairs = useMemo(() => dualPairs.filter(isReadyPair), [dualPairs]);
