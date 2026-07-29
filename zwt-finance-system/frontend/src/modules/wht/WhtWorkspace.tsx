@@ -364,6 +364,8 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     createTask,
     transitionTask,
     persistPayee,
+    removePayee,
+    recoverPayee,
     uploadPayees,
     uploadHistoricalTasks,
     uploadBatchTasks,
@@ -1031,7 +1033,9 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         payees={payees}
         pending={mutationPending}
         t={t}
+        onDelete={removePayee}
         onImport={uploadPayees}
+        onRestore={recoverPayee}
         onSave={persistPayee}
       />
     </section>

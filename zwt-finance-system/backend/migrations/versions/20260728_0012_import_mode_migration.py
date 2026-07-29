@@ -29,15 +29,16 @@ depends_on: str | Sequence[str] | None = None
 
 _TABLE = "import_batches"
 _SCHEMA = "tax_invoice"
-# 必须套 op.f()：naming_convention 会给未标记的名字再加一次 ck_%(table_name)s_
-# 前缀，直接传字符串会变成 ck_import_batches_ck_import_batches_...。
-_CONSTRAINT = op.f("ck_import_batches_import_mode_allowed")
+# 必须在 upgrade/downgrade 的调用期再套 op.f()：模块导入时 Operations proxy
+# 尚未建立，顶层调用会让 `alembic heads/history` 直接 NameError。
+_CONSTRAINT = "ck_import_batches_import_mode_allowed"
 
 
 def upgrade() -> None:
-    op.drop_constraint(_CONSTRAINT, _TABLE, schema=_SCHEMA, type_="check")
+    constraint = op.f(_CONSTRAINT)
+    op.drop_constraint(constraint, _TABLE, schema=_SCHEMA, type_="check")
     op.create_check_constraint(
-        _CONSTRAINT,
+        constraint,
         _TABLE,
         "import_mode IN ('dual', 'sample', 'migration')",
         schema=_SCHEMA,
@@ -51,9 +52,10 @@ def downgrade() -> None:
         "UPDATE tax_invoice.import_batches "
         "SET import_mode = 'sample' WHERE import_mode = 'migration'"
     )
-    op.drop_constraint(_CONSTRAINT, _TABLE, schema=_SCHEMA, type_="check")
+    constraint = op.f(_CONSTRAINT)
+    op.drop_constraint(constraint, _TABLE, schema=_SCHEMA, type_="check")
     op.create_check_constraint(
-        _CONSTRAINT,
+        constraint,
         _TABLE,
         "import_mode IN ('dual', 'sample')",
         schema=_SCHEMA,

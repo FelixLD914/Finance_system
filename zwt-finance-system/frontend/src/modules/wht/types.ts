@@ -72,6 +72,8 @@ export interface Payee {
   updatedByName: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
+  deletedByName: string | null;
 }
 
 export interface PayeeInput {
@@ -82,6 +84,13 @@ export interface PayeeInput {
   whtType: WhtType;
   aliases: string[];
   isActive?: boolean;
+}
+
+export interface PayeeDeletePreview {
+  payeeId: string;
+  taxId: string;
+  nameTh: string;
+  referencingTasks: number;
 }
 
 export interface ImportResult {
@@ -145,6 +154,8 @@ export interface SignatureAsset {
   updatedByName: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
+  deletedByName: string | null;
 }
 
 export interface WhtDocument {

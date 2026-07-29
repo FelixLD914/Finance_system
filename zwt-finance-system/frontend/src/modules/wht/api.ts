@@ -6,6 +6,7 @@ import type {
   ImportResult,
   IncomeTypeOption,
   Payee,
+  PayeeDeletePreview,
   PayeeInput,
   SignatureAsset,
   SignatureUsage,
@@ -173,9 +174,19 @@ export async function transitionWhtTask(
   });
 }
 
-export async function listPayees(): Promise<Payee[]> {
-  if (useDemoApi) return clone(demoPayees);
-  const response = await request<{ items: Payee[] }>("/v1/wht/payees?activeOnly=false");
+export async function listPayees(deleted = false): Promise<Payee[]> {
+  if (useDemoApi) {
+    return clone(
+      demoPayees.filter((payee) =>
+        deleted ? payee.deletedAt !== null : payee.deletedAt === null,
+      ),
+    );
+  }
+  const params = new URLSearchParams({
+    activeOnly: "false",
+    deleted: String(deleted),
+  });
+  const response = await request<{ items: Payee[] }>(`/v1/wht/payees?${params}`);
   return response.items;
 }
 
@@ -201,6 +212,8 @@ export async function savePayee(input: PayeeInput, payeeId?: string): Promise<Pa
       updatedByName: "系统管理员",
       createdAt: timestamp,
       updatedAt: timestamp,
+      deletedAt: null,
+      deletedByName: null,
     };
     demoPayees = [payee, ...demoPayees];
     return clone(payee);
@@ -209,6 +222,68 @@ export async function savePayee(input: PayeeInput, payeeId?: string): Promise<Pa
   return request<Payee>(endpoint, {
     method: payeeId ? "PATCH" : "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export async function getPayeeDeletePreview(
+  payeeId: string,
+): Promise<PayeeDeletePreview> {
+  if (useDemoApi) {
+    const payee = demoPayees.find(
+      (item) => item.id === payeeId && item.deletedAt === null,
+    );
+    if (!payee) throw new ApiError("payee was not found", 404);
+    return {
+      payeeId,
+      taxId: payee.taxId,
+      nameTh: payee.nameTh,
+      referencingTasks: demoTasks.filter((task) => task.payeeId === payeeId).length,
+    };
+  }
+  return request<PayeeDeletePreview>(
+    `/v1/wht/payees/${payeeId}/delete-preview`,
+  );
+}
+
+export async function deletePayee(payeeId: string): Promise<Payee> {
+  if (useDemoApi) {
+    const payee = demoPayees.find(
+      (item) => item.id === payeeId && item.deletedAt === null,
+    );
+    if (!payee) throw new ApiError("payee was not found", 404);
+    payee.deletedAt = nowIso();
+    payee.deletedByName = "系统管理员";
+    return clone(payee);
+  }
+  return request<Payee>(`/v1/wht/payees/${payeeId}`, { method: "DELETE" });
+}
+
+export async function restorePayee(payeeId: string): Promise<Payee> {
+  if (useDemoApi) {
+    const payee = demoPayees.find(
+      (item) => item.id === payeeId && item.deletedAt !== null,
+    );
+    if (!payee) throw new ApiError("payee is not in the recycle bin", 409);
+    const occupied = demoPayees.some(
+      (item) =>
+        item.id !== payeeId &&
+        item.deletedAt === null &&
+        item.taxId === payee.taxId,
+    );
+    if (occupied) {
+      throw new ApiError(
+        `taxId ${payee.taxId} is already used by another payee`,
+        409,
+      );
+    }
+    payee.deletedAt = null;
+    payee.deletedByName = null;
+    payee.updatedAt = nowIso();
+    payee.updatedByName = "系统管理员";
+    return clone(payee);
+  }
+  return request<Payee>(`/v1/wht/payees/${payeeId}/restore`, {
+    method: "POST",
   });
 }
 
@@ -300,11 +375,24 @@ export async function batchTransitionTasks(
 export async function listSignatures(
   includeInactive = true,
   usage?: SignatureUsage,
+  deleted = false,
 ): Promise<SignatureAsset[]> {
-  if (useDemoApi) return clone(demoSignatures);
+  if (useDemoApi) {
+    return clone(
+      demoSignatures.filter((signature) => {
+        const matchesDeleted = deleted
+          ? signature.deletedAt !== null
+          : signature.deletedAt === null;
+        const matchesStatus =
+          includeInactive || signature.status === "active" || deleted;
+        const matchesUsage = !usage || signature.usage.includes(usage);
+        return matchesDeleted && matchesStatus && matchesUsage;
+      }),
+    );
+  }
   const scope = usage ? `&usage=${usage}` : "";
   return request<SignatureAsset[]>(
-    `/v1/wht/signatures?includeInactive=${includeInactive ? "true" : "false"}${scope}`,
+    `/v1/wht/signatures?includeInactive=${includeInactive ? "true" : "false"}&deleted=${deleted ? "true" : "false"}${scope}`,
   );
 }
 
@@ -336,6 +424,8 @@ export async function uploadSignature(
       updatedByName: "系统管理员",
       createdAt: timestamp,
       updatedAt: timestamp,
+      deletedAt: null,
+      deletedByName: null,
     };
     demoSignatures = [signature, ...demoSignatures];
     return clone(signature);
@@ -350,6 +440,46 @@ export async function uploadSignature(
     method: "POST",
     body,
   });
+}
+
+export async function deleteSignature(
+  signatureId: string,
+): Promise<SignatureAsset> {
+  if (useDemoApi) {
+    const signature = demoSignatures.find(
+      (item) => item.id === signatureId && item.deletedAt === null,
+    );
+    if (!signature) throw new ApiError("signature image was not found", 404);
+    signature.deletedAt = nowIso();
+    signature.deletedByName = "系统管理员";
+    signature.isDefault = false;
+    return clone(signature);
+  }
+  return request<SignatureAsset>(`/v1/wht/signatures/${signatureId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function restoreSignature(
+  signatureId: string,
+): Promise<SignatureAsset> {
+  if (useDemoApi) {
+    const signature = demoSignatures.find(
+      (item) => item.id === signatureId && item.deletedAt !== null,
+    );
+    if (!signature) {
+      throw new ApiError("signature is not in the recycle bin", 409);
+    }
+    signature.deletedAt = null;
+    signature.deletedByName = null;
+    signature.updatedAt = nowIso();
+    signature.updatedByName = "系统管理员";
+    return clone(signature);
+  }
+  return request<SignatureAsset>(
+    `/v1/wht/signatures/${signatureId}/restore`,
+    { method: "POST" },
+  );
 }
 
 export async function updateSignature(
