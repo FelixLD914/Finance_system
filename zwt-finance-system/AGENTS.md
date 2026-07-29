@@ -47,6 +47,7 @@ BOM、空行、幂等替换）。**语法检查和肉眼审查不算验证**，�
 | 规则 | 事实源 |
 | --- | --- |
 | 角色与职责分离四条决定（approver 可自录自批、作废与批准同级、WHT/TAX INV 共用批准人、`signature:manage` 仅 admin） | [README.md](README.md) + `backend/tests/test_authz.py` 的策略锁定测试 |
+| TAX INV 编号只在批准事务里生成，任何导入路径都拒收文件里的编号；补开以前月份靠行内 `Invoice Date`，不设专用通道 | `backend/tests/test_authz.py` 的 `test_numbers_are_never_supplied_by_import` + `backend/app/modules/tax_invoice/service.py` 的 `_assert_importable` |
 | WHT 编号不变量（`ZWTYYYYMMNNN` / 补开 `ZWTYYYYMMBKRSS`，正式号只在批准事务中分配） | [docs/architecture.md](docs/architecture.md) |
 | TAX INV 规则（开票日期取报关提交日期、`ZWT-IVYYYYMMDD-NN`、18 行上限禁止批准不得截断、作废号不回收、汇率最多回溯 9 天） | [docs/architecture.md](docs/architecture.md) |
 | 模块只能通过服务层读共享数据，WHT 与 TAX INV 不直接写对方业务表 | [docs/architecture.md](docs/architecture.md)，对应 `core` / `wht` / `tax_invoice` / `audit` 四个 PG schema |
@@ -93,12 +94,11 @@ BOM、空行、幂等替换）。**语法检查和肉眼审查不算验证**，�
 - **改 `backend/requirements.lock` 会改变发布包内容** ——
   `deploy/windows/Build-ZwtRelease.ps1` 会校验它存在并取 SHA-256。测试工具不要
   加进这份 lock。
-- **`POST /v1/tax-invoice/import/migration` 是一次性通道，历史迁移跑完后必须整个
-  删掉**。它是全系统唯一能由调用方指定税票编号的入口：直接写出 `approved` 记录
-  并推进编号计数器，绕过人工复核。摘除清单见
-  [docs/windows-deployment.md](docs/windows-deployment.md)「上线后必须摘掉的一次性
-  通道」。**摘的时候不要收窄 `import_batches.import_mode` 的 CHECK 约束**——迁移
-  留下的审计行正是 `'migration'`，收窄会让它们违反约束。
+- **TAX INV 历史迁移通道已摘除。** `POST /api/v1/tax-invoice/import/migration` 与
+  `invoice:migrate` 已于 2026-07-29 删除，任何导入都不得接受调用方指定的税票编号。
+  **不要收窄 `import_batches.import_mode` 的 CHECK 约束**：`'migration'` 作为旧版本
+  的审计兼容值保留，只删除写入路径。终态说明见
+  [docs/windows-deployment.md](docs/windows-deployment.md)。
 
 ## 目录职责
 
