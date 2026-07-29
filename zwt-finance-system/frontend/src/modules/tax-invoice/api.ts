@@ -115,21 +115,16 @@ export function importDualFiles(
   });
 }
 
-/** 常规批量开具：编号仍由批准时的事务生成，文件里带编号会被整批退回。 */
+/**
+ * 批量开具：编号由批准时的事务生成，文件里带编号会被整批退回。
+ *
+ * 补开以前月份的税票也走这里——把 Invoice Date 填成当时的报关提交日，编号会
+ * 按那一天发。原先另有一条允许沿用旧系统编号的 /import/migration，已摘除。
+ */
 export function importSample(file: File): Promise<TaxInvoiceImportResult> {
   const form = new FormData();
   form.append("file", file);
   return request<TaxInvoiceImportResult>("/v1/tax-invoice/import/sample", {
-    method: "POST",
-    body: form,
-  });
-}
-
-/** 历史迁移：全系统唯一允许沿用旧系统已开出编号的入口。 */
-export function importMigration(file: File): Promise<TaxInvoiceImportResult> {
-  const form = new FormData();
-  form.append("file", file);
-  return request<TaxInvoiceImportResult>("/v1/tax-invoice/import/migration", {
     method: "POST",
     body: form,
   });

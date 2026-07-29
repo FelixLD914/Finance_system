@@ -27,7 +27,6 @@ MUTATING_ENDPOINTS = [
         "invoice:generate",
     ),
     ("post", "/api/v1/tax-invoice/exchange-rates/fetch", "invoice:write"),
-    ("post", "/api/v1/tax-invoice/import/migration", "invoice:migrate"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/approve", "wht:approve"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/return-to-draft", "wht:approve"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/generate-documents", "wht:generate"),
@@ -175,22 +174,21 @@ def test_read_endpoints_reject_role_without_read_permission(
     assert client.get(path).status_code == 403
 
 
-def test_migration_import_needs_more_than_plain_write(client_as) -> None:  # noqa: ANN001
-    """有 invoice:write 但没有 invoice:migrate 时，历史迁移必须 403。
+def test_migration_import_route_is_gone(client_as) -> None:  # noqa: ANN001
+    """一次性历史迁移通道已摘除，这条路由必须不存在。
 
-    上面那条参数化测试只给了 read，被拦下的原因是 write 而不是 migrate，
-    证明不了迁移权真的独立生效。这条刻意把 write 给足，只扣掉 migrate——
-    它才是「拆出 invoice:migrate」这件事的实际验收点。
+    这里刻意用 admin（权限全集）：如果端点还挂着，请求会成功或者以 422 收场，
+    而不是 404。用满权限断言 404，证明拦下它的是"路由没了"，不是"权限不够"
+    ——后者随时可能被一次授权变更悄悄放开。
     """
-    client = client_as(permissions=frozenset({"invoice:read", "invoice:write"}))
+    client = client_as(role="admin")
 
     response = client.post(
         "/api/v1/tax-invoice/import/migration",
         files={"file": ("legacy.xlsx", b"not-a-real-workbook", "application/vnd.ms-excel")},
     )
 
-    assert response.status_code == 403, response.text
-    assert "invoice:migrate" in response.text
+    assert response.status_code == 404, response.text
 
 
 def _empty_workbook() -> bytes:
