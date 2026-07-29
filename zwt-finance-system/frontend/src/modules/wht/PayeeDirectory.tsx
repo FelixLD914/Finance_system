@@ -182,7 +182,7 @@ export function PayeeDirectory({
 
   return (
     <section className="directory-surface">
-      {error && <Alert showIcon type="error" message={t("common.loadFailed")} description={error} />}
+      {error && <Alert showIcon type="error" title={t("common.loadFailed")} description={error} />}
       <div className="directory-toolbar">
         <Input
           allowClear

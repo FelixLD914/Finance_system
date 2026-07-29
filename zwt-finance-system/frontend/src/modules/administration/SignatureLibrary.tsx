@@ -250,7 +250,7 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         <Alert
           showIcon
           type="error"
-          message={t("common.loadFailed")}
+          title={t("common.loadFailed")}
           description={error}
           action={
             <Button size="small" onClick={() => void reload()}>

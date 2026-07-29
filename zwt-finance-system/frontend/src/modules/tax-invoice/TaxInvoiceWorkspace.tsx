@@ -376,7 +376,7 @@ function InvoiceInspector({
       {warnings > 0 && (
         <Alert
           className="tax-review-alert"
-          message={t("tax.warningCount", { count: warnings })}
+          title={t("tax.warningCount", { count: warnings })}
           description={t("tax.warningBody")}
           showIcon
           type="warning"
@@ -1363,7 +1363,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   </div>
                   {incompletePairs.length > 0 && (
                     <Alert
-                      message={t("tax.pairIncomplete", {
+                      title={t("tax.pairIncomplete", {
                         count: incompletePairs.length,
                       })}
                       description={t("tax.pairIncompleteBody")}
@@ -1538,7 +1538,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                         </div>
                       ) : (
                         <Alert
-                          message={record.error}
+                          title={record.error}
                           description={
                             record.details.length ? (
                               <ul>
@@ -1662,7 +1662,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               {/* DocumentNo 一律拒收，没有例外——这是编号只在批准事务里生成
                   这条规则最容易被文件绕过的地方，必须写在最显眼的位置。 */}
               <Alert
-                message={t("tax.batchNumberForbidden")}
+                title={t("tax.batchNumberForbidden")}
                 description={t("tax.batchNumberForbiddenBody")}
                 showIcon
                 type="info"
@@ -1726,7 +1726,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   className="bot-status-alert"
                   showIcon
                   type="warning"
-                  message={t("tax.botNotConfigured")}
+                  title={t("tax.botNotConfigured")}
                   description={t("tax.botNotConfiguredBody", {
                     envVar: botStatus?.envVar ?? "ZWT_BOT_API_KEY",
                     file: "zwt-finance-system/.env",
@@ -1955,7 +1955,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         width={680}
         onCancel={() => setConflicts([])}
       >
-        <Alert message={t("tax.conflictIntro")} showIcon type="error" />
+        <Alert title={t("tax.conflictIntro")} showIcon type="error" />
         <ol className="conflict-list">
           {conflicts.map((issue, index) => (
             <li key={`${issue.reason}-${issue.key}-${index}`}>
@@ -2030,7 +2030,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         onCancel={() => setEditOpen(false)}
         onOk={() => void saveEdit()}
       >
-        <Alert message={t("tax.editHint")} showIcon type="info" />
+        <Alert title={t("tax.editHint")} showIcon type="info" />
         <Form form={editForm} layout="vertical">
           <div className="tax-edit-grid">
             <Form.Item
@@ -2163,7 +2163,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         onOk={() => void runWorkflowAction()}
       >
         <Alert
-          message={
+          title={
             workflowAction === "void" ? t("tax.voidWarning") : t("tax.correctionWarning")
           }
           showIcon
