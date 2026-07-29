@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,7 +21,6 @@ from app.modules.tax_invoice.models import (
     TaxInvoice,
     TaxInvoiceEvent,
     TaxInvoiceImportBatch,
-    TaxInvoiceIssueCounter,
     TaxInvoiceItem,
 )
 from app.modules.tax_invoice.number_service import assign_tax_invoice_number
@@ -57,7 +55,7 @@ class TaxInvoiceStateError(TaxInvoiceServiceError):
 # 塞进一个 openpyxl 工作簿，没有上限的话总有一天会把进程撑爆。
 MAX_EXPORT_INVOICES = 2000
 
-# 正式模板的物理容量。approve() 与批量导入认领已有编号时共用这个上限。
+# 正式模板的物理容量。超过就必须拒绝批准，不得截断。
 APPROVAL_ITEM_LIMIT = 18
 
 
@@ -92,11 +90,11 @@ def check_approval_readiness(
 ) -> ApprovalReadiness:
     """「可批准」的完整性口径，只有这一份。
 
-    approve() 走人工复核这条路，批量导入里带 DocumentNo 的行则绕过复核直接
-    落成 approved——两条路通向同一个状态，校验就必须是同一套。各写一套迟早
-    漂移，而漂移的后果是从导入这条缝里造出一张残缺的已批准税票：客户地址空着、
-    汇率没有，或者 19 条商品（超过模板容量，要等到生成文件时才炸，那时编号
-    早就发出去了）。
+    历史迁移那条能绕过复核直接落成 approved 的通道摘掉之后，approve() 是通往
+    approved 的唯一入口，这里也就成了唯一的守门人。口径留在这个独立函数里而不是
+    内联进 approve()：前端要靠它预判哪些字段还差，两处判断必须同源，各写一套迟早
+    漂移，而漂移的后果是发出一张残缺的已批准税票——客户地址空着、汇率没有，或者
+    19 条商品（超过模板容量，要等到生成文件时才炸，那时编号早就发出去了）。
     """
     missing = [
         name
@@ -314,41 +312,20 @@ class TaxInvoiceService:
         file_name: str,
         content: bytes,
     ) -> TaxInvoiceImportResponse:
-        """常规批量开具：编号只能由批准时的事务生成，文件里带编号一律退回。"""
+        """常规批量开具：编号只能由批准时的事务生成，文件里带编号一律退回。
+
+        补开以前月份的税票也走这条路：编号取自行里的 invoice_date（见
+        `assign_tax_invoice_number`），汇率取自文件的 FX Date / FX Rate 列，
+        两处都不看"今天"，所以回填历史月份不需要任何额外通道。
+        """
         return await self._create_import(
             rows=rows,
             import_mode="sample",
             source_names=[file_name],
             source_files=[(file_name, content)],
-            allow_existing_numbers=False,
         )
 
-    async def import_migration(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        file_name: str,
-        content: bytes,
-    ) -> TaxInvoiceImportResponse:
-        """历史迁移：旧系统已经正式开出的票，必须沿用原编号搬进来。
-
-        这是全系统唯一允许外部指定税票编号的入口，因此单独一个方法、单独一个
-        端点——好让权限、审计和校验都能只针对它收紧，而不牵连日常批量开票。
-        """
-        return await self._create_import(
-            rows=rows,
-            import_mode="migration",
-            source_names=[file_name],
-            source_files=[(file_name, content)],
-            allow_existing_numbers=True,
-        )
-
-    async def _assert_importable(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        allow_existing_numbers: bool = False,
-    ) -> None:
+    async def _assert_importable(self, rows: list[dict[str, Any]]) -> None:
         """把整份文件的冲突一次查完，全部收进 issues 再抛。
 
         以前是查到第一条就抛，用户改一行再导一次、再撞下一条，一份几十行的
@@ -359,7 +336,6 @@ class TaxInvoiceService:
         """
         issues: list[dict[str, object]] = []
         seen_business_keys: dict[tuple[str, str | None], list[int]] = {}
-        seen_document_numbers: dict[str, list[int]] = {}
 
         def locate(row: dict[str, Any]) -> list[int]:
             # 双文件识别那条链路没有源行号，缺了就只报业务键。
@@ -404,78 +380,23 @@ class TaxInvoiceService:
             if not document_no:
                 continue
 
-            # 只有历史迁移能带编号。常规批量开票带了就直接退回——这是全系统
-            # 「编号由批准时的数据库事务生成」这条规则的实际执行点，界面上的
-            # 提示只是提示，拦不住手工改过的表。
-            if not allow_existing_numbers:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "number_not_allowed",
-                        "detail": (
-                            f"document number {document_no} was supplied by the file; "
-                            "numbers are assigned on approval. Clear the DocumentNo "
-                            "column, or use the historical migration import instead."
-                        ),
-                    }
-                )
-                continue
-
-            # 带编号的行会绕过人工复核直接落成 approved，所以这里必须先过一遍
-            # 与 approve() 完全相同的完整性校验。不合格就整批退回，而不是悄悄
-            # 把编号丢掉降级成草稿——那样历史迁移的原编号就没了，之后再批准会
-            # 发一个新号，对不上旧系统的账。让人把行补全或者把编号删掉。
-            readiness = check_approval_readiness(
-                invoice_date=row.get("invoice_date"),
-                exchange_target_date=row.get("exchange_target_date"),
-                exchange_rate=row.get("exchange_rate"),
-                customer_name=row.get("customer_name"),
-                customer_address=row.get("customer_address"),
-                cdn=row.get("cdn"),
-                item_count=len(row.get("items") or []),
+            # 文件里带编号一律退回，没有例外——这是全系统「编号只由批准时的数据库
+            # 事务生成」这条规则的实际执行点，界面上的提示只是提示，拦不住手工改过
+            # 的表。历史迁移那条允许沿用旧编号的一次性通道已经摘掉；补开以前月份的
+            # 票不需要它，把 Invoice Date 填成当时的报关提交日即可，编号会按那一天发。
+            issues.append(
+                {
+                    "rows": source_rows,
+                    "key": document_no,
+                    "reason": "number_not_allowed",
+                    "detail": (
+                        f"document number {document_no} was supplied by the file; "
+                        "numbers are assigned on approval. Clear the DocumentNo "
+                        "column — to issue an invoice dated to an earlier month, "
+                        "set Invoice Date to that date and the number will follow it."
+                    ),
+                }
             )
-            if not readiness.ok:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "incomplete_for_number",
-                        "fields": readiness.blockers(),
-                        "detail": (
-                            f"row(s) carrying number {document_no} are booked as approved "
-                            "and must therefore pass the same checks as manual approval; "
-                            f"unmet: {', '.join(readiness.blockers())}"
-                        ),
-                    }
-                )
-
-            if document_no in seen_document_numbers:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "duplicate_number_in_file",
-                        "detail": (
-                            f"document number {document_no} also appears at row(s) "
-                            f"{seen_document_numbers[document_no] or '-'} of this file"
-                        ),
-                    }
-                )
-                continue
-            seen_document_numbers[document_no] = source_rows
-            existing_document = await self.session.scalar(
-                select(TaxInvoice.id).where(TaxInvoice.document_no == document_no)
-            )
-            if existing_document is not None:
-                issues.append(
-                    {
-                        "rows": source_rows,
-                        "key": document_no,
-                        "reason": "number_already_exists",
-                        "detail": f"document number {document_no} already exists",
-                    }
-                )
 
         if issues:
             raise TaxInvoiceConflictError(
@@ -491,14 +412,10 @@ class TaxInvoiceService:
         import_mode: str,
         source_names: list[str],
         source_files: list[tuple[str, bytes]],
-        allow_existing_numbers: bool = False,
     ) -> TaxInvoiceImportResponse:
         if not rows:
             raise TaxInvoiceStateError("the import file contains no invoice records")
-        await self._assert_importable(
-            rows,
-            allow_existing_numbers=allow_existing_numbers,
-        )
+        await self._assert_importable(rows)
 
         batch = TaxInvoiceImportBatch(
             import_mode=import_mode,
@@ -532,27 +449,23 @@ class TaxInvoiceService:
                 status = self._review_status(row, len(item_rows))
                 if status == "needs_review":
                     needs_review_count += 1
-                document_no = row.pop("document_no", None)
+                # _assert_importable 已经把带编号的行整批拦下了，这里只是把键摘掉
+                # 免得落进 TaxInvoice(**row)。导入永远产出未批准记录，编号统一由
+                # approve() 里的 assign_tax_invoice_number 发。
+                row.pop("document_no", None)
                 invoice = TaxInvoice(
                     **row,
                     batch_id=batch.id,
-                    document_no=document_no,
-                    status="approved" if document_no else status,
+                    status=status,
                     source_invoice_file_name=source_names[0],
                     source_customs_file_name=(
                         source_names[1] if len(source_names) > 1 else None
                     ),
                     created_by_name=self.actor_name,
                     updated_by_name=self.actor_name,
-                    approved_at=datetime.now(UTC) if document_no else None,
                 )
                 self.session.add(invoice)
                 await self.session.flush()
-                if document_no:
-                    await self._advance_counter_for_existing_number(
-                        document_no,
-                        invoice.invoice_date,
-                    )
                 for item in item_rows:
                     self.session.add(TaxInvoiceItem(invoice_id=invoice.id, **item))
                 self.session.add(
@@ -1101,36 +1014,6 @@ class TaxInvoiceService:
         except ValueError as exc:
             raise TaxInvoiceStateError("attachment path escaped the configured root") from exc
         return path
-
-    async def _advance_counter_for_existing_number(
-        self,
-        document_no: str,
-        invoice_date: date | None,
-    ) -> None:
-        match = re.fullmatch(r"ZWT-IV(\d{8})-(\d{2,})", document_no)
-        if match is None or invoice_date is None:
-            return
-        if match.group(1) != invoice_date.strftime("%Y%m%d"):
-            raise TaxInvoiceStateError(
-                f"document number {document_no} does not match its invoice date"
-            )
-        next_sequence = int(match.group(2)) + 1
-        statement = insert(TaxInvoiceIssueCounter).values(
-            invoice_date=invoice_date,
-            next_sequence=next_sequence,
-        )
-        await self.session.execute(
-            statement.on_conflict_do_update(
-                constraint="uq_tax_invoice_issue_counter_date",
-                set_={
-                    "next_sequence": func.greatest(
-                        TaxInvoiceIssueCounter.next_sequence,
-                        statement.excluded.next_sequence,
-                    ),
-                    "updated_at": func.now(),
-                },
-            )
-        )
 
 
 def _currency(item: dict[str, Any]) -> str:

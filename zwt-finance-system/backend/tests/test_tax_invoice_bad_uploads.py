@@ -68,18 +68,15 @@ def test_unsupported_extension_still_rejected() -> None:
         parse_invoice_workbook(NOT_A_WORKBOOK, "upload.csv")
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["/api/v1/tax-invoice/import/sample", "/api/v1/tax-invoice/import/migration"],
-)
-def test_import_endpoints_answer_422_not_500(admin_client, path: str) -> None:  # noqa: ANN001
+def test_import_endpoints_answer_422_not_500(admin_client) -> None:  # noqa: ANN001
     """端到端确认用户看到的是 422。
 
     上面那些是解析器层面的断言；这条盯的是真正的契约——传错文件不该让接口
-    以 500 加一份栈收场。两个导入端点都测，它们各自 catch 一次。
+    以 500 加一份栈收场。原先还参数化了 /import/migration，那个一次性通道
+    已摘除，只剩 /import/sample 这一条 Sample 表格入口。
     """
     response = admin_client.post(
-        path,
+        "/api/v1/tax-invoice/import/sample",
         files={
             "file": (
                 "upload.xlsx",

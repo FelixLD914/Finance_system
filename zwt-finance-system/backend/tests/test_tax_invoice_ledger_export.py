@@ -26,7 +26,12 @@ from app.modules.tax_invoice.ledger_export import (
 from app.modules.tax_invoice.models import TaxInvoice, TaxInvoiceItem
 from app.modules.tax_invoice.recognition import parse_sample_workbook
 from app.modules.tax_invoice.router import get_tax_invoice_service
-from app.modules.tax_invoice.service import TaxInvoiceConflictError, TaxInvoiceService
+from app.modules.tax_invoice.service import (
+    APPROVAL_ITEM_LIMIT,
+    TaxInvoiceConflictError,
+    TaxInvoiceService,
+    check_approval_readiness,
+)
 
 
 def _invoice(**overrides: object) -> TaxInvoice:
@@ -207,10 +212,10 @@ def _numbered_row(
     document_no: str,
     **overrides: object,
 ) -> dict:
-    """一行带编号的导入行，默认填满到「够格直接批准」。
+    """一行带编号的导入行，其余字段填满到「够格直接批准」。
 
-    带编号 = 绕过复核直接 approved，所以默认必须是完整的；
-    要测不完整的情况就用 overrides 把某个字段打成 None。
+    编号现在一律被拒，所以这个夹具只用来构造"该被拒"的输入。其余字段之所以
+    仍然填满：要证明拒绝的理由是编号本身，而不是顺带缺了别的字段。
     """
     row: dict = {
         "ci_no": ci_no,
@@ -228,21 +233,13 @@ def _numbered_row(
     return row
 
 
-def _check(rows: list[dict], *, allow_existing_numbers: bool = True) -> None:
+def _check(rows: list[dict]) -> None:
     """同步地跑一遍 _assert_importable。
 
     测试栈里没装 pytest-asyncio / anyio 插件（CI 也只装 pytest+cov+ruff），
     直接写 async def 测试会被静默跳过。这里自己起一个事件循环，不引入新依赖。
-
-    默认按历史迁移（允许带编号）来测，因为编号相关的分支都在那条路上；
-    常规批量开票那条单独用 allow_existing_numbers=False 测。
     """
-    asyncio.run(
-        _service()._assert_importable(
-            rows,
-            allow_existing_numbers=allow_existing_numbers,
-        )
-    )
+    asyncio.run(_service()._assert_importable(rows))
 
 
 def test_all_conflicts_are_reported_in_one_pass() -> None:
@@ -265,7 +262,51 @@ def test_all_conflicts_are_reported_in_one_pass() -> None:
     assert "2 problem" in str(excinfo.value)
 
 
-def test_duplicate_document_numbers_inside_one_file_are_reported() -> None:
+def test_a_clean_file_raises_nothing() -> None:
+    """留空编号才是导入的正常形态。
+
+    没编号的行不受完整性门槛约束：它落成 needs_review，等人工批准时再校验。
+    """
+    _check(
+        [
+            _row("CI-1", "CDN-1", [2]),
+            _row("CI-2", "CDN-2", [3]),
+            _row("CI-3", "CDN-3", [4]),
+        ]
+    )
+
+
+def test_an_incomplete_row_without_a_number_is_allowed_through() -> None:
+    """缺字段但没编号，就没绕过任何东西，它会落成 needs_review 等人工补。
+    在导入这一步拦它等于把「先导进来再慢慢补」这条正常路堵死。"""
+    _check([_row("CI-1", "CDN-1", [2])])
+
+
+def test_import_rejects_any_supplied_number() -> None:
+    """导入一律不接受文件里的编号，没有例外。
+
+    「编号在批准时由数据库事务生成」这条规则的实际执行点就在这里；界面上那句
+    「请留空」只是提示，拦不住一张手工改过的表。曾经有过一条允许沿用旧编号的
+    历史迁移通道，已于 2026-07-29 摘除——补开以前月份的票靠行里的 Invoice
+    Date，编号会跟着那一天发，不需要外部指定。
+    """
+    rows = [_numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01")]
+
+    with pytest.raises(TaxInvoiceConflictError) as excinfo:
+        _check(rows)
+
+    issue = excinfo.value.issues[0]
+    assert issue["reason"] == "number_not_allowed"
+    assert issue["rows"] == [2]
+    assert issue["key"] == "ZWT-IV20260605-01"
+
+
+def test_every_numbered_row_is_reported_not_just_the_first() -> None:
+    """整份表里每一行带编号的都要报出来，一次改完。
+
+    这也顺带钉住「不再有编号相关的其他分支」：两行同号在迁移时代会报
+    duplicate_number_in_file，现在两行各自只报一次 number_not_allowed。
+    """
     rows = [
         _numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01"),
         _numbered_row("CI-2", "CDN-2", [3], "ZWT-IV20260605-01"),
@@ -275,98 +316,8 @@ def test_duplicate_document_numbers_inside_one_file_are_reported() -> None:
         _check(rows)
 
     issues = excinfo.value.issues
-    assert [issue["reason"] for issue in issues] == ["duplicate_number_in_file"]
-    assert issues[0]["key"] == "ZWT-IV20260605-01"
-    assert issues[0]["rows"] == [3]
-
-
-def test_a_clean_file_raises_nothing() -> None:
-    rows = [
-        _numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01"),
-        _numbered_row("CI-2", "CDN-2", [3], "ZWT-IV20260605-02"),
-        # 没编号的行不受完整性门槛约束：它落成 needs_review，等人工批准时再校验。
-        _row("CI-3", "CDN-3", [4]),
-    ]
-
-    _check(rows)
-
-
-def test_a_numbered_row_must_pass_the_same_checks_as_manual_approval() -> None:
-    """带编号 = 绕过复核直接 approved，所以完整性门槛必须一样高。
-
-    以前这条缝里能塞进一张客户地址为空的「已批准」税票，还会把编号计数器
-    往前推。
-    """
-    rows = [
-        _numbered_row(
-            "CI-1",
-            "CDN-1",
-            [2],
-            "ZWT-IV20260605-01",
-            customer_address=None,
-            exchange_rate=None,
-        )
-    ]
-
-    with pytest.raises(TaxInvoiceConflictError) as excinfo:
-        _check(rows)
-
-    issue = excinfo.value.issues[0]
-    assert issue["reason"] == "incomplete_for_number"
-    assert issue["rows"] == [2]
-    assert set(issue["fields"]) == {"exchangeRate", "customerAddress"}
-
-
-def test_a_numbered_row_over_the_template_limit_is_rejected() -> None:
-    """19 条商品的 approved 税票能安静躺在台账里，直到生成文件时才炸——
-    那时编号早就发出去了。所以要在导入这一步拦住。"""
-    rows = [
-        _numbered_row(
-            "CI-1",
-            "CDN-1",
-            [2],
-            "ZWT-IV20260605-01",
-            items=[{"line_number": n} for n in range(1, 20)],
-        )
-    ]
-
-    with pytest.raises(TaxInvoiceConflictError) as excinfo:
-        _check(rows)
-
-    issue = excinfo.value.issues[0]
-    assert issue["reason"] == "incomplete_for_number"
-    assert issue["fields"] == ["itemLimit"]
-
-
-def test_an_incomplete_row_without_a_number_is_allowed_through() -> None:
-    """没有编号就没绕过任何东西，它会落成 needs_review 等人工补。
-    在导入这一步拦它等于把「先导进来再慢慢补」这条正常路堵死。"""
-    _check([_row("CI-1", "CDN-1", [2])])
-
-
-def test_normal_batch_import_rejects_any_supplied_number() -> None:
-    """常规批量开具不接受文件里的编号。
-
-    「编号在批准时由数据库事务生成」这条规则的实际执行点就在这里；界面上那句
-    「请留空」只是提示，拦不住一张手工改过的表。
-    """
-    rows = [_numbered_row("CI-1", "CDN-1", [2], "ZWT-IV20260605-01")]
-
-    with pytest.raises(TaxInvoiceConflictError) as excinfo:
-        _check(rows, allow_existing_numbers=False)
-
-    issue = excinfo.value.issues[0]
-    assert issue["reason"] == "number_not_allowed"
-    assert issue["rows"] == [2]
-    assert issue["key"] == "ZWT-IV20260605-01"
-
-
-def test_normal_batch_import_accepts_rows_without_numbers() -> None:
-    """留空编号才是常规批量开具的正常形态。"""
-    _check(
-        [_row("CI-1", "CDN-1", [2]), _row("CI-2", "CDN-2", [3])],
-        allow_existing_numbers=False,
-    )
+    assert [issue["reason"] for issue in issues] == ["number_not_allowed"] * 2
+    assert [issue["rows"] for issue in issues] == [[2], [3]]
 
 
 def test_a_rejected_number_is_not_also_reported_as_incomplete() -> None:
@@ -383,13 +334,17 @@ def test_a_rejected_number_is_not_also_reported_as_incomplete() -> None:
     ]
 
     with pytest.raises(TaxInvoiceConflictError) as excinfo:
-        _check(rows, allow_existing_numbers=False)
+        _check(rows)
 
     assert [issue["reason"] for issue in excinfo.value.issues] == ["number_not_allowed"]
 
 
-def test_migration_and_sample_use_different_import_modes() -> None:
-    """两条路必须在审计里分得开，否则事后看不出这一批是迁移还是开票。"""
+def test_sample_import_records_its_mode_and_supplies_no_number_flag() -> None:
+    """导入模式要在审计里分得开，且不再有"允许带编号"这档开关。
+
+    `allow_existing_numbers` 参数随历史迁移一并删掉了。这里断言它没被悄悄
+    加回来——参数一旦回来，例外就又可能被打开。
+    """
     from app.modules.tax_invoice import service as service_module
 
     recorded: list[dict] = []
@@ -400,13 +355,71 @@ def test_migration_and_sample_use_different_import_modes() -> None:
     original = service_module.TaxInvoiceService._create_import
     service_module.TaxInvoiceService._create_import = _capture
     try:
-        svc = _service()
-        asyncio.run(svc.import_sample(rows=[], file_name="a.xlsx", content=b""))
-        asyncio.run(svc.import_migration(rows=[], file_name="a.xlsx", content=b""))
+        asyncio.run(_service().import_sample(rows=[], file_name="a.xlsx", content=b""))
     finally:
         service_module.TaxInvoiceService._create_import = original
 
     assert recorded[0]["import_mode"] == "sample"
-    assert recorded[0]["allow_existing_numbers"] is False
-    assert recorded[1]["import_mode"] == "migration"
-    assert recorded[1]["allow_existing_numbers"] is True
+    assert "allow_existing_numbers" not in recorded[0]
+    assert not hasattr(service_module.TaxInvoiceService, "import_migration")
+
+
+# --- 可批准门槛 ---------------------------------------------------------------
+#
+# check_approval_readiness 是通往 approved 的唯一守门人（历史迁移那条能绕过它
+# 的路已摘除）。这几条直接测它，不经过导入——原先 18 行上限只被导入里的
+# incomplete_for_number 分支覆盖，那个分支随迁移一起没了。
+
+
+def test_approval_readiness_reports_every_missing_field() -> None:
+    readiness = check_approval_readiness(
+        invoice_date=date(2026, 6, 5),
+        exchange_target_date=None,
+        exchange_rate=None,
+        customer_name="TEST CUSTOMER",
+        customer_address=None,
+        cdn="A0099887766",
+        item_count=1,
+    )
+
+    assert not readiness.ok
+    assert set(readiness.blockers()) == {
+        "exchangeTargetDate",
+        "exchangeRate",
+        "customerAddress",
+    }
+
+
+def test_approval_readiness_rejects_more_than_the_template_limit() -> None:
+    """19 条商品的税票要等到生成文件时才炸，那时编号早发出去了。
+
+    模板物理容量是 18 行，超过必须禁止批准、不得截断（已锁定的业务规则）。
+    """
+    complete = {
+        "invoice_date": date(2026, 6, 5),
+        "exchange_target_date": date(2026, 6, 4),
+        "exchange_rate": Decimal("36.1234"),
+        "customer_name": "TEST CUSTOMER",
+        "customer_address": "BANGKOK",
+        "cdn": "A0099887766",
+    }
+
+    assert check_approval_readiness(**complete, item_count=APPROVAL_ITEM_LIMIT).ok
+
+    over = check_approval_readiness(**complete, item_count=APPROVAL_ITEM_LIMIT + 1)
+    assert not over.ok
+    assert over.blockers() == ["itemLimit"]
+
+
+def test_approval_readiness_requires_at_least_one_item() -> None:
+    readiness = check_approval_readiness(
+        invoice_date=date(2026, 6, 5),
+        exchange_target_date=date(2026, 6, 4),
+        exchange_rate=Decimal("36.1234"),
+        customer_name="TEST CUSTOMER",
+        customer_address="BANGKOK",
+        cdn="A0099887766",
+        item_count=0,
+    )
+
+    assert readiness.blockers() == ["items"]
