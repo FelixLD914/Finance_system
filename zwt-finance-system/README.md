@@ -176,6 +176,11 @@ $env:ZWT_ADMIN_PW = Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlai
 3. WHT 与 TAX INV 共用同一批批准人，`_APPROVE` 不拆分。
 4. `signature:manage` 只给 `admin`。能批准一张税票，不等于能改上面盖谁的章。
 
+税票编号**只在批准事务里生成**，任何导入路径都不接受文件里带来的编号。补开
+以前月份的税票走常规批量开具即可：编号取自行里的 `invoice_date`，汇率取自文件
+的 `FX Date` / `FX Rate` 列，两处都不看"今天"。曾经用于沿用旧系统原编号的
+`POST /import/migration` 与配套的 `invoice:migrate` 权限点已于 2026-07-29 摘除。
+
 新建用户默认是 `operator`（`User.role` 的默认值），因此默认情况下录入人
 无法批准自己录的单。
 

@@ -294,20 +294,8 @@ const resources = {
     "tax.conflictNoRow": "无行号",
     "tax.issueDuplicateInFile": "本文件内重复：{key} 在前面已经出现过",
     "tax.issueAlreadyExists": "台账里已存在：{key}",
-    "tax.issueDuplicateNumberInFile": "本文件内编号重复：{key}",
-    "tax.issueNumberAlreadyExists": "编号已被占用：{key}",
-    "tax.issueIncompleteForNumber":
-      "{key} 带编号会直接以「已批准」入账，但这几项还缺：{fields}。补齐，或者删掉编号让它走正常复核。",
     "tax.issueNumberNotAllowed":
-      "批量开具不接受文件里的编号（{key}）。清空 DocumentNo 列让编号在批准时生成；要搬旧系统已开出的票，请切到「历史迁移」。",
-    "tax.blocker.invoiceDate": "开票日期",
-    "tax.blocker.exchangeTargetDate": "汇率目标日",
-    "tax.blocker.exchangeRate": "汇率",
-    "tax.blocker.customerName": "客户名称",
-    "tax.blocker.customerAddress": "客户地址",
-    "tax.blocker.CDN": "报关单号",
-    "tax.blocker.items": "商品明细",
-    "tax.blocker.itemLimit": "商品超过 18 条",
+      "批量开具不接受文件里的编号（{key}）。请清空 DocumentNo，让编号在批准时生成；补开以前月份的税票时，把 Invoice Date 填成当时的报关提交日。",
     "tax.rateFileRequired": "请选择 BOT 汇率 Excel",
     "tax.rateImported": "汇率已更新：新增 {created}，覆盖 {updated}",
     "tax.rateImportFailed": "汇率导入失败",
@@ -357,28 +345,16 @@ const resources = {
     "tax.runSampleImport": "开始批量导入",
     "tax.batchNav": "表格批量导入",
     "tax.batchRuleNote":
-      "同一张税票的多条商品写成多行，按 DocumentNo → CDN → C/I No. 的优先级归组；每张税票最多 18 条商品。",
+      "同一张税票的多条商品写成连续多行，按 CDN → C/I No. 的优先级归组；每张税票最多 18 条商品。",
     "tax.batchColumns": "表头要求",
     "tax.batchColumnsHint": "表头名称必须完全一致，缺一列整份文件都不会导入",
     "tax.batchRequired": "必填列",
     "tax.batchOptional": "可选列",
-    "tax.batchModeIssue": "批量开具",
-    "tax.batchModeMigration": "历史迁移",
-    "tax.batchMigrationNoPermission":
-      "历史迁移仅限系统管理员（invoice:migrate）。它能凭一份表格直接写出已批准税票并指定编号，因此不下放给录入或复核角色。",
     "tax.batchIssueTitle": "Sample 表格批量开具",
     "tax.batchIssueHint": "批量核对完成的新票，编号仍在批准时生成",
-    "tax.batchMigrationTitle": "迁移旧系统台账",
-    "tax.batchMigrationHint": "旧系统已正式开出的票，沿用原编号搬进来",
     "tax.batchNumberForbidden": "DocumentNo 列必须留空",
     "tax.batchNumberForbiddenBody":
-      "这条路开出的票，编号仍由批准时的数据库事务生成。文件里带了编号会整批退回——要搬旧系统已开出的票，切到「历史迁移」。",
-    "tax.batchMigrationScope": "这是全系统唯一能指定税票编号的入口",
-    "tax.batchMigrationScopeBody":
-      "带编号的行跳过人工复核直接以「已批准」入账，并把编号计数器推到该编号之后，因此必须通过与人工批准完全相同的完整性校验（开票日期、汇率、客户名与地址、CDN、商品 1–18 条）。迁移完成后建议不要再走这条路。",
-    "tax.batchNumberWarning": "填了 DocumentNo 的行会直接以「已批准」入账",
-    "tax.batchNumberWarningBody":
-      "这类行跳过人工复核，并把编号计数器推进到该编号之后。只有已在旧系统正式开出的税票才应该带编号；正常批量开票请留空，编号仍由批准时的数据库事务生成。带编号的行必须通过与人工批准完全相同的完整性校验（开票日期、汇率、客户名与地址、CDN、商品 1–18 条），缺哪一项都会整批退回。",
+      "编号只在批准事务里生成，文件带编号会整批退回。补开以前月份的税票仍走这里：把 Invoice Date 填成当时的报关提交日，编号会按该日期生成。",
     "tax.quality18": "单张 TAX INV 最多 18 条商品",
     "tax.quality18Body": "限的是每张税票的模板容量，不是一次导入的商品总数；超出时禁止批准",
     "tax.qualityFob": "FOB 自动验算",
@@ -881,20 +857,8 @@ const resources = {
     "tax.conflictNoRow": "No row number",
     "tax.issueDuplicateInFile": "Duplicated in this file: {key} already appeared above",
     "tax.issueAlreadyExists": "Already in the ledger: {key}",
-    "tax.issueDuplicateNumberInFile": "Duplicated number in this file: {key}",
-    "tax.issueNumberAlreadyExists": "Number already taken: {key}",
-    "tax.issueIncompleteForNumber":
-      "{key} carries a number so it is booked as approved, but these are missing: {fields}. Complete them, or drop the number and let it go through normal review.",
     "tax.issueNumberNotAllowed":
-      "Batch issuing does not accept numbers from the file ({key}). Clear the DocumentNo column so the number is assigned on approval; to bring across invoices the old system issued, switch to Historical migration.",
-    "tax.blocker.invoiceDate": "Invoice date",
-    "tax.blocker.exchangeTargetDate": "FX target date",
-    "tax.blocker.exchangeRate": "FX rate",
-    "tax.blocker.customerName": "Customer name",
-    "tax.blocker.customerAddress": "Customer address",
-    "tax.blocker.CDN": "CDN",
-    "tax.blocker.items": "Line items",
-    "tax.blocker.itemLimit": "More than 18 line items",
+      "Batch issuing does not accept numbers from the file ({key}). Clear DocumentNo so approval can assign it; for an earlier accounting period, set Invoice Date to that period's customs submission date.",
     "tax.rateFileRequired": "Select the BOT rate spreadsheet",
     "tax.rateImported": "Rates updated: {created} created, {updated} overwritten",
     "tax.rateImportFailed": "Rate import failed",
@@ -948,32 +912,18 @@ const resources = {
     "tax.runSampleImport": "Start batch import",
     "tax.batchNav": "Spreadsheet import",
     "tax.batchRuleNote":
-      "Line items of one invoice go on consecutive rows, grouped by DocumentNo → CDN → C/I No. in that order of precedence; 18 line items per invoice at most.",
+      "Line items of one invoice go on consecutive rows, grouped by CDN → C/I No. in that order of precedence; 18 line items per invoice at most.",
     "tax.batchColumns": "Header requirements",
     "tax.batchColumnsHint":
       "Header names must match exactly — one missing column rejects the whole file",
     "tax.batchRequired": "Required",
     "tax.batchOptional": "Optional",
-    "tax.batchModeIssue": "Batch issuing",
-    "tax.batchModeMigration": "Historical migration",
-    "tax.batchMigrationNoPermission":
-      "Historical migration is restricted to administrators (invoice:migrate). It can write approved invoices with caller-supplied numbers straight from a spreadsheet, so it is not delegated to preparer or approver roles.",
     "tax.batchIssueTitle": "Sample spreadsheet batch issuing",
     "tax.batchIssueHint":
       "New batch-reconciled invoices; numbers are still assigned on approval",
-    "tax.batchMigrationTitle": "Migrate the legacy ledger",
-    "tax.batchMigrationHint":
-      "Invoices already issued formally in the old system, keeping their original numbers",
     "tax.batchNumberForbidden": "The DocumentNo column must be left empty",
     "tax.batchNumberForbiddenBody":
-      "Invoices issued through this path still get their number from the database transaction on approval. A file carrying numbers is rejected in full — to bring across invoices the old system already issued, switch to Historical migration.",
-    "tax.batchMigrationScope":
-      "This is the only place in the system where an invoice number can be supplied",
-    "tax.batchMigrationScopeBody":
-      "Numbered rows skip manual review, are booked as approved, and advance the number counter past that number, so they must pass exactly the same completeness checks as manual approval (invoice date, FX rate, customer name and address, CDN, 1–18 line items). Once migration is done, this path should no longer be used.",
-    "tax.batchNumberWarning": "Rows carrying a DocumentNo are booked as already approved",
-    "tax.batchNumberWarningBody":
-      "Those rows skip manual review and advance the number counter past that number. Only invoices already issued formally in the old system should carry one; leave it empty for normal batch invoicing so the number is still assigned by the database transaction on approval. A numbered row must pass exactly the same completeness checks as manual approval (invoice date, FX rate, customer name and address, CDN, 1–18 line items); anything missing rejects the whole file.",
+      "Numbers are generated only by the approval transaction, so a file carrying one is rejected in full. Earlier-period invoices use this same import: set Invoice Date to the customs submission date for that period and the number will follow it.",
     "tax.quality18": "18 line items per TAX INV",
     "tax.quality18Body":
       "The cap is the template capacity of a single invoice, not the total across an import; approval is blocked when exceeded",

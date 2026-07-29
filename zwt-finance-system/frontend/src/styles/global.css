@@ -1403,14 +1403,6 @@ select {
   line-height: 1.7;
 }
 
-/* 只有历史迁移能用的列，跟普通可选列区分开。 */
-.column-tags code.is-migration {
-  color: #7a4a4a;
-  background: #f8eeea;
-  border-color: #e0c4bb;
-  font-weight: 600;
-}
-
 .column-tags code.is-required {
   color: #6d4a2c;
   background: #f6ede1;

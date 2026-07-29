@@ -6,8 +6,10 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from io import BytesIO
 from typing import Any
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 MONEY = Decimal("0.01")
 PRICE = Decimal("0.0001")
@@ -80,7 +82,17 @@ def _parse_date(value: object) -> date | None:
 
 
 def _xlsx_grid(content: bytes) -> tuple[list[list[object]], str]:
-    workbook = load_workbook(BytesIO(content), data_only=True)
+    try:
+        workbook = load_workbook(BytesIO(content), data_only=True)
+    except (BadZipFile, InvalidFileException, KeyError) as exc:
+        # 扩展名对不代表内容对：改名的 PDF、下载了一半的文件、真 zip 但不是
+        # xlsx，都会在这里炸。openpyxl 抛的是 BadZipFile / InvalidFileException
+        # /（缺 workbook.xml 时）KeyError，都不是 TaxInvoiceRecognitionError，
+        # 于是一路冒到 FastAPI 变成 500。用户传错文件是 4xx，不是服务器故障。
+        raise TaxInvoiceRecognitionError(
+            "the file is not a readable .xlsx workbook; "
+            "re-save it from Excel and upload again"
+        ) from exc
     worksheet = next(
         (
             workbook[name]
@@ -106,7 +118,14 @@ def _xls_grid(content: bytes) -> tuple[list[list[object]], str]:
         import xlrd
     except ImportError as exc:
         raise TaxInvoiceRecognitionError("legacy .xls import requires xlrd") from exc
-    workbook = xlrd.open_workbook(file_contents=content)
+    try:
+        workbook = xlrd.open_workbook(file_contents=content)
+    except xlrd.XLRDError as exc:
+        # 同 _xlsx_grid：内容不是真的 .xls 时给 4xx，不要冒成 500。
+        raise TaxInvoiceRecognitionError(
+            "the file is not a readable .xls workbook; "
+            "re-save it from Excel and upload again"
+        ) from exc
     sheet = next(
         (
             workbook.sheet_by_name(name)
@@ -334,7 +353,17 @@ def parse_customs_pdf(content: bytes) -> dict[str, Any]:
         raise TaxInvoiceRecognitionError("customs PDF import requires pdfplumber") from exc
 
     page_texts: list[str] = []
-    with pdfplumber.open(BytesIO(content)) as pdf:
+    try:
+        pdf_document = pdfplumber.open(BytesIO(content))
+    except Exception as exc:
+        # pdfplumber 底下是 pdfminer，坏文件抛的异常类型不稳定（PSException /
+        # PDFSyntaxError / struct.error 都见过），只能按"打不开就是文件不对"
+        # 处理。同样是 4xx 而不是 500。
+        raise TaxInvoiceRecognitionError(
+            "the file is not a readable PDF; check that the customs declaration "
+            "was downloaded completely"
+        ) from exc
+    with pdf_document as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
             if not text:

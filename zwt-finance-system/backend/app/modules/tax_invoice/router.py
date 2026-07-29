@@ -329,40 +329,6 @@ async def import_existing_sample(
     return await service.import_sample(rows=rows, file_name=file_name, content=content)
 
 
-# 与 /import/sample 读同一种表格，区别只在编号口径：这里允许沿用旧系统已经
-# 开出的 DocumentNo，那边一律拒绝。做成独立端点而不是一个 mode 参数，是为了
-# 让权限能只收紧这一条——这是全系统唯一能由外部指定税票编号的入口。
-#
-# 【一次性通道：历史迁移跑完后整个删掉】
-# 迁移一辈子只做一次，做完之后这个端点就是纯风险敞口、没有任何业务收益。
-# 摘除清单（含一条「不要把 import_mode 的 CHECK 约束收窄回去」的坑）见
-# docs/windows-deployment.md 的「上线后必须摘掉的一次性通道」。
-@router.post(
-    "/import/migration",
-    response_model=TaxInvoiceImportResponse,
-    # 两个都要：invoice:write 是导入这个动作本身，invoice:migrate 是"允许沿用
-    # 外部编号"这项额外授权。分开挂着，将来收回迁移权不会连带影响日常导入。
-    dependencies=[
-        Depends(require_permission("invoice:write")),
-        Depends(require_permission("invoice:migrate")),
-    ],
-)
-async def import_historical_migration(
-    service: ServiceDependency,
-    file: Annotated[UploadFile, File(description="Legacy TAX INV ledger .xlsx")],
-) -> TaxInvoiceImportResponse:
-    content, file_name = await _read_upload(file, (".xlsx", ".xls"))
-    try:
-        rows = parse_sample_workbook(content, file_name)
-    except TaxInvoiceRecognitionError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return await service.import_migration(
-        rows=rows,
-        file_name=file_name,
-        content=content,
-    )
-
-
 @router.get("/exchange-rates", response_model=list[ExchangeRateResponse])
 async def list_exchange_rates(
     service: ServiceDependency,
