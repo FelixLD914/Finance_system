@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ServiceError
+from app.modules.wht import income_types
 from app.modules.wht.batch_import import resolve_rate as resolve_batch_rate
 from app.modules.wht.models import IssueCounter, PayeeProfile, WhtTask, WhtTaskEvent
 from app.modules.wht.number_service import assign_number_on_approval
@@ -112,6 +113,7 @@ class WhtService:
         values = payload.model_dump(by_alias=False)
         payee_id = values.pop("payee_id")
         company_name = values.pop("company_name")
+        rate_override_note = values.pop("rate_override_note")
         if payee_id is not None:
             payee = await self._load_payee(payee_id)
             company_name = payee.name_th
@@ -121,6 +123,13 @@ class WhtService:
             values["wht_type"] = values["wht_type"] or payee.wht_type
         if not company_name:
             raise WhtStateError("companyName is required")
+
+        note = self._rate_override_note(
+            values["income_type"],
+            values["wht_type"],
+            values["wht_rate"],
+            rate_override_note,
+        )
 
         values["wht_amount"] = self._calculated_wht_amount(
             values["total_amount"],
@@ -136,7 +145,7 @@ class WhtService:
         )
         self.session.add(task)
         await self.session.flush()
-        event = self._event(task, "created", None, "draft")
+        event = self._event(task, "created", None, "draft", note)
         self.session.add(event)
         await self.session.commit()
         await self.session.refresh(task)
@@ -563,6 +572,34 @@ class WhtService:
             missing.append("totalAmount")
         if missing:
             raise WhtStateError(f"task is incomplete; required fields: {', '.join(missing)}")
+
+    @staticmethod
+    def _rate_override_note(
+        income_type: str | None,
+        wht_type: str | None,
+        wht_rate: Decimal | None,
+        supplied_note: str | None,
+    ) -> str | None:
+        """税率偏离目录法定值时要求填理由，返回要写进建单事件的 note。
+
+        偏离与否由服务端按目录自己判定 —— 前端的警示只是提醒，直接打 API 的
+        调用方绕不过去。目录里查不到这个收入类型（自由输入的类型）时无从比对，
+        不强制；此时理由若有仍然记下。
+        """
+        note = (supplied_note or "").strip() or None
+        if income_type is None or wht_rate is None:
+            return note
+        statutory = income_types.default_rate(income_type, wht_type)
+        if statutory is None or statutory == wht_rate:
+            return note
+        entered_pct = f"{wht_rate * 100:.2f}%"
+        statutory_pct = f"{statutory * 100:.2f}%"
+        if note is None:
+            raise WhtStateError(
+                f"rateOverrideNote is required: {entered_pct} deviates from the "
+                f'statutory {statutory_pct} for "{income_type}" under {wht_type}'
+            )
+        return f"税率 {entered_pct}（法定 {statutory_pct}）：{note}"
 
     @staticmethod
     def _calculated_wht_amount(
