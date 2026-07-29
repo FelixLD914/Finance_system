@@ -29,8 +29,12 @@ from app.modules.tax_invoice.schemas import (
     BotApiStatus,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
+    ExchangeRateMonth,
+    ExchangeRateUpdate,
+    ExchangeRateUpsert,
     TaxInvoiceImportResponse,
     TaxInvoiceUpdate,
+    month_bounds,
 )
 from app.modules.wht.service import WhtServiceError
 
@@ -284,6 +288,10 @@ class TaxInvoiceService:
                                 submission_date - timedelta(days=9),
                                 submission_date,
                             ),
+                            # 停用或已删的汇率不参与计价。这是「停用」在汇率上
+                            # 唯一有业务后果的地方：查得到、但不再被税票取用。
+                            ExchangeRate.is_active.is_(True),
+                            ExchangeRate.deleted_at.is_(None),
                         )
                     )
                 ).all()
@@ -761,8 +769,23 @@ class TaxInvoiceService:
         currency: str,
         start_date: date | None,
         end_date: date | None,
+        month: str | None = None,
+        deleted: bool = False,
     ) -> list[ExchangeRate]:
-        filters = [ExchangeRate.currency == currency.upper()]
+        """某币种的每日汇率。month（YYYY-MM）是 start/end 的便捷写法。
+
+        月份边界故意放在服务端算：闰年和月末天数交给前端算，迟早会有人用
+        `new Date(y, m, 31)` 把 2 月溢出到 3 月，而汇率查错一天就是税票金额错。
+        """
+        filters: list[Any] = [
+            ExchangeRate.currency == currency.upper(),
+            ExchangeRate.deleted_at.is_not(None)
+            if deleted
+            else ExchangeRate.deleted_at.is_(None),
+        ]
+        if month:
+            first, last = month_bounds(month)
+            filters.extend([ExchangeRate.rate_date >= first, ExchangeRate.rate_date <= last])
         if start_date:
             filters.append(ExchangeRate.rate_date >= start_date)
         if end_date:
@@ -778,16 +801,163 @@ class TaxInvoiceService:
             ).all()
         )
 
+    async def list_exchange_rate_months(self, *, currency: str) -> list[ExchangeRateMonth]:
+        """按月汇总，供「先看月份、点进去再看每天」的两级界面用。
+
+        汇总在 SQL 里做而不是把整年日行拉回来在 Python 里 group：一个币种攒几年
+        就是上千行，而月份列表只需要每月一行。to_char 是 PG 专有，与本模块其它
+        地方（JSONB、ON CONFLICT）的取舍一致。
+        """
+        month_expr = func.to_char(ExchangeRate.rate_date, "YYYY-MM").label("month")
+        rows = (
+            await self.session.execute(
+                select(
+                    month_expr,
+                    func.count().label("day_count"),
+                    func.count()
+                    .filter(ExchangeRate.is_active.is_(False))
+                    .label("inactive_count"),
+                    func.min(ExchangeRate.buying_transfer).label("min_rate"),
+                    func.max(ExchangeRate.buying_transfer).label("max_rate"),
+                    func.max(ExchangeRate.rate_date).label("latest_date"),
+                    func.max(ExchangeRate.updated_at).label("updated_at"),
+                )
+                .where(
+                    ExchangeRate.currency == currency.upper(),
+                    ExchangeRate.deleted_at.is_(None),
+                )
+                .group_by(month_expr)
+                .order_by(month_expr.desc())
+            )
+        ).all()
+        return [
+            ExchangeRateMonth(
+                currency=currency.upper(),
+                month=row.month,
+                day_count=row.day_count,
+                inactive_count=row.inactive_count,
+                min_rate=row.min_rate,
+                max_rate=row.max_rate,
+                latest_date=row.latest_date,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
     async def list_rate_currencies(self) -> list[str]:
         return list(
             (
                 await self.session.scalars(
                     select(ExchangeRate.currency)
                     .distinct()
+                    .where(ExchangeRate.deleted_at.is_(None))
                     .order_by(ExchangeRate.currency)
                 )
             ).all()
         )
+
+    async def upsert_exchange_rate(self, payload: ExchangeRateUpsert) -> ExchangeRate:
+        """手工录入/覆盖某一天的汇率。
+
+        与 Excel/BOT 导入的区别只在 source='manual' 和「四个价位一律按传入值写」：
+        导入路径用 coalesce 保护另外三种价位不被单来源的表抹掉，而手工录入是人
+        当面填的完整一行，填空就是要清空。
+        """
+        existing = await self.session.scalar(
+            select(ExchangeRate)
+            .where(
+                ExchangeRate.currency == payload.currency,
+                ExchangeRate.rate_date == payload.rate_date,
+                ExchangeRate.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if existing is None:
+            existing = ExchangeRate(
+                currency=payload.currency,
+                rate_date=payload.rate_date,
+                source="manual",
+            )
+            self.session.add(existing)
+        existing.buying_transfer = payload.buying_transfer
+        existing.buying_sight = payload.buying_sight
+        existing.selling = payload.selling
+        existing.mid_rate = payload.mid_rate
+        existing.source = "manual"
+        existing.source_file_name = None
+        existing.is_active = payload.is_active
+        existing.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(existing)
+        return existing
+
+    async def update_exchange_rate(
+        self,
+        rate_id: int,
+        payload: ExchangeRateUpdate,
+    ) -> ExchangeRate:
+        rate = await self._load_exchange_rate(rate_id, for_update=True)
+        for name, value in payload.model_dump(by_alias=False, exclude_unset=True).items():
+            setattr(rate, name, value)
+        rate.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(rate)
+        return rate
+
+    async def delete_exchange_rate(self, rate_id: int) -> ExchangeRate:
+        """移入回收站。不动 is_active，恢复时还原成删除前的样子。"""
+        rate = await self._load_exchange_rate(rate_id, for_update=True)
+        rate.deleted_at = datetime.now(UTC)
+        rate.deleted_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(rate)
+        return rate
+
+    async def restore_exchange_rate(self, rate_id: int) -> ExchangeRate:
+        """从回收站恢复。
+
+        (currency, rate_date) 在删除时就释放了，期间完全可能有人重新导入或手工
+        录了同一天的汇率，所以恢复前必须复查。撞车时报 409 —— 自动覆盖在用的
+        那条等于用一份被人主动删掉的数据悄悄改掉税票计价依据。
+        """
+        rate = await self._load_exchange_rate(rate_id, for_update=True, include_deleted=True)
+        if rate.deleted_at is None:
+            raise TaxInvoiceStateError("exchange rate is not in the recycle bin")
+        occupied = await self.session.scalar(
+            select(ExchangeRate.id).where(
+                ExchangeRate.currency == rate.currency,
+                ExchangeRate.rate_date == rate.rate_date,
+                ExchangeRate.deleted_at.is_(None),
+            )
+        )
+        if occupied is not None:
+            raise TaxInvoiceConflictError(
+                f"{rate.currency} {rate.rate_date.isoformat()} already has an active rate; "
+                f"delete that one before restoring this record"
+            )
+        rate.deleted_at = None
+        rate.deleted_by_name = None
+        rate.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(rate)
+        return rate
+
+    async def _load_exchange_rate(
+        self,
+        rate_id: int,
+        *,
+        for_update: bool = False,
+        include_deleted: bool = False,
+    ) -> ExchangeRate:
+        statement = select(ExchangeRate).where(ExchangeRate.id == rate_id)
+        if not include_deleted:
+            statement = statement.where(ExchangeRate.deleted_at.is_(None))
+        if for_update:
+            statement = statement.with_for_update()
+        rate = await self.session.scalar(statement)
+        if rate is None:
+            raise TaxInvoiceNotFoundError("exchange rate was not found")
+        return rate
 
     async def import_exchange_rates(
         self,
@@ -807,6 +977,7 @@ class TaxInvoiceService:
                 select(ExchangeRate.id).where(
                     ExchangeRate.currency == currency.upper(),
                     ExchangeRate.rate_date == rate_date,
+                    ExchangeRate.deleted_at.is_(None),
                 )
             )
             statement = insert(ExchangeRate).values(
@@ -820,8 +991,16 @@ class TaxInvoiceService:
                 source_file_name=source_file_name,
                 updated_by_name=self.actor_name,
             )
+            # 冲突目标必须按「索引元素 + 索引条件」指定，不能再按约束名。
+            # 20260729_0013 把 uq_core_exchange_rates_currency_date 换成了部分唯一
+            # 索引（只约束 deleted_at IS NULL 的行），而 PG 的 ON CONFLICT ON
+            # CONSTRAINT 只接受真正的约束，引用部分索引会直接报错。
+            #
+            # 语义上这也正是想要的：命中的只可能是「在用」的那一行，回收站里的
+            # 同币种同日期记录不参与 upsert，重导会正常插入一条新的生效行。
             statement = statement.on_conflict_do_update(
-                constraint="uq_core_exchange_rates_currency_date",
+                index_elements=[ExchangeRate.currency, ExchangeRate.rate_date],
+                index_where=ExchangeRate.deleted_at.is_(None),
                 set_={
                     "buying_transfer": statement.excluded.buying_transfer,
                     # coalesce 而不是直接覆盖：API 同步过四种汇率之后再导一次

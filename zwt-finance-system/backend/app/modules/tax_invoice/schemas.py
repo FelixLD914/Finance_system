@@ -1,4 +1,6 @@
+import re
 import uuid
+from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
@@ -141,7 +143,27 @@ class TaxInvoiceImportResponse(ApiSchema):
     needs_review_count: int
 
 
+MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
+def month_bounds(month: str) -> tuple[date, date]:
+    """把 YYYY-MM 展开成 [当月 1 号, 当月最后一天]。
+
+    用 calendar.monthrange 而不是「下月 1 号减一天」的手写算术：后者在 12 月
+    要额外处理跨年，是这类工具函数最常见的错法。
+    """
+    if not re.fullmatch(MONTH_PATTERN, month):
+        raise ValueError("month must look like YYYY-MM")
+    year, month_number = (int(part) for part in month.split("-"))
+    return (
+        date(year, month_number, 1),
+        date(year, month_number, monthrange(year, month_number)[1]),
+    )
+
+
 class ExchangeRateResponse(ApiSchema):
+    # id 是行内编辑/停用/删除的定位依据。此前这个响应不带 id，因为汇率只读。
+    id: int
     currency: str
     rate_date: date
     # 出口税票取 buying_transfer；其余三种留档备查，Excel 导入的行会是 null。
@@ -151,8 +173,53 @@ class ExchangeRateResponse(ApiSchema):
     mid_rate: Decimal | None = None
     source: str
     source_file_name: str | None
+    is_active: bool
     updated_by_name: str
     updated_at: datetime
+    deleted_at: datetime | None = None
+    deleted_by_name: str | None = None
+
+
+class ExchangeRateMonth(ApiSchema):
+    """月份列表的一行。点进去才拉当月的每日明细。"""
+
+    currency: str
+    month: str
+    day_count: int
+    # 当月有多少天被停用。列表上直接标出来，免得点进去才发现这个月是残缺的。
+    inactive_count: int
+    min_rate: Decimal
+    max_rate: Decimal
+    latest_date: date
+    updated_at: datetime
+
+
+class ExchangeRateUpsert(ApiSchema):
+    """手工录入某一天的汇率。同币种同日期已有在用记录时覆盖它。"""
+
+    currency: str = Field(min_length=3, max_length=3)
+    rate_date: date
+    buying_transfer: Decimal = Field(gt=0, max_digits=18, decimal_places=6)
+    buying_sight: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    selling: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    mid_rate: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    is_active: bool = True
+
+    @model_validator(mode="after")
+    def normalize(self) -> "ExchangeRateUpsert":
+        self.currency = self.currency.upper()
+        return self
+
+
+class ExchangeRateUpdate(ApiSchema):
+    """行内编辑。币种和日期不可改——它们是这条记录的业务身份，
+    要改就是另一条记录，走 upsert 新建再把这条删掉。"""
+
+    buying_transfer: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    buying_sight: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    selling: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    mid_rate: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=6)
+    is_active: bool | None = None
 
 
 class ExchangeRateImportResponse(ApiSchema):

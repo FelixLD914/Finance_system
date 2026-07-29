@@ -43,6 +43,8 @@
 /.tmp/
 /.playwright-mcp/
 **/.playwright-cli/
+**/.playwright-daemon/
+**/.playwright-localappdata/
 # Playwright 等工具写出的截图与临时产物。Build-ZwtRelease.ps1 的 robocopy
 # 也用 /XD output 把它排除在发布包外，两处口径一致。
 **/output/

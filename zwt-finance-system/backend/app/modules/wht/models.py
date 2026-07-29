@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.soft_delete import SoftDeleteMixin
 
 
 class IssueCounter(Base):
@@ -120,10 +121,18 @@ class WhtTask(Base):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class PayeeProfile(Base):
+class PayeeProfile(Base, SoftDeleteMixin):
     __tablename__ = "payees"
     __table_args__ = (
-        UniqueConstraint("tax_id", name="uq_wht_payees_tax_id"),
+        # 部分唯一索引而非表级约束：税号只在「未删除」的行之间唯一，
+        # 删除后立刻释放（2026-07-29 业务确认，见 app.core.soft_delete）。
+        # PG 专有能力；本表本来就用了 JSONB，迁移到别的库本就要重写。
+        Index(
+            "uq_wht_payees_tax_id_live",
+            "tax_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint("wht_type IN ('PND3', 'PND53')", name="wht_type_allowed"),
         Index("ix_wht_payees_name_th", "name_th"),
         {"schema": "wht"},

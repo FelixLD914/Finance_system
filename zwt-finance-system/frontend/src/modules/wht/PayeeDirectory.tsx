@@ -1,5 +1,12 @@
-import { useMemo, useState } from "react";
-import { EditOutlined, PlusOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  UndoOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import {
   Alert,
   App as AntApp,
@@ -18,6 +25,7 @@ import type { UploadProps } from "antd";
 
 import type { Translate } from "../../i18n";
 import { ThaiText } from "../../shared/ThaiText";
+import { getPayeeDeletePreview, listPayees } from "./api";
 import type { ImportResult, Payee, PayeeInput } from "./types";
 
 interface PayeeDirectoryProps {
@@ -28,6 +36,8 @@ interface PayeeDirectoryProps {
   error: string | null;
   onSave: (input: PayeeInput, payeeId?: string) => Promise<Payee>;
   onImport: (file: File) => Promise<ImportResult>;
+  onDelete: (payeeId: string) => Promise<Payee>;
+  onRestore: (payeeId: string) => Promise<Payee>;
 }
 
 interface PayeeFormValues {
@@ -48,22 +58,45 @@ export function PayeeDirectory({
   error,
   onSave,
   onImport,
+  onDelete,
+  onRestore,
 }: PayeeDirectoryProps) {
-  const { message } = AntApp.useApp();
+  const { message, modal } = AntApp.useApp();
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"active" | "deleted">("active");
+  const [deletedPayees, setDeletedPayees] = useState<Payee[]>([]);
+  const [recycleLoading, setRecycleLoading] = useState(false);
   const [editing, setEditing] = useState<Payee | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<PayeeFormValues>();
 
+  const loadDeletedPayees = useCallback(async () => {
+    setRecycleLoading(true);
+    try {
+      setDeletedPayees(await listPayees(true));
+    } catch (loadError) {
+      message.error(
+        loadError instanceof Error ? loadError.message : t("common.loadFailed"),
+      );
+    } finally {
+      setRecycleLoading(false);
+    }
+  }, [message, t]);
+
+  useEffect(() => {
+    if (view === "deleted") void loadDeletedPayees();
+  }, [loadDeletedPayees, view]);
+
   const filtered = useMemo(() => {
+    const source = view === "deleted" ? deletedPayees : payees;
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return payees;
-    return payees.filter((payee) =>
+    if (!normalized) return source;
+    return source.filter((payee) =>
       [payee.taxId, payee.nameTh, payee.nameEn, ...payee.aliases]
         .filter(Boolean)
         .some((value) => value?.toLocaleLowerCase().includes(normalized)),
     );
-  }, [payees, query]);
+  }, [deletedPayees, payees, query, view]);
 
   const openEditor = (payee?: Payee) => {
     setEditing(payee ?? null);
@@ -130,6 +163,77 @@ export function PayeeDirectory({
     }
   };
 
+  const confirmDelete = async (payee: Payee) => {
+    try {
+      const preview = await getPayeeDeletePreview(payee.id);
+      modal.confirm({
+        title: t("wht.deletePayeeTitle"),
+        content: (
+          <div className="delete-preview">
+            <strong>
+              <ThaiText>{preview.nameTh}</ThaiText>
+            </strong>
+            <span className="tax-id-value">{preview.taxId}</span>
+            <p>
+              {t("wht.deletePayeeImpact", {
+                count: preview.referencingTasks,
+              })}
+            </p>
+            <p>{t("wht.recycleNotPermanent")}</p>
+          </div>
+        ),
+        okText: t("common.moveToRecycleBin"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            const deleted = await onDelete(payee.id);
+            setDeletedPayees((current) => [deleted, ...current]);
+            message.success(t("wht.payeeDeleted"));
+          } catch (deleteError) {
+            message.error(
+              deleteError instanceof Error
+                ? deleteError.message
+                : t("common.unknownError"),
+            );
+            throw deleteError;
+          }
+        },
+      });
+    } catch (deleteError) {
+      message.error(
+        deleteError instanceof Error
+          ? deleteError.message
+          : t("common.unknownError"),
+      );
+    }
+  };
+
+  const confirmRestore = (payee: Payee) => {
+    modal.confirm({
+      title: t("wht.restorePayeeTitle"),
+      content: t("wht.restorePayeeHint", { taxId: payee.taxId }),
+      okText: t("common.restore"),
+      cancelText: t("common.cancel"),
+      onOk: async () => {
+        try {
+          await onRestore(payee.id);
+          setDeletedPayees((current) =>
+            current.filter((item) => item.id !== payee.id),
+          );
+          message.success(t("wht.payeeRestored"));
+        } catch (restoreError) {
+          message.error(
+            restoreError instanceof Error
+              ? restoreError.message
+              : t("common.unknownError"),
+          );
+          throw restoreError;
+        }
+      },
+    });
+  };
+
   const columns: ColumnsType<Payee> = [
     {
       title: t("wht.taxId"),
@@ -156,33 +260,81 @@ export function PayeeDirectory({
       render: (value: string) => <Tag className="directory-type-tag">{value}</Tag>,
     },
     {
-      title: t("wht.active"),
-      dataIndex: "isActive",
-      width: 90,
-      render: (active: boolean) => (
-        <Tag color={active ? "green" : "default"}>
-          {active ? t("wht.enabled") : t("wht.disabled")}
-        </Tag>
-      ),
+      title: view === "deleted" ? t("common.deletedAt") : t("wht.active"),
+      dataIndex: view === "deleted" ? "deletedAt" : "isActive",
+      width: view === "deleted" ? 190 : 90,
+      render: (value: boolean | string | null, payee) =>
+        view === "deleted" ? (
+          <div className="audit-cell">
+            <span>
+              {payee.deletedAt
+                ? new Date(payee.deletedAt).toLocaleString("zh-CN", {
+                    hour12: false,
+                  })
+                : "—"}
+            </span>
+            <small>{payee.deletedByName ?? "—"}</small>
+          </div>
+        ) : (
+          <Tag color={value ? "green" : "default"}>
+            {value ? t("wht.enabled") : t("wht.disabled")}
+          </Tag>
+        ),
     },
     {
       title: "",
-      key: "edit",
-      width: 58,
-      render: (_, payee) => (
-        <Button
-          aria-label={t("common.edit")}
-          icon={<EditOutlined />}
-          type="text"
-          onClick={() => openEditor(payee)}
-        />
-      ),
+      key: "actions",
+      width: view === "deleted" ? 110 : 100,
+      render: (_, payee) =>
+        view === "deleted" ? (
+          <Button
+            disabled={pending}
+            icon={<UndoOutlined />}
+            size="small"
+            onClick={() => confirmRestore(payee)}
+          >
+            {t("common.restore")}
+          </Button>
+        ) : (
+          <div className="compact-row-actions">
+            <Button
+              aria-label={t("common.edit")}
+              icon={<EditOutlined />}
+              type="text"
+              onClick={() => openEditor(payee)}
+            />
+            <Button
+              aria-label={t("common.moveToRecycleBin")}
+              danger
+              disabled={pending}
+              icon={<DeleteOutlined />}
+              type="text"
+              onClick={() => void confirmDelete(payee)}
+            />
+          </div>
+        ),
     },
   ];
 
   return (
     <section className="directory-surface">
       {error && <Alert showIcon type="error" title={t("common.loadFailed")} description={error} />}
+      <nav className="directory-view-switch" aria-label={t("common.dataView")}>
+        <button
+          className={view === "active" ? "is-active" : ""}
+          type="button"
+          onClick={() => setView("active")}
+        >
+          {t("common.activeRecords")}
+        </button>
+        <button
+          className={view === "deleted" ? "is-active" : ""}
+          type="button"
+          onClick={() => setView("deleted")}
+        >
+          {t("common.recycleBin")}
+        </button>
+      </nav>
       <div className="directory-toolbar">
         <Input
           allowClear
@@ -191,7 +343,7 @@ export function PayeeDirectory({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div className="directory-toolbar-actions">
+        {view === "active" && <div className="directory-toolbar-actions">
           <Upload
             accept=".xlsx"
             customRequest={customRequest}
@@ -206,15 +358,17 @@ export function PayeeDirectory({
           <Button icon={<PlusOutlined />} type="primary" onClick={() => openEditor()}>
             {t("wht.newPayee")}
           </Button>
-        </div>
+        </div>}
       </div>
       <div className="directory-summary">
-        {t("wht.payeeCount", { count: filtered.length })}
+        {view === "deleted"
+          ? t("wht.payeeRecycleCount", { count: filtered.length })
+          : t("wht.payeeCount", { count: filtered.length })}
       </div>
       <Table<Payee>
         columns={columns}
         dataSource={filtered}
-        loading={loading}
+        loading={view === "deleted" ? recycleLoading : loading}
         pagination={{ pageSize: 10, hideOnSinglePage: true }}
         rowKey="id"
         scroll={{ x: 900 }}

@@ -718,6 +718,43 @@ select {
   margin: 16px 16px 0;
 }
 
+.directory-view-switch {
+  display: flex;
+  gap: 20px;
+  min-height: 42px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.directory-view-switch button {
+  position: relative;
+  padding: 0 2px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.directory-view-switch button::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: transparent;
+  content: "";
+}
+
+.directory-view-switch button.is-active {
+  color: var(--ink);
+}
+
+.directory-view-switch button.is-active::after {
+  background: var(--camel);
+}
+
 .directory-toolbar {
   display: flex;
   align-items: center;
@@ -774,6 +811,35 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.compact-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.audit-cell {
+  display: grid;
+  gap: 2px;
+  color: #4f4740;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-cell small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.delete-preview {
+  display: grid;
+  gap: 5px;
+}
+
+.delete-preview p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .generated-documents {
@@ -1924,6 +1990,68 @@ select {
   font-size: 16px;
 }
 
+.rate-directory {
+  max-width: 1320px;
+  margin: 0 auto;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.rate-directory-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rate-directory-toolbar > .rate-currency-field {
+  width: 180px;
+}
+
+.rate-directory-toolbar > .directory-view-switch {
+  align-self: stretch;
+  flex: 1;
+  border-bottom: 0;
+}
+
+.rate-directory-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.rate-directory .ant-table-thead > tr > th {
+  font-size: 12px;
+}
+
+.rate-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.rate-form-grid .ant-input-number,
+.rate-form-grid .ant-select {
+  width: 100%;
+}
+
+.numeric-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover td {
+  background: var(--finance-selected) !important;
+}
+
 .date-field {
   display: grid;
   gap: 7px;
@@ -1945,6 +2073,33 @@ select {
   color: #554c44;
   font-size: 12px;
   font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .directory-toolbar,
+  .master-toolbar,
+  .rate-directory-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .directory-toolbar > .ant-input-affix-wrapper,
+  .rate-directory-toolbar > .rate-currency-field {
+    width: 100%;
+  }
+
+  .rate-directory-toolbar > .directory-view-switch {
+    min-height: 40px;
+    padding: 0;
+  }
+
+  .rate-directory-actions {
+    margin-left: 0;
+  }
+
+  .rate-form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .tax-edit-modal .ant-modal-body {

@@ -269,9 +269,20 @@ class WhtService:
         self,
         query: str | None,
         active_only: bool,
+        deleted: bool = False,
     ) -> tuple[list[PayeeProfile], int]:
-        filters = []
-        if active_only:
+        """deleted=False 出「在用」列表，deleted=True 出「回收站」。
+
+        两者互斥而不是叠加：回收站是一个独立视图，不是在用列表上的一个筛选项。
+        active_only 在回收站视图里没有意义（删除时保留了原来的启停状态，
+        回收站按停用与否再切一刀只会让人困惑），因此那边强制忽略它。
+        """
+        filters = [
+            PayeeProfile.deleted_at.is_not(None)
+            if deleted
+            else PayeeProfile.deleted_at.is_(None)
+        ]
+        if active_only and not deleted:
             filters.append(PayeeProfile.is_active.is_(True))
         if query:
             pattern = f"%{query.strip()}%"
@@ -292,8 +303,13 @@ class WhtService:
         return payees, len(payees)
 
     async def create_payee(self, payload: PayeeCreate) -> PayeeProfile:
+        # 只和「未删除」的行比税号。回收站里躺着同税号的记录不该挡住新建——
+        # 这正是「删除即释放税号」这条决定的直接体现（2026-07-29 业务确认）。
         existing = await self.session.scalar(
-            select(PayeeProfile).where(PayeeProfile.tax_id == payload.tax_id)
+            select(PayeeProfile).where(
+                PayeeProfile.tax_id == payload.tax_id,
+                PayeeProfile.deleted_at.is_(None),
+            )
         )
         if existing is not None:
             raise WhtConflictError("a payee with this taxId already exists")
@@ -320,6 +336,61 @@ class WhtService:
         await self.session.refresh(payee)
         return payee
 
+    async def get_payee(self, payee_id: uuid.UUID) -> PayeeProfile:
+        return await self._load_payee(payee_id)
+
+    async def delete_payee(self, payee_id: uuid.UUID) -> PayeeProfile:
+        """移入回收站。不动 is_active——恢复时要能还原成删除前的样子。"""
+        payee = await self._load_payee(payee_id, for_update=True)
+        payee.deleted_at = datetime.now(UTC)
+        payee.deleted_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(payee)
+        return payee
+
+    async def restore_payee(self, payee_id: uuid.UUID) -> PayeeProfile:
+        """从回收站恢复。
+
+        税号在删除时就被释放了，所以恢复前必须重新确认它还空着——期间完全可能
+        有人用同一个税号建了新记录。撞号时明确报 409 让人自己决定留哪一条，
+        绝不自动改税号：税号是有业务含义的真实标识，篡改它等于让数据失真。
+        """
+        payee = await self._load_payee(payee_id, for_update=True, include_deleted=True)
+        if payee.deleted_at is None:
+            raise WhtStateError("payee is not in the recycle bin")
+        occupied = await self.session.scalar(
+            select(PayeeProfile.id).where(
+                PayeeProfile.tax_id == payee.tax_id,
+                PayeeProfile.deleted_at.is_(None),
+            )
+        )
+        if occupied is not None:
+            raise WhtConflictError(
+                f"taxId {payee.tax_id} is already used by another payee; "
+                f"delete or change that one before restoring this record"
+            )
+        payee.deleted_at = None
+        payee.deleted_by_name = None
+        payee.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(payee)
+        return payee
+
+    async def count_payee_references(self, payee_id: uuid.UUID) -> int:
+        """该收款方被多少张 WHT 单据引用。
+
+        软删除不会破坏外键——历史单据的 payee_id 继续指向回收站里的那一行，而且
+        单据本身早已把名称/税号/地址反规范化存了一份，所以删除在技术上完全安全。
+        这个计数纯粹用于在前端删除确认框里提示影响面，不作为拦截条件。
+        """
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(WhtTask)
+                .where(WhtTask.payee_id == payee_id)
+            )
+        ) or 0
+
     async def import_payees(
         self,
         rows: list[dict[str, Any]],
@@ -327,8 +398,16 @@ class WhtService:
     ) -> ImportResult:
         result = ImportResult(source_file_name=source_file_name, created=0)
         for row in rows:
+            # 只匹配未删除的行。导入**不会**把回收站里的记录捞回来：那条记录是人
+            # 主动删的，一次 Excel 导入不该悄悄推翻这个决定。同税号会新建一条在用
+            # 记录，回收站里那条原样留着。
             payee = await self.session.scalar(
-                select(PayeeProfile).where(PayeeProfile.tax_id == row["tax_id"]).with_for_update()
+                select(PayeeProfile)
+                .where(
+                    PayeeProfile.tax_id == row["tax_id"],
+                    PayeeProfile.deleted_at.is_(None),
+                )
+                .with_for_update()
             )
             if payee is None:
                 payee = PayeeProfile(
@@ -370,7 +449,10 @@ class WhtService:
                 result.errors.append(f"{values['task_no']}: sequence must be positive")
                 continue
             payee_id = await self.session.scalar(
-                select(PayeeProfile.id).where(PayeeProfile.tax_id == values["tax_id"])
+                select(PayeeProfile.id).where(
+                    PayeeProfile.tax_id == values["tax_id"],
+                    PayeeProfile.deleted_at.is_(None),
+                )
             )
             task = WhtTask(
                 **values,
@@ -407,7 +489,10 @@ class WhtService:
             payee.tax_id: payee
             for payee in (
                 await self.session.scalars(
-                    select(PayeeProfile).where(PayeeProfile.tax_id.in_(tax_ids))
+                    select(PayeeProfile).where(
+                        PayeeProfile.tax_id.in_(tax_ids),
+                        PayeeProfile.deleted_at.is_(None),
+                    )
                 )
             ).all()
         }
@@ -537,8 +622,13 @@ class WhtService:
         payee_id: uuid.UUID,
         *,
         for_update: bool = False,
+        include_deleted: bool = False,
     ) -> PayeeProfile:
         statement = select(PayeeProfile).where(PayeeProfile.id == payee_id)
+        if not include_deleted:
+            # 默认看不到回收站里的行：建单、改单引用一个已删除的收款方应当是 404，
+            # 而不是悄悄带出一份已经被移出业务视野的资料。
+            statement = statement.where(PayeeProfile.deleted_at.is_(None))
         if for_update:
             statement = statement.with_for_update()
         payee = await self.session.scalar(statement)

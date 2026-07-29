@@ -39,9 +39,14 @@ class WhtDocumentService:
         self,
         include_inactive: bool,
         usage: str | None = None,
+        deleted: bool = False,
     ) -> list[SignatureAsset]:
-        statement = select(SignatureAsset)
-        if not include_inactive:
+        statement = select(SignatureAsset).where(
+            SignatureAsset.deleted_at.is_not(None)
+            if deleted
+            else SignatureAsset.deleted_at.is_(None)
+        )
+        if not include_inactive and not deleted:
             statement = statement.where(SignatureAsset.status == "active")
         signatures = list(
             (
@@ -80,6 +85,9 @@ class WhtDocumentService:
         except DocumentGenerationError as exc:
             raise WhtStateError(str(exc)) from exc
 
+        # 刻意**不**排除已删除行：name+version 是全表唯一约束，回收站里那张
+        # v3 仍占着号。跳过它算出的 version 会和它撞，直接 IntegrityError；
+        # 就算不撞，同名同版本指向两张不同的图也会让历史 PDF 溯源失效。
         version = (
             await self.session.scalar(
                 select(func.coalesce(func.max(SignatureAsset.version), 0)).where(
@@ -153,8 +161,48 @@ class WhtDocumentService:
         await self.session.refresh(signature)
         return signature
 
+    async def delete_signature(self, signature_id: uuid.UUID) -> SignatureAsset:
+        """移入回收站。磁盘上的图片文件**不删**。
+
+        已签发 PDF 上盖的就是这张图，storage_key 是它唯一的溯源线索；删文件会让
+        「这张票上的签名当初是哪一张」永久查不回来。回收站没有彻底删除，所以文件
+        也就不存在"最终该谁清理"的问题。
+
+        顺带清掉默认标记：一张在回收站里的签名不能继续当某个模块的默认，
+        否则该模块生成文件时会拿到 404。这与停用（status=inactive）的处理一致。
+        """
+        signature = await self._load_signature(signature_id, for_update=True)
+        signature.deleted_at = datetime.now(UTC)
+        signature.deleted_by_name = self.actor_name
+        signature.is_default = False
+        await self.session.commit()
+        await self.session.refresh(signature)
+        return signature
+
+    async def restore_signature(self, signature_id: uuid.UUID) -> SignatureAsset:
+        """从回收站恢复。
+
+        不做冲突检查——签名的两个唯一键（storage_key、name+version）在删除时都没有
+        被释放，期间不可能被别人占走，所以恢复永远能成功。这正是当初选择「签名不走
+        部分唯一索引」换来的好处。
+
+        恢复后不自动变回默认：默认标记在删除时清掉了，要不要重新当默认由人再点一次。
+        """
+        signature = await self._load_signature(
+            signature_id, for_update=True, include_deleted=True
+        )
+        if signature.deleted_at is None:
+            raise WhtStateError("signature is not in the recycle bin")
+        signature.deleted_at = None
+        signature.deleted_by_name = None
+        signature.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(signature)
+        return signature
+
     async def signature_content(self, signature_id: uuid.UUID) -> tuple[SignatureAsset, Path]:
-        signature = await self._load_signature(signature_id)
+        # 回收站里的签名仍可预览：管理员要能看清自己删的是哪一张再决定恢复。
+        signature = await self._load_signature(signature_id, include_deleted=True)
         path = signature_path(self.settings.attachment_root, signature.storage_key)
         if not path.is_file():
             raise WhtNotFoundError("signature image file was not found")
@@ -323,10 +371,15 @@ class WhtDocumentService:
         signature_id: uuid.UUID | None,
         *,
         for_update: bool = False,
+        include_deleted: bool = False,
     ) -> SignatureAsset:
         if signature_id is None:
             raise WhtStateError("signatureId is required")
         statement = select(SignatureAsset).where(SignatureAsset.id == signature_id)
+        if not include_deleted:
+            # 回收站里的签名不能被拿去盖章：generate_documents 也走这个加载器，
+            # 默认排除已删除行等于顺手堵死「用一张已删除签名生成正式 PDF」。
+            statement = statement.where(SignatureAsset.deleted_at.is_(None))
         if for_update:
             statement = statement.with_for_update()
         signature = await self.session.scalar(statement)
