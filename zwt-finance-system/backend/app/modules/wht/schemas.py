@@ -164,11 +164,24 @@ class PayeeResponse(ApiSchema):
     updated_by_name: str
     created_at: datetime
     updated_at: datetime
+    # 非空即代表这条在回收站里。前端据此决定行内出「删除」还是「恢复」。
+    deleted_at: datetime | None = None
+    deleted_by_name: str | None = None
 
 
 class PayeeListResponse(ApiSchema):
     items: list[PayeeResponse]
     total: int
+
+
+class PayeeDeletePreview(ApiSchema):
+    """删除前的影响面预览。referencing_tasks 只用于确认框提示，不拦截删除——
+    历史单据已反规范化存了收款方信息，外键也继续指向回收站里那行。"""
+
+    payee_id: uuid.UUID
+    tax_id: str
+    name_th: str
+    referencing_tasks: int
 
 
 class ImportResult(ApiSchema):
@@ -254,6 +267,8 @@ class SignatureAssetResponse(ApiSchema):
     updated_by_name: str
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = None
+    deleted_by_name: str | None = None
 
     @field_validator("usage", mode="before")
     @classmethod

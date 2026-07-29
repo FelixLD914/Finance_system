@@ -31,10 +31,8 @@ import {
   Input,
   InputNumber,
   Modal,
-  Progress,
   Select,
   Space,
-  Statistic,
   Table,
   Tag,
   Tooltip,
@@ -64,7 +62,6 @@ import {
   importExchangeRates,
   importMigration,
   importSample,
-  listExchangeRates,
   listRateCurrencies,
   listTaxInvoiceDocuments,
   listTaxInvoices,
@@ -73,12 +70,12 @@ import {
 } from "./api";
 import type {
   BotApiStatus,
-  ExchangeRate,
   TaxInvoice,
   TaxInvoiceDocument,
   TaxInvoiceItem,
   TaxInvoiceStatus,
 } from "./types";
+import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
 type WorkspaceView = "ledger" | "recognition" | "batch" | "rates";
 
@@ -145,11 +142,6 @@ const CURRENCY_CHOICES = [
   "VND",
   "INR",
 ];
-
-/** 非交易日或 Excel 导入的行拿不到这几种报价，显示为 — 而不是 0.0000。 */
-function rateCell(value: string | null): string {
-  return value ? Number(value).toFixed(4) : "—";
-}
 
 /** 业务阶段 → 内部状态，与 WHT 侧同一套语义。 */
 const taxInvoicePhaseStatuses: Record<
@@ -537,9 +529,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // 真正的拦截在后端，禁掉按钮拦不住直接调接口的人。
   const { can } = useAuth();
   const canMigrate = can("invoice:migrate");
+  const canWriteRates = can("invoice:write");
   const [view, setView] = useState<WorkspaceView>("ledger");
   const [invoices, setInvoices] = useState<TaxInvoice[]>([]);
-  const [rates, setRates] = useState<ExchangeRate[]>([]);
   // 汇率中心可以看任何币种；出口税票取哪个汇率是另一回事，业务规则仍是
   // USD 的 buying transfer，不受这里的浏览选择影响。
   const [currency, setCurrency] = useState("USD");
@@ -548,7 +540,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // 想查个汇率的人要盯着"同步/导入"两个写操作按钮，误点代价还不小。
   // 入库在前：台账里的数据都是先同步/导入才有的，查询是它的下游。
   const [rateTab, setRateTab] = useState<"ingest" | "query">("ingest");
-  const [rateRange, setRateRange] = useState({ startDate: "", endDate: "" });
   const [botStatus, setBotStatus] = useState<BotApiStatus | null>(null);
   const [selected, setSelected] = useState<TaxInvoice | null>(null);
   const [documents, setDocuments] = useState<TaxInvoiceDocument[]>([]);
@@ -590,23 +581,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   }, [message, t]);
 
-  const refreshRates = useCallback(
-    async (nextCurrency = currency) => {
-      try {
-        setRates(
-          await listExchangeRates(
-            nextCurrency,
-            rateRange.startDate || undefined,
-            rateRange.endDate || undefined,
-          ),
-        );
-      } catch (error) {
-        message.error(error instanceof Error ? error.message : t("tax.rateLoadFailed"));
-      }
-    },
-    [currency, message, rateRange.endDate, rateRange.startDate, t],
-  );
-
   useEffect(() => {
     void refreshInvoices();
     // 配置自检和币种列表失败都不该打断页面：拿不到就退化，不弹错。
@@ -617,10 +591,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       .then((items) => setCurrencies(items.length ? items : ["USD"]))
       .catch(() => setCurrencies(["USD"]));
   }, [refreshInvoices]);
-
-  useEffect(() => {
-    void refreshRates(currency);
-  }, [currency, refreshRates]);
 
   const openInvoice = useCallback(
     async (invoice: TaxInvoice) => {
@@ -1016,7 +986,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         t("tax.rateImported", { created: result.created, updated: result.updated }),
       );
       setRateFile(null);
-      await refreshRates();
+      if (!currencies.includes(currency)) {
+        setCurrencies((current) => [...current, currency].sort());
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.rateImportFailed"));
     } finally {
@@ -1043,7 +1015,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       if (!currencies.includes(currency)) {
         setCurrencies((current) => [...current, currency].sort());
       }
-      await refreshRates();
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.botFailed"));
     } finally {
@@ -1556,7 +1527,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <Button
                   block
-                  disabled={botUnconfigured}
+                  disabled={botUnconfigured || !canWriteRates}
                   icon={<ApiOutlined />}
                   size="large"
                   type="primary"
@@ -1578,6 +1549,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <Upload
                   accept=".xlsx,.xls"
+                  disabled={!canWriteRates}
                   beforeUpload={(file) => {
                     setRateFile(file);
                     return false;
@@ -1593,7 +1565,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   </Button>
                 </Upload>
                 <Button
-                  disabled={!rateFile}
+                  disabled={!rateFile || !canWriteRates}
                   loading={busy}
                   size="large"
                   onClick={() => void runRateImport()}
@@ -1605,154 +1577,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           )}
 
           {rateTab === "query" && (
-            <div className="rate-stat-grid">
-              <section>
-                <Statistic
-                  title={t("tax.rateRecords", { currency })}
-                  value={rates.length}
-                  suffix={t("tax.days")}
-                />
-                <Progress
-                  percent={Math.min(100, Math.round((rates.length / 366) * 100))}
-                  showInfo={false}
-                  strokeColor="#a87349"
-                />
-                <small>{t("tax.rateListLimit")}</small>
-              </section>
-              <section>
-                <Statistic
-                  precision={4}
-                  title={t("tax.latestBuyingTransfer")}
-                  value={Number(rates[0]?.buyingTransfer ?? 0)}
-                />
-                <small>
-                  {rates[0]?.rateDate ?? t("tax.notImported")} · {rates[0]?.source ?? "—"}
-                </small>
-              </section>
-              <section className="rate-query-card">
-                <label className="rate-currency-field">
-                  <span>{t("tax.currency")}</span>
-                  <Select
-                    options={CURRENCY_CHOICES.map((code) => ({
-                      value: code,
-                      label: currencies.includes(code)
-                        ? code
-                        : `${code} · ${t("tax.noData")}`,
-                    }))}
-                    showSearch
-                    value={currency}
-                    onChange={setCurrency}
-                  />
-                </label>
-                <label className="rate-currency-field">
-                  <span>{t("tax.startDate")}</span>
-                  <Input
-                    type="date"
-                    value={rateRange.startDate}
-                    onChange={(event) =>
-                      setRateRange((current) => ({
-                        ...current,
-                        startDate: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                <label className="rate-currency-field">
-                  <span>{t("tax.endDate")}</span>
-                  <Input
-                    type="date"
-                    value={rateRange.endDate}
-                    onChange={(event) =>
-                      setRateRange((current) => ({
-                        ...current,
-                        endDate: event.target.value,
-                      }))
-                    }
-                  />
-                </label>
-                {(rateRange.startDate || rateRange.endDate) && (
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => setRateRange({ startDate: "", endDate: "" })}
-                  >
-                    {t("tax.clearRange")}
-                  </Button>
-                )}
-              </section>
-            </div>
-          )}
-
-          {rateTab === "query" && (
-          <section className="rate-ledger-card">
-            <div className="section-title-row">
-              <div>
-                <span className="workspace-kicker">{t("tax.rateLedgerKicker")}</span>
-                <h2>{t("tax.rateLedger")}</h2>
-              </div>
-              <Button icon={<ReloadOutlined />} onClick={() => void refreshRates()}>
-                {t("common.refresh")}
-              </Button>
-            </div>
-            {rates.length ? (
-              <Table
-                columns={[
-                  { title: t("tax.colCurrency"), dataIndex: "currency", width: 90 },
-                  { title: t("tax.colRateDay"), dataIndex: "rateDate", width: 120 },
-                  {
-                    // 出口税票取的就是这一列，加粗与其余三种区分开。
-                    title: `Buying Transfer · ${t("tax.rateUsedForInvoice")}`,
-                    dataIndex: "buyingTransfer",
-                    width: 190,
-                    align: "right",
-                    render: (value: string) => <strong>{Number(value).toFixed(4)}</strong>,
-                  },
-                  {
-                    title: "Buying Sight",
-                    dataIndex: "buyingSight",
-                    width: 130,
-                    align: "right",
-                    render: rateCell,
-                  },
-                  {
-                    title: "Selling",
-                    dataIndex: "selling",
-                    width: 120,
-                    align: "right",
-                    render: rateCell,
-                  },
-                  {
-                    title: "Mid Rate",
-                    dataIndex: "midRate",
-                    width: 120,
-                    align: "right",
-                    render: rateCell,
-                  },
-                  {
-                    title: t("tax.colSource"),
-                    dataIndex: "source",
-                    width: 150,
-                    render: (value: string) => (
-                      <Tag>{value === "bot_api" ? "BOT API" : "BOT Excel"}</Tag>
-                    ),
-                  },
-                  { title: t("tax.colSourceFile"), dataIndex: "sourceFileName", ellipsis: true },
-                  {
-                    title: t("tax.colUpdatedAt"),
-                    dataIndex: "updatedAt",
-                    width: 190,
-                    render: (value: string) => dateTime(value, locale),
-                  },
-                ]}
-                dataSource={rates}
-                pagination={{ pageSize: 15, showSizeChanger: false }}
-                rowKey={(record) => `${record.currency}-${record.rateDate}`}
-                scroll={{ x: 1100 }}
-              />
-            ) : (
-              <Empty description={t("tax.noRates")} />
-            )}
-          </section>
+            <ExchangeRateDirectory
+              canWrite={canWriteRates}
+              currencies={currencies}
+              currency={currency}
+              locale={locale}
+              t={t}
+              onCurrencyChange={setCurrency}
+            />
           )}
         </main>
       )}

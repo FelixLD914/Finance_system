@@ -7,7 +7,10 @@ import {
 import type {
   BotApiStatus,
   ExchangeRate,
+  ExchangeRateInput,
   ExchangeRateImportResult,
+  ExchangeRateMonth,
+  ExchangeRateUpdate,
   TaxInvoice,
   TaxInvoiceDocument,
   TaxInvoiceImportResult,
@@ -137,13 +140,73 @@ export function importMigration(file: File): Promise<TaxInvoiceImportResult> {
 
 export function listExchangeRates(
   currency = "USD",
-  startDate?: string,
-  endDate?: string,
+  options: {
+    startDate?: string;
+    endDate?: string;
+    month?: string;
+    deleted?: boolean;
+  } = {},
 ): Promise<ExchangeRate[]> {
   const params = new URLSearchParams({ currency });
-  if (startDate) params.set("startDate", startDate);
-  if (endDate) params.set("endDate", endDate);
+  if (options.startDate) params.set("startDate", options.startDate);
+  if (options.endDate) params.set("endDate", options.endDate);
+  if (options.month) params.set("month", options.month);
+  if (options.deleted) params.set("deleted", "true");
   return request<ExchangeRate[]>(`/v1/tax-invoice/exchange-rates?${params}`);
+}
+
+export function listExchangeRateMonths(
+  currency = "USD",
+): Promise<ExchangeRateMonth[]> {
+  const params = new URLSearchParams({ currency });
+  return request<ExchangeRateMonth[]>(
+    `/v1/tax-invoice/exchange-rates/months?${params}`,
+  );
+}
+
+export function saveExchangeRate(
+  input: ExchangeRateInput,
+  rateId?: number,
+): Promise<ExchangeRate> {
+  const endpoint = rateId
+    ? `/v1/tax-invoice/exchange-rates/${rateId}`
+    : "/v1/tax-invoice/exchange-rates";
+  const payload: ExchangeRateInput | ExchangeRateUpdate = rateId
+    ? {
+        buyingTransfer: input.buyingTransfer,
+        buyingSight: input.buyingSight,
+        selling: input.selling,
+        midRate: input.midRate,
+        isActive: input.isActive,
+      }
+    : input;
+  return request<ExchangeRate>(endpoint, {
+    method: rateId ? "PATCH" : "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateExchangeRate(
+  rateId: number,
+  input: Partial<ExchangeRateUpdate>,
+): Promise<ExchangeRate> {
+  return request<ExchangeRate>(`/v1/tax-invoice/exchange-rates/${rateId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteExchangeRate(rateId: number): Promise<ExchangeRate> {
+  return request<ExchangeRate>(`/v1/tax-invoice/exchange-rates/${rateId}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreExchangeRate(rateId: number): Promise<ExchangeRate> {
+  return request<ExchangeRate>(
+    `/v1/tax-invoice/exchange-rates/${rateId}/restore`,
+    { method: "POST" },
+  );
 }
 
 /** 台账里已有数据的币种，用于币种下拉。 */

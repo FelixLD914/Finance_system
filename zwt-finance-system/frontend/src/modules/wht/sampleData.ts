@@ -139,4 +139,6 @@ export const samplePayees: Payee[] = sampleWhtTasks.map((task, index) => ({
   updatedByName: "系统管理员",
   createdAt: now,
   updatedAt: now,
+  deletedAt: null,
+  deletedByName: null,
 }));

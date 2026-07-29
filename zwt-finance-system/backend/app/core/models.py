@@ -13,11 +13,13 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.soft_delete import SoftDeleteMixin
 
 
 class User(Base):
@@ -77,8 +79,11 @@ class UserSession(Base):
     )
 
 
-class SignatureAsset(Base):
+class SignatureAsset(Base, SoftDeleteMixin):
     __tablename__ = "signature_assets"
+    # 两个唯一约束都保持「全表」语义，不改成部分索引：删除不释放 storage_key
+    # （磁盘文件还在）也不释放版本号（否则 name+v3 会指向两张不同的图，
+    # 历史 PDF 就对不上号）。理由详见 app.core.soft_delete 的模块注释。
     __table_args__ = (
         UniqueConstraint("storage_key", name="uq_core_signature_assets_storage_key"),
         UniqueConstraint("name", "version", name="uq_core_signature_assets_name_version"),
@@ -117,13 +122,23 @@ class SignatureAsset(Base):
     )
 
 
-class ExchangeRate(Base):
+class ExchangeRate(Base, SoftDeleteMixin):
     __tablename__ = "exchange_rates"
     __table_args__ = (
-        UniqueConstraint(
+        # 部分唯一索引。这里换掉表级约束不是为了对齐收款方的策略，是正确性要求：
+        # 导入走 ON CONFLICT，若沿用全表唯一约束，「删掉一条错汇率 → 重新从 BOT
+        # 导入」会命中那条已删除行并更新它，行仍然是删除状态，导入报成功但界面
+        # 上什么都没有。改成部分索引后，重导会正常插入一条新的生效行。
+        #
+        # 改动连带项：tax_invoice.service.import_exchange_rates 的 on_conflict_do_update
+        # 不能再按约束名指定冲突目标（部分索引不是约束，PG 不允许），必须改用
+        # index_elements + index_where。
+        Index(
+            "uq_core_exchange_rates_currency_date_live",
             "currency",
             "rate_date",
-            name="uq_core_exchange_rates_currency_date",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
         ),
         {"schema": "core"},
     )
@@ -131,6 +146,11 @@ class ExchangeRate(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     rate_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # 停用：汇率此前没有启停开关，只能靠删。停用保留数据但不再供税票选用，
+    # 语义与收款方、签名图库一致（停用=不可选，删除=移出列表）。
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     # 出口税票一律按 buying transfer 计价，所以它是必填；其余三种是 BOT 同一条
     # 记录里顺带给出的，留档备查，Excel 导入的行拿不到就是 NULL。
     buying_transfer: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)

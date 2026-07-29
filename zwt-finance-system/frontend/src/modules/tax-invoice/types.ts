@@ -89,6 +89,7 @@ export interface TaxInvoiceImportResult {
 }
 
 export interface ExchangeRate {
+  id: number;
   currency: string;
   rateDate: string;
   /** 出口税票计价用的汇率，必有值。 */
@@ -99,9 +100,38 @@ export interface ExchangeRate {
   midRate: string | null;
   source: string;
   sourceFileName: string | null;
+  isActive: boolean;
   updatedByName: string;
   updatedAt: string;
+  deletedAt: string | null;
+  deletedByName: string | null;
 }
+
+export interface ExchangeRateMonth {
+  currency: string;
+  month: string;
+  dayCount: number;
+  inactiveCount: number;
+  minRate: string;
+  maxRate: string;
+  latestDate: string;
+  updatedAt: string;
+}
+
+export interface ExchangeRateInput {
+  currency: string;
+  rateDate: string;
+  buyingTransfer: number;
+  buyingSight?: number | null;
+  selling?: number | null;
+  midRate?: number | null;
+  isActive: boolean;
+}
+
+export type ExchangeRateUpdate = Omit<
+  ExchangeRateInput,
+  "currency" | "rateDate"
+>;
 
 export interface ExchangeRateImportResult {
   sourceFileName: string;
