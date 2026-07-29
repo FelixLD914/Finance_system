@@ -23,6 +23,9 @@ const payee: Payee = {
   updatedByName: "系统管理员",
   createdAt: "2026-07-23T10:00:00+07:00",
   updatedAt: "2026-07-23T10:00:00+07:00",
+  // 回收站里的收款方开不出票（listPayees 默认就不返回），这里固定是未删除。
+  deletedAt: null,
+  deletedByName: null,
 };
 
 beforeAll(() => {
