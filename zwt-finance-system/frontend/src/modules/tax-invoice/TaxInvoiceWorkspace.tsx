@@ -8,6 +8,7 @@ import {
   CloudDownloadOutlined,
   DatabaseOutlined,
   DeleteOutlined,
+  DownOutlined,
   DownloadOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -28,6 +29,7 @@ import {
   Button,
   Descriptions,
   Divider,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -701,6 +703,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [period, setPeriod] = useState("all");
   // 台账按收入期间（月）分组：每月一段、带小计。默认开，可切回平铺分页表。
   const [groupByMonth, setGroupByMonth] = useState(true);
+  // 分组时哪些月份是展开的：默认全折叠，第一层只列月份，点月份行才展开这一月的票。
+  const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
   // 列头筛选（客户 / incoterms）：受控且在 filteredInvoices 里集中过滤，
   // 这样分组视图下一处勾选对全部月份生效（antd 各表自带筛选只作用于本表）。
   const [colFilters, setColFilters] = useState<{
@@ -1793,7 +1797,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       </nav>
 
       {view === "ledger" && (
-        <div className={`tax-ledger-layout${selected ? " has-inspector" : ""}`}>
+        <div className="tax-ledger-layout">
           <main className="tax-ledger-main">
             <FinanceLifecycleTabs
               activeKey={phase}
@@ -1886,38 +1890,58 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               </div>
             </div>
             {groupByMonth ? (
-              // 每月一段：段头写 期间 + 张数 + FOB THB 小计，段内一张不分页的表。
-              // 整个分组区自己纵向滚动（平铺表是表体内滚，两者的滚动容器不一样）。
+              // 第一层只列月份行（默认全折叠），点某月才展开这一月的票。段头写
+              // 期间 + 张数 + FOB THB 小计，chevron 指示展开态；展开的那月才渲染表。
               <div className="tax-ledger-groups">
-                {ledgerGroups.map((group) => (
-                  <section className="tax-ledger-group" key={group.key}>
-                    <header className="tax-ledger-group-head">
-                      <h3>{group.label}</h3>
-                      <span className="tax-ledger-group-count">
-                        {t("tax.groupCount", { count: group.rows.length })}
-                      </span>
-                      <span className="tax-ledger-group-total">
-                        FOB THB {money(group.fobThbTotal, locale)}
-                      </span>
-                    </header>
-                    <Table
-                      columns={columns}
-                      dataSource={group.rows}
-                      loading={loading}
-                      pagination={false}
-                      rowClassName={(record) =>
-                        record.id === selected?.id ? "selected-table-row" : ""
-                      }
-                      rowKey="id"
-                      scroll={{ x: 1450 }}
-                      size="middle"
-                      onChange={onLedgerFilterChange}
-                      onRow={(record) => ({
-                        onClick: () => void openInvoice(record.id),
-                      })}
-                    />
-                  </section>
-                ))}
+                {ledgerGroups.map((group) => {
+                  const open = expandedMonths.includes(group.key);
+                  return (
+                    <section
+                      className={`tax-ledger-group${open ? " is-open" : ""}`}
+                      key={group.key}
+                    >
+                      <button
+                        aria-expanded={open}
+                        className="tax-ledger-group-head"
+                        type="button"
+                        onClick={() =>
+                          setExpandedMonths((current) =>
+                            open
+                              ? current.filter((key) => key !== group.key)
+                              : [...current, group.key],
+                          )
+                        }
+                      >
+                        <DownOutlined className="tax-ledger-group-chevron" />
+                        <h3>{group.label}</h3>
+                        <span className="tax-ledger-group-count">
+                          {t("tax.groupCount", { count: group.rows.length })}
+                        </span>
+                        <span className="tax-ledger-group-total">
+                          FOB THB {money(group.fobThbTotal, locale)}
+                        </span>
+                      </button>
+                      {open && (
+                        <Table
+                          columns={columns}
+                          dataSource={group.rows}
+                          loading={loading}
+                          pagination={false}
+                          rowClassName={(record) =>
+                            record.id === selected?.id ? "selected-table-row" : ""
+                          }
+                          rowKey="id"
+                          scroll={{ x: 1450 }}
+                          size="middle"
+                          onChange={onLedgerFilterChange}
+                          onRow={(record) => ({
+                            onClick: () => void openInvoice(record.id),
+                          })}
+                        />
+                      )}
+                    </section>
+                  );
+                })}
                 {!ledgerGroups.length && (
                   <Empty description={t("tax.ledgerEmpty")} />
                 )}
@@ -1941,36 +1965,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               />
             )}
           </main>
-          {selected && (
-            <InvoiceInspector
-              busy={busy}
-              documents={documents}
-              invoice={selected}
-              locale={locale}
-              t={t}
-              onApprove={approveSelected}
-              onClose={() => setSelected(null)}
-              onDownload={(document) => void downloadTaxInvoiceDocument(document)}
-              onEdit={openEdit}
-              onGenerate={() => void generateSelected()}
-              onMatchRate={() => void matchRateSelected()}
-              onReject={rejectSelected}
-              onRestore={() => void restoreSelected()}
-              onCorrection={() => {
-                setWorkflowReason("");
-                setWorkflowAction("correction");
-              }}
-              onVoid={() => {
-                setWorkflowReason("");
-                setWorkflowAction("void");
-              }}
-            />
-          )}
         </div>
       )}
 
       {view === "review" && (
-        <div className={`tax-ledger-layout${selected ? " has-inspector" : ""}`}>
+        <div className="tax-ledger-layout">
           <main className="tax-ledger-main">
             {!selectedBatch ? (
               <>
@@ -2125,31 +2124,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               </>
             )}
           </main>
-          {selected && (
-            <InvoiceInspector
-              busy={busy}
-              documents={documents}
-              invoice={selected}
-              locale={locale}
-              t={t}
-              onApprove={approveSelected}
-              onClose={() => setSelected(null)}
-              onDownload={(document) => void downloadTaxInvoiceDocument(document)}
-              onEdit={openEdit}
-              onGenerate={() => void generateSelected()}
-              onMatchRate={() => void matchRateSelected()}
-              onReject={rejectSelected}
-              onRestore={() => void restoreSelected()}
-              onCorrection={() => {
-                setWorkflowReason("");
-                setWorkflowAction("correction");
-              }}
-              onVoid={() => {
-                setWorkflowReason("");
-                setWorkflowAction("void");
-              }}
-            />
-          )}
         </div>
       )}
 
@@ -2776,6 +2750,44 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           )}
         </main>
       )}
+
+      {/* 详情统一走右侧抽屉：台账和复核台点行都开它，宽度足够看清所有字段和明细，
+          不再挤在窄侧栏或叠在表格下面。抽屉自带遮罩/ESC，InvoiceInspector 保留自己的
+          头部（含关闭/编辑），所以 closable=false 免得两个关闭按钮。 */}
+      <Drawer
+        classNames={{ body: "tax-inspector-drawer-body" }}
+        closable={false}
+        open={!!selected}
+        title={null}
+        width={680}
+        onClose={() => setSelected(null)}
+      >
+        {selected && (
+          <InvoiceInspector
+            busy={busy}
+            documents={documents}
+            invoice={selected}
+            locale={locale}
+            t={t}
+            onApprove={approveSelected}
+            onClose={() => setSelected(null)}
+            onDownload={(document) => void downloadTaxInvoiceDocument(document)}
+            onEdit={openEdit}
+            onGenerate={() => void generateSelected()}
+            onMatchRate={() => void matchRateSelected()}
+            onReject={rejectSelected}
+            onRestore={() => void restoreSelected()}
+            onCorrection={() => {
+              setWorkflowReason("");
+              setWorkflowAction("correction");
+            }}
+            onVoid={() => {
+              setWorkflowReason("");
+              setWorkflowAction("void");
+            }}
+          />
+        )}
+      </Drawer>
 
       <Modal
         className="tax-conflict-modal"
