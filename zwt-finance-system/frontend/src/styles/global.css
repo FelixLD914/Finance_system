@@ -2037,6 +2037,53 @@ select {
   font-size: var(--tax-fs-micro);
 }
 
+/* 结果卡片里「未导入的配对 / 退回的文件」两小节：标题 + 逐条列出原因。 */
+.dual-result-block {
+  margin-top: 12px;
+}
+
+.dual-result-block h4 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dual-result-block ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dual-result-block li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: var(--tax-fs-micro);
+  line-height: 1.5;
+  border-top: 1px solid rgba(58, 50, 43, 0.08);
+}
+
+.dual-result-block li:first-child {
+  border-top: none;
+}
+
+.dual-result-block li strong {
+  flex: none;
+  color: #3a322b;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/* 待补关单：不是空白，标成灰字提示，跟真缺字段区分开。 */
+.tax-pending-customs {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .dual-pair-index {
   color: var(--muted);
   font-size: var(--tax-fs-micro);
