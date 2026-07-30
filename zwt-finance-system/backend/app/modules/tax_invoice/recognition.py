@@ -11,6 +11,11 @@ from zipfile import BadZipFile
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
+from app.modules.tax_invoice.customs_declaration import (
+    CustomsDeclarationError,
+    parse_export_declaration,
+)
+
 MONEY = Decimal("0.01")
 PRICE = Decimal("0.0001")
 MONTHS = {
@@ -338,176 +343,68 @@ def parse_invoice_workbook(content: bytes, file_name: str) -> dict[str, Any]:
     return result
 
 
-def _clean_pdf_text(text: str) -> str:
-    return re.sub(
-        r"[ \t]+",
-        " ",
-        re.sub(r"\(cid:\d+\)", "", (text or "").replace("\u00a0", " ")),
-    )
-
-
 def parse_customs_pdf(content: bytes) -> dict[str, Any]:
+    """出口报关单 → 识别结果 dict（口径见 customs_declaration 模块）。
+
+    这层只做两件事：把 `CustomsDeclarationError` 翻成 `TaxInvoiceRecognitionError`
+    （上传接口靠它给 4xx，不能让新异常一路冒成 500），以及把结构化结果摊平成
+    service/combine 一直在用的那套键名。真正的识别逻辑全在 customs_declaration 里，
+    那里能脱离 FastAPI 单测。
+    """
     try:
-        import pdfplumber
-    except ImportError as exc:
-        raise TaxInvoiceRecognitionError("customs PDF import requires pdfplumber") from exc
+        parsed = parse_export_declaration(content)
+    except CustomsDeclarationError as exc:
+        raise TaxInvoiceRecognitionError(str(exc)) from exc
 
-    page_texts: list[str] = []
-    try:
-        pdf_document = pdfplumber.open(BytesIO(content))
-    except Exception as exc:
-        # pdfplumber 底下是 pdfminer，坏文件抛的异常类型不稳定（PSException /
-        # PDFSyntaxError / struct.error 都见过），只能按"打不开就是文件不对"
-        # 处理。同样是 4xx 而不是 500。
-        raise TaxInvoiceRecognitionError(
-            "the file is not a readable PDF; check that the customs declaration "
-            "was downloaded completely"
-        ) from exc
-    with pdf_document as pdf:
-        for page in pdf.pages:
-            text = page.extract_text() or ""
-            if not text:
-                words = page.extract_words(
-                    x_tolerance=2,
-                    y_tolerance=2,
-                    keep_blank_chars=False,
-                )
-                text = "\n".join(word.get("text", "") for word in words)
-            page_texts.append(_clean_pdf_text(text))
-    text = "\n".join(page_texts).strip()
-    result: dict[str, Any] = {
-        "cdn": "",
-        "ci_no": "",
-        "ci_date": None,
-        "submission_date": None,
-        "submission_date_confidence": "",
-        "submission_date_source": "",
-        "submission_date_low_confidence": False,
-        "customs_fob_usd_total": None,
-    }
-    if not text:
-        return result
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    flat = re.sub(r"\s+", " ", text)
-
-    for pattern in (
-        r"\*([A]\d{10,})\*",
-        r"\b(A\d{3,4}(?:-\d+){1,3})\b",
-        r"\b(A\d{10,})\b",
-    ):
-        match = re.search(pattern, flat)
-        if match:
-            result["cdn"] = match.group(1)
-            break
-
-    match = re.search(
-        r"(ZWT-[A-Z0-9-]{6,})(?:\s*[:：\s]+(\d{1,2}[./-]\d{1,2}[./-]\d{4}))?",
-        flat,
-        re.IGNORECASE,
-    )
-    if match:
-        result["ci_no"] = match.group(1).upper()
-        result["ci_date"] = _parse_date(match.group(2))
-
-    dmy = re.compile(r"(\d{1,2}[./-]\d{1,2}[./-]\d{4})")
-    iso = re.compile(r"(\d{4}-\d{2}-\d{2})")
-    candidates: list[tuple[int, int, date, str]] = []
-
-    def add_candidate(score: int, order: int, raw: str, source: str) -> None:
-        parsed = _parse_date(raw)
-        if parsed:
-            candidates.append((score, order, parsed, source))
-
-    def is_submit_label(line: str) -> bool:
-        compact = re.sub(r"\s+", "", line)
-        return (
-            "วันที่ยื่น" in compact
-            or "วันทียื่น" in compact
-            or "ันที่ยื่น" in compact
-            or (
-                "ยื่น" in compact
-                and any(hint in compact for hint in ("วันที่", "วันที", "วนัทย"))
-            )
-        )
-
-    for index, line in enumerate(lines):
-        if not is_submit_label(line):
-            continue
-        upper = line.upper()
-        if any(noise in upper for noise in ("VGM", "PRINT DATE", "AUTHORIZER")):
-            continue
-        anchor = max(line.find("ยื่น"), 0)
-        matches = list(dmy.finditer(line))
-        after = [item for item in matches if item.start() >= anchor]
-        before = [item for item in matches if item.start() < anchor]
-        for item in after:
-            year = int(item.group(1)[-4:])
-            add_candidate(
-                130 if year >= 2400 else 120,
-                index,
-                item.group(1),
-                "submit_after_same_line",
-            )
-        if before and "..." not in line and "…" not in line:
-            add_candidate(80, index, before[-1].group(1), "submit_before_same_line")
-        for step in (1, 2):
-            if index + step < len(lines):
-                next_match = dmy.search(lines[index + step])
-                if next_match:
-                    year = int(next_match.group(1)[-4:])
-                    add_candidate(
-                        (115 - step) if year >= 2400 else (100 - step),
-                        index * 10 + step,
-                        next_match.group(1),
-                        f"submit_next_line_{step}",
-                    )
-
-    for index, line in enumerate(lines):
-        upper = line.upper()
-        if "STATUS = 02" not in upper and "DECLARATION ACCEPTED" not in upper:
-            continue
-        for item in dmy.finditer(line):
-            add_candidate(70, 9000 + index, item.group(1), "status_dmy")
-        iso_match = re.search(r"0?2\s*[:：]\s*(\d{4}-\d{2}-\d{2})", line)
-        if iso_match:
-            add_candidate(65, 10000 + index, iso_match.group(1), "status_iso")
-        elif (iso_match := iso.search(line)):
-            add_candidate(55, 11000 + index, iso_match.group(1), "status_iso_any")
-
-    flat_match = re.search(
-        r"วันที่\s*ยื่น[^0-9]{0,30}(\d{1,2}[./-]\d{1,2}[./-]\d{4})",
-        flat,
-    )
-    if flat_match:
-        add_candidate(118, 12000, flat_match.group(1), "flat_submit_after")
-
-    if candidates:
-        score, _, submission_date, source = sorted(
-            candidates,
-            key=lambda item: (-item[0], item[1]),
-        )[0]
-        confidence = "high" if score >= 110 else "medium" if score >= 95 else "low"
-        result.update(
+    submission = parsed.fields["submission_date"]
+    return {
+        # ── 原有键，调用方不用改 ────────────────────────────────────────────
+        "cdn": parsed.value("cdn") or "",
+        "ci_no": parsed.value("ci_no") or "",
+        "ci_date": parsed.value("ci_date"),
+        "submission_date": submission.value,
+        "submission_date_confidence": submission.confidence,
+        "submission_date_source": submission.source,
+        "submission_date_low_confidence": submission.review_required,
+        # 计价链路一直用这个键做 FOB 验算。优先用报关单自印合计（有独立来源、
+        # 能和行级互证），没有自印合计时退回行级加总。
+        "customs_fob_usd_total": (
+            parsed.value("customs_fob_usd_printed_total")
+            or parsed.value("customs_fob_usd_line_total")
+        ),
+        # ── 业务 2026-07-30 新增：海关汇率 / 货代 / 出口泰铢金额 ──────────────
+        "declaration_ref_no": parsed.value("declaration_ref_no") or "",
+        "customs_exchange_rate": parsed.value("customs_exchange_rate"),
+        # 业务口径：报关单印英文就写英文，只印泰文就写泰文。forwarder_name 是落库/
+        # 导出用的那一个值；th/en 两个原文字段留着做取值依据。
+        "forwarder_name": parsed.value("forwarder_name") or "",
+        "forwarder_name_th": parsed.value("forwarder_name_th") or "",
+        "forwarder_name_en": parsed.value("forwarder_name_en") or "",
+        "forwarder_tax_no": parsed.value("forwarder_tax_no") or "",
+        "customs_fob_thb_total": (
+            parsed.value("customs_fob_thb_printed_total")
+            or parsed.value("customs_fob_thb_line_total")
+        ),
+        "customs_fob_thb_line_total": parsed.value("customs_fob_thb_line_total"),
+        "customs_fob_thb_printed_total": parsed.value("customs_fob_thb_printed_total"),
+        "customs_fob_usd_line_total": parsed.value("customs_fob_usd_line_total"),
+        "customs_fob_usd_printed_total": parsed.value("customs_fob_usd_printed_total"),
+        "customs_items": [
             {
-                "submission_date": submission_date,
-                "submission_date_confidence": confidence,
-                "submission_date_source": source,
-                "submission_date_low_confidence": confidence == "low",
+                "line_number": item.line_number,
+                "fob_usd": item.fob_usd,
+                "fob_thb": item.fob_thb,
             }
-        )
-
-    usd_values = [
-        _decimal(match.group(1) or match.group(2), quantum=MONEY)
-        for match in re.finditer(
-            r"USD\s*([\d,]+\.\d{2})|([\d,]+\.\d{2})\s*USD",
-            flat,
-            re.IGNORECASE,
-        )
-    ]
-    reasonable = [amount for amount in usd_values if amount is not None and amount >= 100]
-    if reasonable:
-        result["customs_fob_usd_total"] = max(reasonable)
-    return result
+            for item in parsed.items
+        ],
+        # 识别阶段发现的不一致（行级 vs 自印合计、泰铢 vs 汇率×美元）。
+        # 只报不改：擅自挑一个"看起来对的"就等于把这道核对做没了。
+        "customs_warnings": list(parsed.warnings),
+        # 每个字段的原文与可信度，供复核页并排显示"系统读到的 vs 报关单原文"。
+        "customs_field_evidence": {
+            name: field.as_dict() for name, field in parsed.fields.items()
+        },
+    }
 
 
 def parse_bot_fx_workbook(content: bytes, file_name: str) -> dict[date, Decimal]:
@@ -751,6 +648,7 @@ def combine_invoice_and_customs(
         (invoice_total is not None and calculated_total != invoice_total)
         or (customs_total is not None and calculated_total != customs_total)
     )
+    line_warnings = _check_customs_lines(items, customs.get("customs_items") or [])
     return {
         "ci_no": invoice.get("ci_no"),
         "cdn": customs.get("cdn"),
@@ -780,4 +678,58 @@ def combine_invoice_and_customs(
         ),
         "submission_date_confidence": customs.get("submission_date_confidence", ""),
         "submission_date_source": customs.get("submission_date_source", ""),
+        # ── 报关单侧留痕（业务 2026-07-30 新增）─────────────────────────────
+        # 这些值不参与计价——计价口径仍是 BOT 汇率表，不能变。它们是核对用的：
+        # 海关按哪个汇率折的泰铢、谁报的关、报关单自己印的泰铢金额是多少。
+        # 全部要落到导出核对表里，所以必须一路带到 service 层。
+        "declaration_ref_no": customs.get("declaration_ref_no") or None,
+        "customs_exchange_rate": customs.get("customs_exchange_rate"),
+        "forwarder_name": customs.get("forwarder_name") or None,
+        "forwarder_name_th": customs.get("forwarder_name_th") or None,
+        "forwarder_name_en": customs.get("forwarder_name_en") or None,
+        "forwarder_tax_no": customs.get("forwarder_tax_no") or None,
+        "customs_fob_usd_total": customs.get("customs_fob_usd_total"),
+        "customs_fob_thb_line_total": customs.get("customs_fob_thb_line_total"),
+        "customs_fob_thb_printed_total": customs.get("customs_fob_thb_printed_total"),
+        # 非落库字段：service 摘掉它，只用来决定这张票要不要进 needs_review。
+        "customs_warnings": [
+            *(customs.get("customs_warnings") or []),
+            *line_warnings,
+        ],
     }
+
+
+def _check_customs_lines(
+    items: list[dict[str, Any]],
+    customs_items: list[Mapping[str, Any]],
+) -> list[str]:
+    """逐行核对：报关单第 N 行 ↔ 商业发票第 N 行。
+
+    业务口径（2026-07-30）：一份关单可能有两三行，**每行对应 commercial invoice
+    的一行**，顺序一致。所以行数不等、或者某一行的 FOB USD 对不上，都是要人看的：
+    合计对得上但分行错位（比如两行金额互换）在总额上完全看不出来。
+
+    只报差异不改值——识别阶段擅自"对齐"就等于把这道核对做没了。
+    关单读不到明细（老模板、文本层坏）时不报：那是"没得核对"，不是"核对不过"。
+    """
+    if not customs_items:
+        return []
+
+    warnings: list[str] = []
+    if len(customs_items) != len(items):
+        warnings.append(
+            f"报关单有 {len(customs_items)} 个申报行，发票有 {len(items)} 行商品，"
+            "行数不一致，请人工核对逐行对应关系"
+        )
+
+    for customs_item, item in zip(customs_items, items, strict=False):
+        declared = customs_item.get("fob_usd")
+        calculated = item.get("fob_revenue_usd")
+        if declared is None or calculated is None:
+            continue
+        if declared != calculated:
+            warnings.append(
+                f"第 {item.get('line_number')} 行 FOB USD 不一致："
+                f"系统算出 {calculated}，报关单该行为 {declared}"
+            )
+    return warnings

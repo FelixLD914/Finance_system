@@ -273,8 +273,8 @@ class TaxInvoiceService:
         currency: str,
         invoice_file_name: str,
         invoice_content: bytes,
-        customs_file_name: str,
-        customs_content: bytes,
+        customs_file_name: str | None,
+        customs_content: bytes | None,
     ) -> TaxInvoiceImportResponse:
         submission_date = customs_data.get("submission_date")
         rates: dict[date, Decimal] = {}
@@ -303,14 +303,16 @@ class TaxInvoiceService:
             rates,
             currency=currency,
         )
+        # 关单还没下来时只留发票这一份源文件。补到关单后走更正流程重新识别，
+        # 那时才会有第二份——这里不留占位空文件，附件列表要如实反映手上有什么。
+        source_files = [(invoice_file_name, invoice_content)]
+        if customs_file_name is not None and customs_content is not None:
+            source_files.append((customs_file_name, customs_content))
         return await self._create_import(
             rows=[recognized],
             import_mode="dual",
-            source_names=[invoice_file_name, customs_file_name],
-            source_files=[
-                (invoice_file_name, invoice_content),
-                (customs_file_name, customs_content),
-            ],
+            source_names=[name for name, _ in source_files],
+            source_files=source_files,
         )
 
     async def import_sample(
@@ -457,6 +459,9 @@ class TaxInvoiceService:
                 status = self._review_status(row, len(item_rows))
                 if status == "needs_review":
                     needs_review_count += 1
+                # 识别期的核对告警只用来定 needs_review，不是 TaxInvoice 的列。
+                # 不摘掉会直接把 TaxInvoice(**row) 炸成 TypeError。
+                row.pop("customs_warnings", None)
                 # _assert_importable 已经把带编号的行整批拦下了，这里只是把键摘掉
                 # 免得落进 TaxInvoice(**row)。导入永远产出未批准记录，编号统一由
                 # approve() 里的 assign_tax_invoice_number 发。
@@ -1158,6 +1163,9 @@ class TaxInvoiceService:
             row.get("submission_date_low_confidence"),
             item_count == 0,
             item_count > 18,
+            # 报关单识别阶段发现的不一致（行级 vs 自印合计、泰铢 vs 汇率×美元）。
+            # 数字可能个个看着都合理，只有互相一比才露馅，所以必须转人工。
+            bool(row.get("customs_warnings")),
         )
         return "needs_review" if not all(required) or any(warnings) else "ready"
 

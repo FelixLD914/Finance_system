@@ -88,6 +88,67 @@ export interface TaxInvoiceImportResult {
   needsReviewCount: number;
 }
 
+// ── 双文件识别：后端按 C/I No. 配好组再回给界面预览 ──────────────────────────
+
+/** Export Invoice Excel 认出来的身份与摘要。 */
+export interface DualIdentifiedInvoice {
+  fileName: string;
+  ciNo: string;
+  ciDate: string | null;
+  incoterms: string | null;
+  customerName: string | null;
+  itemCount: number;
+  fobAmountUsd: string | null;
+  quantityTotal: string | null;
+}
+
+/** 出口报关单认出来的身份 + 核对字段。 */
+export interface DualIdentifiedCustoms {
+  fileName: string;
+  ciNo: string;
+  cdn: string | null;
+  declarationRefNo: string | null;
+  submissionDate: string | null;
+  submissionDateConfidence: string | null;
+  submissionDateLowConfidence: boolean;
+  customsExchangeRate: string | null;
+  /** 报关单印英文就是英文，只印泰文就是泰文。界面显示用这个。 */
+  forwarderName: string | null;
+  forwarderNameTh: string | null;
+  forwarderNameEn: string | null;
+  forwarderTaxNo: string | null;
+  customsFobUsdTotal: string | null;
+  customsFobThbLineTotal: string | null;
+  customsFobThbPrintedTotal: string | null;
+  warnings: string[];
+}
+
+/** 一组配对结果。两边任一缺失也保留——界面要显示是哪一组没配上。 */
+export interface DualPairPreview {
+  key: string;
+  /** conflict = 同一 C/I No. 配到多份不同的报关单，撮合阶段就要人工处理。 */
+  status: "ready" | "invoice_only" | "customs_only" | "conflict";
+  invoice: DualIdentifiedInvoice | null;
+  customs: DualIdentifiedCustoms | null;
+  supersededCustomsFileNames: string[];
+  conflicts: string[];
+}
+
+export interface DualRejectedFile {
+  fileName: string;
+  kind: "invoice" | "customs" | "unsupported";
+  reason: string;
+}
+
+export interface DualIdentifyResult {
+  pairs: DualPairPreview[];
+  rejected: DualRejectedFile[];
+  readyCount: number;
+  invoiceOnlyCount: number;
+  customsOnlyCount: number;
+  conflictCount: number;
+}
+
 export interface ExchangeRate {
   id: number;
   currency: string;

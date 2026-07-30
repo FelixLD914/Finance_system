@@ -24,6 +24,9 @@ QUANTITY_FORMAT = "0"
 PRICE_FORMAT = "0.0000"
 MONEY_FORMAT = "0.00"
 DATE_FORMAT = "yyyy-mm-dd"
+# 海关汇率按报关单原样显示 6 位：单子上印的就是 31.062700，显示成 31.0627
+# 会让人以为系统改过数——核对列的第一原则是和原件逐字符对得上。
+RATE_FORMAT = "0.000000"
 
 # (表头, 宽度, 数字格式)。顺序即列顺序。
 # 前 14 列是税票级字段，其余是商品级字段——一张税票的多条商品写成多行，
@@ -54,6 +57,18 @@ COLUMNS: tuple[tuple[str, int, str | None], ...] = (
     ("FOB Unit Price USD", 16, PRICE_FORMAT),
     ("FOB Rev USD", 14, MONEY_FORMAT),
     ("FOB Rev THB", 14, MONEY_FORMAT),
+    # ── 报关单侧核对列（业务 2026-07-30 新增）──────────────────────────────
+    # 追加在末尾而不是插进中间：parse_sample_workbook 按表头名取列、忽略不认识的
+    # 列，所以往后加不影响回导；插在中间则会让所有存量导出文件的列序对不上。
+    # "海关汇率"是报关单自印的，不是计价用的 FX Rate——两列并排放，差异一眼可见。
+    ("Declaration Ref No", 18, None),
+    ("Forwarder", 32, None),
+    ("Forwarder TAX ID", 16, None),
+    ("Customs FX Rate", 14, RATE_FORMAT),
+    ("Customs FOB USD", 16, MONEY_FORMAT),
+    ("Customs FOB THB (line)", 20, MONEY_FORMAT),
+    ("Customs FOB THB (printed)", 22, MONEY_FORMAT),
+    ("Customs FOB THB Diff", 20, MONEY_FORMAT),
 )
 
 HEADER_FILL = PatternFill("solid", fgColor="EFE7DC")
@@ -77,7 +92,27 @@ def _invoice_cells(invoice: TaxInvoice) -> dict[str, Any]:
         "PO No": invoice.po_no,
         "INCOTERMS": invoice.incoterms,
         "Payment Term": invoice.payment_term,
+        "Declaration Ref No": invoice.declaration_ref_no,
+        # 报关单印英文就是英文、只印泰文就是泰文——写进去的一定是单子上那几个字。
+        "Forwarder": invoice.forwarder_name,
+        "Forwarder TAX ID": invoice.forwarder_tax_no,
+        "Customs FX Rate": invoice.customs_exchange_rate,
+        "Customs FOB USD": invoice.customs_fob_usd_total,
+        "Customs FOB THB (line)": invoice.customs_fob_thb_line_total,
+        "Customs FOB THB (printed)": invoice.customs_fob_thb_printed_total,
+        # 差额直接算出来给人看。让对账的人自己在 Excel 里减一遍，就总有人不减。
+        # 两边任一为空时留空，而不是写 0——空值和"核对通过"是两回事。
+        "Customs FOB THB Diff": _difference(
+            invoice.customs_fob_thb_line_total,
+            invoice.customs_fob_thb_printed_total,
+        ),
     }
+
+
+def _difference(left: Decimal | None, right: Decimal | None) -> Decimal | None:
+    if left is None or right is None:
+        return None
+    return left - right
 
 
 def _item_cells(item: TaxInvoiceItem) -> dict[str, Any]:

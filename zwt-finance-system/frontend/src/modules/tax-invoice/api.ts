@@ -6,6 +6,7 @@ import {
 } from "../../shared/http";
 import type {
   BotApiStatus,
+  DualIdentifyResult,
   ExchangeRate,
   ExchangeRateInput,
   ExchangeRateImportResult,
@@ -103,15 +104,37 @@ export function createTaxInvoiceCorrection(
   });
 }
 
+/**
+ * 认一批文件的身份并按 C/I No. 配对，不入库。
+ *
+ * 配对键在文件内容里，只有后端解析得动，所以"哪个 Excel 对哪份报关单"必须先来
+ * 后端问一趟，再把结果摆给用户确认。按文件名配对是原来的做法，实测 100% 配错：
+ * 同名的那份 PDF 全都是发票自己的打印件，不是报关单。
+ */
+export function identifyDualFiles(files: File[]): Promise<DualIdentifyResult> {
+  const form = new FormData();
+  for (const file of files) form.append("files", file);
+  return request<DualIdentifyResult>("/v1/tax-invoice/import/dual/identify", {
+    method: "POST",
+    body: form,
+  });
+}
+
+/**
+ * 一组文件导入成一张税票。
+ *
+ * `customsFile` 可以不传：关单还没下来时先按发票开票，这张票停在"待补关单"
+ * （CDN / 提交日期 / 汇率 / THB 全空），补到关单再回填。
+ */
 export function importDualFiles(
   invoiceFile: File,
-  customsFile: File,
+  customsFile: File | null,
   currency = "USD",
 ): Promise<TaxInvoiceImportResult> {
   const form = new FormData();
   form.append("currency", currency);
   form.append("invoiceFile", invoiceFile);
-  form.append("customsFile", customsFile);
+  if (customsFile) form.append("customsFile", customsFile);
   return request<TaxInvoiceImportResult>("/v1/tax-invoice/import/dual", {
     method: "POST",
     body: form,

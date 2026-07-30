@@ -124,10 +124,39 @@ class TaxInvoice(Base):
         default=False,
     )
     submission_date_confidence: Mapped[str | None] = mapped_column(
-        String(20),
+        # 24 而不是 20：可信度改用 BOI 那套分级后最长的是 needs_review_repaired（21）。
+        String(24),
         nullable=True,
     )
     submission_date_source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # ── 报关单侧留痕（业务 2026-07-30 新增，全部要出现在导出核对表里）──────────
+    # 这些值一律**不参与计价**：计价汇率仍取 BOT 表。它们的用途是让人能核对
+    # "海关按什么折的、谁报的关、报关单自己印的金额是多少"，事后对账不用再翻 PDF。
+    declaration_ref_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    customs_exchange_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 6),
+        nullable=True,
+    )
+    # 业务口径：报关单印英文就写英文，只印泰文就写泰文。这一列是落库/导出用的
+    # 那一个值；下面 th/en 两列留原文，人核对时要知道名字是从哪一栏抄来的。
+    forwarder_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    forwarder_name_th: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    forwarder_name_en: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    forwarder_tax_no: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    customs_fob_usd_total: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 2),
+        nullable=True,
+    )
+    # 行级加总与报关单自印合计分开存。存成一个"已核对过的数"就把这道核对做没了——
+    # 两个都留着，导出表里并排显示，对不上一眼就能看见。
+    customs_fob_thb_line_total: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 2),
+        nullable=True,
+    )
+    customs_fob_thb_printed_total: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 2),
+        nullable=True,
+    )
     source_invoice_file_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
     source_customs_file_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
