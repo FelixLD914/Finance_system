@@ -1895,19 +1895,146 @@ select {
 
 .dual-pair-row {
   display: grid;
-  align-items: center;
+  align-items: start;
   padding: 8px 10px;
   background: #fdfbf8;
   border: 1px solid var(--line);
   border-radius: 9px;
   gap: 0 10px;
-  grid-template-columns: 22px minmax(96px, 0.9fr) minmax(0, 2fr) auto;
+  grid-template-columns: 22px minmax(96px, 0.9fr) minmax(0, 1.6fr) minmax(0, 1.6fr);
 }
 
-/* 配齐的一组才会真的发出去，底色跟着变，扫一眼就知道哪几组会跑。 */
+/* 三种状态各自一个底色，扫一眼就知道哪几组会跑、哪几组要等。 */
 .dual-pair-row.is-ready {
   background: #f6efe5;
   border-color: #cdb99f;
+}
+
+/* 待补关单：能导，但导完是半张票，用提示色而不是警示色。 */
+.dual-pair-row.is-invoice-only {
+  background: #fbf7ef;
+  border-color: #ddd0b8;
+}
+
+/* 孤立关单：导不了，压灰。 */
+.dual-pair-row.is-conflict {
+  background: #fdf3f1;
+  border-color: #d8a79c;
+}
+
+.dual-pair-row.is-customs-only {
+  background: #f7f5f2;
+  border-color: var(--line);
+  opacity: 0.85;
+}
+
+/* 两份文件清单并排。窄屏下堆成上下两块，别把文件名挤成一个字一行。 */
+.dual-file-columns {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.dual-file-column {
+  min-width: 0;
+  padding: 8px 10px;
+  background: #fdfbf8;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.dual-file-column h4 {
+  display: flex;
+  align-items: center;
+  margin: 0 0 6px;
+  gap: 6px;
+  color: #3a322b;
+  font-size: var(--tax-fs-micro);
+  font-weight: 600;
+}
+
+.dual-file-column h4 .anticon {
+  color: #a0855f;
+}
+
+.dual-file-column h4 span {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dual-file-column ol {
+  display: flex;
+  max-height: 176px;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  gap: 2px;
+  list-style: none;
+}
+
+.dual-file-column li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+}
+
+.dual-file-column li > span {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dual-file-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+}
+
+/* 关单读出来的核对字段，摆在配对行右侧：点导入之前就该看见。 */
+.dual-pair-facts {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+}
+
+.dual-pair-facts > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dual-pair-facts b {
+  margin-left: 4px;
+  color: var(--finance-danger-text);
+  font-weight: 600;
+}
+
+.dual-pair-warning {
+  color: var(--finance-danger-text);
+  white-space: normal !important;
+}
+
+.dual-pair-name em {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.dual-reject-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--tax-fs-micro);
 }
 
 .dual-pair-index {

@@ -21,6 +21,15 @@ from app.core.config import get_settings
 from app.core.database import get_db_session
 from app.core.dependencies import PrincipalDependency, require_permission
 from app.modules.tax_invoice.document_service import TaxInvoiceDocumentService
+from app.modules.tax_invoice.dual_pairing import (
+    CUSTOMS_SUFFIXES,
+    INVOICE_SUFFIXES,
+    DualPair,
+    IdentifiedFile,
+    classify_file,
+    pair_identified_files,
+    pairing_key,
+)
 from app.modules.tax_invoice.ledger_export import build_ledger_workbook
 from app.modules.tax_invoice.recognition import (
     TaxInvoiceRecognitionError,
@@ -32,6 +41,11 @@ from app.modules.tax_invoice.recognition import (
 from app.modules.tax_invoice.schemas import (
     MONTH_PATTERN,
     BotApiStatus,
+    DualIdentifiedCustoms,
+    DualIdentifiedInvoice,
+    DualIdentifyResponse,
+    DualPairPreview,
+    DualRejectedFile,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
     ExchangeRateMonth,
@@ -276,6 +290,133 @@ async def create_correction(
 
 
 @router.post(
+    "/import/dual/identify",
+    response_model=DualIdentifyResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def identify_dual_files(
+    files: Annotated[list[UploadFile], File(description="Export invoices and customs PDFs")],
+) -> DualIdentifyResponse:
+    """认一批文件的身份并按 C/I No. 配对，**不入库**。
+
+    为什么要有这一步：配对键在文件内容里（C/I No.），而内容只有后端解析得动。
+    界面要在导入前把"哪个 Excel 对哪份报关单"摆给用户看，就必须先有这一趟。
+    按文件名配对是原来的做法，实测 100% 配错（见 dual_pairing 模块 docstring）。
+
+    这里只读不写：没有事务、不落盘、不产生编号。确认之后仍然逐组走 /import/dual，
+    每组各自一个事务——一份坏 PDF 不该把另外十八组一起废掉。
+    """
+    identified: list[IdentifiedFile] = []
+    rejected: list[DualRejectedFile] = []
+
+    for upload in files:
+        file_name = upload.filename or "upload"
+        kind = classify_file(file_name)
+        if kind is None:
+            rejected.append(
+                DualRejectedFile(
+                    file_name=file_name,
+                    kind="unsupported",
+                    reason="只认 .xlsx / .xls 的 Export Invoice 与 .pdf 的报关单",
+                )
+            )
+            continue
+        content, _ = await _read_upload(
+            upload,
+            INVOICE_SUFFIXES if kind == "invoice" else CUSTOMS_SUFFIXES,
+        )
+        try:
+            data = (
+                parse_invoice_workbook(content, file_name)
+                if kind == "invoice"
+                else parse_customs_pdf(content)
+            )
+        except TaxInvoiceRecognitionError as exc:
+            # 单份读不了不该让整批 4xx：其它文件还得配对。记下来一起回报。
+            identified.append(
+                IdentifiedFile(file_name=file_name, kind=kind, error=str(exc))
+            )
+            continue
+        identified.append(
+            IdentifiedFile(
+                file_name=file_name,
+                kind=kind,
+                key=pairing_key(data.get("ci_no")),
+                data=data,
+            )
+        )
+
+    pairs, unpairable = pair_identified_files(identified)
+    for item in unpairable:
+        rejected.append(
+            DualRejectedFile(
+                file_name=item.file_name,
+                kind=item.kind,
+                reason=item.error or "文件里没读到 C/I No.，无法配对",
+            )
+        )
+
+    previews = [_pair_preview(pair) for pair in pairs]
+    return DualIdentifyResponse(
+        pairs=previews,
+        rejected=rejected,
+        ready_count=sum(1 for pair in pairs if pair.status == "ready"),
+        invoice_only_count=sum(1 for pair in pairs if pair.status == "invoice_only"),
+        customs_only_count=sum(1 for pair in pairs if pair.status == "customs_only"),
+        conflict_count=sum(1 for pair in pairs if pair.status == "conflict"),
+    )
+
+
+def _pair_preview(pair: DualPair) -> DualPairPreview:
+    invoice = None
+    if pair.invoice:
+        data = pair.invoice.data
+        invoice = DualIdentifiedInvoice(
+            file_name=pair.invoice.file_name,
+            ci_no=data.get("ci_no") or "",
+            ci_date=data.get("ci_date"),
+            incoterms=data.get("incoterms") or None,
+            customer_name=data.get("customer_name") or None,
+            item_count=len(data.get("items") or []),
+            fob_amount_usd=data.get("fob_amount_usd"),
+            quantity_total=data.get("quantity_total"),
+        )
+    customs = None
+    if pair.customs:
+        data = pair.customs.data
+        customs = DualIdentifiedCustoms(
+            file_name=pair.customs.file_name,
+            ci_no=data.get("ci_no") or "",
+            cdn=data.get("cdn") or None,
+            declaration_ref_no=data.get("declaration_ref_no") or None,
+            submission_date=data.get("submission_date"),
+            submission_date_confidence=data.get("submission_date_confidence") or None,
+            submission_date_low_confidence=bool(
+                data.get("submission_date_low_confidence")
+            ),
+            customs_exchange_rate=data.get("customs_exchange_rate"),
+            forwarder_name=data.get("forwarder_name") or None,
+            forwarder_name_th=data.get("forwarder_name_th") or None,
+            forwarder_name_en=data.get("forwarder_name_en") or None,
+            forwarder_tax_no=data.get("forwarder_tax_no") or None,
+            customs_fob_usd_total=data.get("customs_fob_usd_total"),
+            customs_fob_thb_line_total=data.get("customs_fob_thb_line_total"),
+            customs_fob_thb_printed_total=data.get("customs_fob_thb_printed_total"),
+            warnings=list(data.get("customs_warnings") or []),
+        )
+    return DualPairPreview(
+        key=pair.key,
+        status=pair.status,
+        invoice=invoice,
+        customs=customs,
+        superseded_customs_file_names=[
+            item.file_name for item in pair.superseded_customs
+        ],
+        conflicts=list(pair.conflicts),
+    )
+
+
+@router.post(
     "/import/dual",
     response_model=TaxInvoiceImportResponse,
     dependencies=[Depends(require_permission("invoice:write"))],
@@ -288,21 +429,33 @@ async def import_invoice_and_customs(
         File(alias="invoiceFile", description="Export invoice .xlsx or .xls"),
     ] = ...,
     customs_file: Annotated[
-        UploadFile,
+        UploadFile | None,
         File(alias="customsFile", description="Thai customs declaration PDF"),
-    ] = ...,
+    ] = None,
 ) -> TaxInvoiceImportResponse:
+    """一组（Export Invoice + 报关单）→ 一张税票。
+
+    报关单可以缺。业务口径（2026-07-30 确认）：关单还没下来时先按发票开票，这张票
+    停在"待补关单"——CDN / 提交日期 / 汇率 / THB 全空，补到关单再回填。原桌面版
+    本来就是这个行为（`customs_data.get(ci_key, {})` 取不到就给空 dict 继续出行），
+    Web 版那条"两份不齐不许导"的限制是移植时多加的，业务上是个死结。
+    """
     invoice_content, invoice_file_name = await _read_upload(
         invoice_file,
         (".xlsx", ".xls"),
     )
-    customs_content, customs_file_name = await _read_upload(
-        customs_file,
-        (".pdf",),
-    )
+    customs_content: bytes | None = None
+    customs_file_name: str | None = None
+    if customs_file is not None and customs_file.filename:
+        customs_content, customs_file_name = await _read_upload(
+            customs_file,
+            (".pdf",),
+        )
     try:
         invoice_data = parse_invoice_workbook(invoice_content, invoice_file_name)
-        customs_data = parse_customs_pdf(customs_content)
+        customs_data = (
+            parse_customs_pdf(customs_content) if customs_content is not None else {}
+        )
     except TaxInvoiceRecognitionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await service.import_dual(

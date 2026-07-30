@@ -1,107 +1,98 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyDualFile, isReadyPair, mergeDualFiles } from "./dualPairing";
+import {
+  classifyDualFile,
+  findQueuedFile,
+  mergeDualFiles,
+  type QueuedFile,
+} from "./dualPairing";
 
-function file(name: string): File {
-  return new File(["x"], name);
+function file(name: string, size = 1024): File {
+  return new File([new Uint8Array(size)], name);
 }
 
-/** 真实文件名长这样：序号 + 日期 + 单号 + 金额，Excel 与 PDF 只差扩展名。 */
-function pairOf(index: number, day: string): [File, File] {
-  const base = `${index}.2026${day}-TAX INV(ZWT-IV2026${day}-01)-THB431,369.94`;
-  return [file(`${base}.xlsx`), file(`${base}.pdf`)];
-}
+const empty = { invoices: [] as QueuedFile[], customs: [] as QueuedFile[] };
 
 describe("classifyDualFile", () => {
   it("按扩展名归位，认不出的返回 null", () => {
     expect(classifyDualFile(file("a.xlsx"))).toBe("invoice");
     expect(classifyDualFile(file("a.XLS"))).toBe("invoice");
-    expect(classifyDualFile(file("a.PDF"))).toBe("customs");
-    expect(classifyDualFile(file("a.docx"))).toBeNull();
+    expect(classifyDualFile(file("QECL603151144.PDF"))).toBe("customs");
+    expect(classifyDualFile(file("说明.docx"))).toBeNull();
   });
 });
 
 describe("mergeDualFiles", () => {
-  it("同名的 Excel 与 PDF 配成一组", () => {
-    const [excel, pdf] = pairOf(1, "0210");
-
-    const { pairs, unsupported, duplicated } = mergeDualFiles([], [excel, pdf]);
-
-    expect(pairs).toHaveLength(1);
-    expect(pairs[0].invoiceFile).toBe(excel);
-    expect(pairs[0].customsFile).toBe(pdf);
-    expect(isReadyPair(pairs[0])).toBe(true);
-    expect(unsupported).toEqual([]);
-    expect(duplicated).toEqual([]);
+  it("Excel 与 PDF 分成两份清单，不按文件名撮合", () => {
+    // 真实归档里最常见的一组：发票 Excel、发票自己的 PDF 打印件、真报关单。
+    // 前两者同名——旧逻辑会把打印件当报关单配上去，新逻辑只按类型分清单，
+    // 谁跟谁一组交给后端按 C/I No. 判。
+    const { invoices, customs } = mergeDualFiles(empty, [
+      file("3.ZWT：20260123-NOKIA-IV&PL(ZWT-NSB26012304).xlsx"),
+      file("3.ZWT：20260123-NOKIA-IV&PL(ZWT-NSB26012304).pdf"),
+      file("QECL603151144.pdf"),
+    ]);
+    expect(invoices.map((item) => item.file.name)).toEqual([
+      "3.ZWT：20260123-NOKIA-IV&PL(ZWT-NSB26012304).xlsx",
+    ]);
+    expect(customs.map((item) => item.file.name)).toEqual([
+      "3.ZWT：20260123-NOKIA-IV&PL(ZWT-NSB26012304).pdf",
+      "QECL603151144.pdf",
+    ]);
   });
 
-  // 这是这次要修的那个 bug：一次选 19 对，旧逻辑只留下第一对。
-  it("一次多选保留全部组，不再只留第一组", () => {
-    const files = [1, 2, 3].flatMap((index) => pairOf(index, "0210"));
-
-    const { pairs, duplicated } = mergeDualFiles([], files);
-
-    expect(pairs).toHaveLength(3);
-    expect(pairs.every(isReadyPair)).toBe(true);
-    expect(duplicated).toEqual([]);
+  it("第二次选择并进队列，不清空第一次的", () => {
+    const first = mergeDualFiles(empty, [file("a.xlsx")]);
+    const second = mergeDualFiles(first, [file("QECL1.pdf")]);
+    expect(second.invoices).toHaveLength(1);
+    expect(second.customs).toHaveLength(1);
   });
 
-  it("按文件名里的序号排，不是按码位排", () => {
-    const files = [10, 2, 1].flatMap((index) => pairOf(index, "0210"));
-
-    const { pairs } = mergeDualFiles([], files);
-
-    expect(pairs.map((pair) => pair.label.split(".")[0])).toEqual(["1", "2", "10"]);
+  it("同名同大小算重复选择，忽略并回报", () => {
+    const first = mergeDualFiles(empty, [file("a.xlsx", 2048)]);
+    const second = mergeDualFiles(first, [file("a.xlsx", 2048)]);
+    expect(second.invoices).toHaveLength(1);
+    expect(second.duplicated).toEqual(["a.xlsx"]);
   });
 
-  it("先选 Excel 再补 PDF 会并进同一组，不会清空上一批", () => {
-    const [excel, pdf] = pairOf(1, "0210");
-
-    const first = mergeDualFiles([], [excel]);
-    const second = mergeDualFiles(first.pairs, [pdf]);
-
-    expect(first.pairs).toHaveLength(1);
-    expect(isReadyPair(first.pairs[0])).toBe(false);
-    expect(second.pairs).toHaveLength(1);
-    expect(second.pairs[0].invoiceFile).toBe(excel);
-    expect(second.pairs[0].customsFile).toBe(pdf);
+  it("同名但大小不同是改过的版本，两份都留着让人自己挑", () => {
+    const first = mergeDualFiles(empty, [file("a.xlsx", 2048)]);
+    const second = mergeDualFiles(first, [file("a.xlsx", 4096)]);
+    expect(second.invoices).toHaveLength(2);
+    expect(second.duplicated).toEqual([]);
   });
 
-  it("配不上对的一边保留在队列里，标记为未就绪", () => {
-    const [excel] = pairOf(1, "0210");
-    const orphanPdf = file("完全不同的名字.pdf");
-
-    const { pairs } = mergeDualFiles([], [excel, orphanPdf]);
-
-    expect(pairs).toHaveLength(2);
-    expect(pairs.filter(isReadyPair)).toHaveLength(0);
-  });
-
-  it("同一组里同类型撞车才算重复，不同组的两份 Excel 各自成组", () => {
-    const [excelA] = pairOf(1, "0210");
-    const [excelB] = pairOf(2, "0210");
-    const sameKeyOtherExt = file(`${excelA.name.replace(/\.xlsx$/, "")}.xls`);
-
-    const { pairs, duplicated } = mergeDualFiles([], [excelA, excelB, sameKeyOtherExt]);
-
-    expect(pairs).toHaveLength(2);
-    expect(duplicated).toEqual([sameKeyOtherExt.name]);
-  });
-
-  it("大小写不同的同名文件算同一组", () => {
-    const excel = file("Invoice-01.XLSX");
-    const pdf = file("invoice-01.pdf");
-
-    const { pairs } = mergeDualFiles([], [excel, pdf]);
-
-    expect(pairs).toHaveLength(1);
-    expect(isReadyPair(pairs[0])).toBe(true);
-  });
-
-  it("扩展名认不出的整份忽略并回报文件名", () => {
-    const { pairs, unsupported } = mergeDualFiles([], [file("说明.docx")]);
-
-    expect(pairs).toEqual([]);
+  it("认不出扩展名的整份忽略并回报", () => {
+    const { invoices, customs, unsupported } = mergeDualFiles(empty, [
+      file("说明.docx"),
+    ]);
+    expect(invoices).toHaveLength(0);
+    expect(customs).toHaveLength(0);
     expect(unsupported).toEqual(["说明.docx"]);
+  });
+
+  it("带序号前缀的文件名按自然序排，不是 1、10、2", () => {
+    const { customs } = mergeDualFiles(empty, [
+      file("10.decl.pdf"),
+      file("2.decl.pdf"),
+      file("1.decl.pdf"),
+    ]);
+    expect(customs.map((item) => item.file.name)).toEqual([
+      "1.decl.pdf",
+      "2.decl.pdf",
+      "10.decl.pdf",
+    ]);
+  });
+});
+
+describe("findQueuedFile", () => {
+  it("按后端回的文件名找回 File，找不到给 null", () => {
+    const { customs } = mergeDualFiles(empty, [file("QECL603151144.pdf")]);
+    expect(findQueuedFile(customs, "QECL603151144.pdf")?.name).toBe(
+      "QECL603151144.pdf",
+    );
+    expect(findQueuedFile(customs, "别的.pdf")).toBeNull();
+    // 关单没配到时后端回的是 null，不能当成"找第一个"。
+    expect(findQueuedFile(customs, null)).toBeNull();
   });
 });
