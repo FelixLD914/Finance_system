@@ -143,6 +143,74 @@ class TaxInvoiceImportResponse(ApiSchema):
     needs_review_count: int
 
 
+# ── 双文件识别：先"认身份并配对"，再逐组导入 ──────────────────────────────────
+# 配对必须看内容（C/I No.），而文件内容只有后端解析得动，所以配对结果由后端算好
+# 返回给界面预览。导入仍走 /import/dual 一组一次——每组各自一个事务这条不变。
+
+
+class DualIdentifiedInvoice(ApiSchema):
+    """Export Invoice Excel 认出来的身份与摘要，供界面在配对行上显示。"""
+
+    file_name: str
+    ci_no: str
+    ci_date: date | None
+    incoterms: str | None
+    customer_name: str | None
+    item_count: int
+    fob_amount_usd: Decimal | None
+    quantity_total: Decimal | None
+
+
+class DualIdentifiedCustoms(ApiSchema):
+    """出口报关单认出来的身份 + 核对字段（海关汇率 / 货代 / 出口泰铢金额）。"""
+
+    file_name: str
+    ci_no: str
+    cdn: str | None
+    declaration_ref_no: str | None
+    submission_date: date | None
+    submission_date_confidence: str | None
+    submission_date_low_confidence: bool
+    customs_exchange_rate: Decimal | None
+    #: 报关单印英文就是英文，只印泰文就是泰文（业务口径 2026-07-30）。
+    forwarder_name: str | None
+    forwarder_name_th: str | None
+    forwarder_name_en: str | None
+    forwarder_tax_no: str | None
+    customs_fob_usd_total: Decimal | None
+    customs_fob_thb_line_total: Decimal | None
+    customs_fob_thb_printed_total: Decimal | None
+    warnings: list[str] = []
+
+
+class DualPairPreview(ApiSchema):
+    key: str
+    #: conflict = 撮合阶段就发现要人工处理（同一 C/I No. 配到多份不同的报关单）。
+    status: Literal["ready", "invoice_only", "customs_only", "conflict"]
+    invoice: DualIdentifiedInvoice | None = None
+    customs: DualIdentifiedCustoms | None = None
+    #: 同一 C/I No. 命中多份报关单时未被选用的那几份的文件名。
+    superseded_customs_file_names: list[str] = []
+    conflicts: list[str] = []
+
+
+class DualRejectedFile(ApiSchema):
+    """读不了、或者读得了但没有 C/I No. 的文件。必须回报，不能静默丢掉。"""
+
+    file_name: str
+    kind: Literal["invoice", "customs", "unsupported"]
+    reason: str
+
+
+class DualIdentifyResponse(ApiSchema):
+    pairs: list[DualPairPreview]
+    rejected: list[DualRejectedFile]
+    ready_count: int
+    invoice_only_count: int
+    customs_only_count: int
+    conflict_count: int
+
+
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
