@@ -229,4 +229,27 @@ describe("WHT 开票操作页", { timeout: 15_000 }, () => {
     await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
     expect(onCreate.mock.calls[0][0].rateOverrideNote).toBeNull();
   });
+
+  it("收入类型只打字不点下拉项，也按目录判定偏离", async () => {
+    render(<Harness />);
+    await pickOption("payeeId");
+    await waitFor(() =>
+      expect(
+        (document.querySelector("#incomeType") as HTMLInputElement).disabled,
+      ).toBe(false),
+    );
+
+    // 粘贴泰文原文但不点下拉项：法定税率不会被回填，税率停在默认的 3%。
+    // 服务端按同一份目录照样查得到「运输费」的 1%，会以「必须填理由」422 挡下——
+    // 前端若只认 onSelect，这里既不提示偏离也不渲染理由框，人就被堵死在这一屏。
+    // 末尾留个空格，顺带钉住前端 trim 与服务端 strip 的口径一致。
+    const input = document.querySelector("#incomeType") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "ค่าขนส่ง " } });
+
+    await waitFor(() => {
+      const note = screen.getByText(/已手工改为 3%.*法定税率 1%/);
+      expect(note.className).toContain("is-warning");
+    });
+    expect(document.querySelector("#rateOverrideNote")).toBeTruthy();
+  });
 });
