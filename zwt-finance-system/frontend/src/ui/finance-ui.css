@@ -823,31 +823,6 @@
   font-weight: 600;
 }
 
-.login-divider.ant-divider {
-  margin: 24px 0 18px;
-  color: var(--finance-text-muted);
-  font-size: 12px;
-}
-
-/* antd 6 的 Divider 用真实的 .ant-divider-rail 元素画横线，不再是 ::before /
-   ::after —— 按 v5 的写法改伪元素是不生效的。 */
-.login-divider .ant-divider-rail {
-  border-block-start-color: var(--login-hairline);
-}
-
-.login-federated {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.login-federated .ant-btn {
-  height: 44px;
-  padding: 0 6px;
-  border-radius: var(--finance-radius-md);
-  font-size: 13px;
-}
-
 .login-footer {
   display: flex;
   flex-wrap: wrap;
