@@ -527,8 +527,61 @@
   grid-template-columns: minmax(700px, 1fr) 430px;
 }
 
+/* 台账 / 复核台的正文是一条 flex 列：页签、筛选栏、汇总条按自身内容排高，
+   表格吃掉剩下的全部高度。不要再用 calc(100vh - N) 去猜表高——每加一条
+   工具栏那个常数就作废，猜大了表体会被 .tax-ledger-main 的 overflow:hidden
+   直接截掉，用户滚到底也够不着后面的行。 */
 .tax-ledger-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 14px 20px 20px;
+}
+
+/* 表格以外的直接子元素（生命周期页签、筛选栏、汇总条、复核台头部与操作条）
+   都按内容高度固定，flex 默认的 shrink 会把它们压扁。 */
+.tax-ledger-main > *:not(.ant-table-wrapper) {
+  flex: none;
+}
+
+/* antd 在 .ant-table-wrapper 和真正滚动的 .ant-table-body 之间还夹着四层
+   div，flex:1 得一层层传下去；断在任何一层，表体就退回自然高度、被上面的
+   overflow:hidden 截掉。这条链是照 antd 6 实测的 DOM 写的：
+     .ant-table-wrapper > .ant-spin > .ant-spin-container
+       > .ant-table > .ant-table-container > .ant-table-body
+   注意 antd 6 已经没有 .ant-spin-nested-loading 了（那是 antd 5 的类名），
+   升级 antd 前先把这条链重新验一遍，断了不会报错、只会悄悄变回老样子。 */
+.tax-ledger-main > .ant-table-wrapper,
+.tax-ledger-main > .ant-table-wrapper .ant-spin,
+.tax-ledger-main > .ant-table-wrapper .ant-spin-container,
+.tax-ledger-main > .ant-table-wrapper .ant-table,
+.tax-ledger-main > .ant-table-wrapper .ant-table-container {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 表头和分页条不参与拉伸，中间的表体独占剩余空间。scroll.y 会给表体写
+   inline 的 max-height，这里用 !important 顶掉：真高度由上面的 flex 链算，
+   组件里那个 calc 只是这段 CSS 没加载时的兜底值。 */
+.tax-ledger-main > .ant-table-wrapper .ant-table-header,
+.tax-ledger-main > .ant-table-wrapper .ant-pagination {
+  flex: none;
+}
+
+.tax-ledger-main > .ant-table-wrapper .ant-table-body {
+  flex: 1;
+  max-height: none !important;
+}
+
+/* 钻进整页时上面没有筛选栏，表格四角都该是圆的。 */
+.tax-ledger-main.is-drill {
+  padding-top: 0;
+}
+
+.tax-ledger-main.is-drill > .ant-table-wrapper {
+  border-radius: var(--finance-radius-md);
 }
 
 /* 详情里「待匹配 + 匹配汇率」按钮同排，link 型按钮去掉内边距贴着文字。 */
@@ -541,6 +594,58 @@
 .tax-rate-unmatched .ant-btn-link {
   height: auto;
   padding-inline: 0;
+}
+
+/* 钻进某一月的整页视图：模块页头 + 子导航 + 生命周期页签 + 筛选栏（合计
+   300px 上下）全部让位给这一条 56px 的返回条，省下来的高度直接进表体。
+   这是整页视图的全部页头开销，别再往这里加第二行。 */
+.tax-drill-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 10px 20px;
+  background: var(--finance-surface);
+  border-bottom: 1px solid var(--finance-border);
+}
+
+.tax-drill-back {
+  flex: none;
+  padding-inline: 8px;
+  color: var(--finance-text-muted);
+}
+
+/* 月份和汇总同排：整页视图里它是标题，但只有一行的分量，不要再撑成 h1 那么大。 */
+.tax-drill-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tax-drill-title h1 {
+  margin: 0;
+  color: #1f1c19;
+  font-family: var(--font-ui);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.tax-drill-title span {
+  overflow: hidden;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tax-drill-search {
+  max-width: 260px;
+  flex: none;
 }
 
 /* 复核台：批次列表 / 详情的头部与操作条。 */
@@ -588,10 +693,11 @@
   flex: 1;
 }
 
-/* 末尾两列是「刷新」和「导出台账」。这条规则覆盖 global.css 里的同名选择器
-   （main.tsx 里 finance-ui.css 排最后），列数要跟着筛选栏的按钮数一起改。 */
+/* 这条规则覆盖 global.css 里的同名选择器（main.tsx 里 finance-ui.css 排最后）。
+   列数必须等于筛选栏里的控件数：期数 / 状态 / 搜索 / 按月分组 / 刷新 / 导出＝6。
+   少一列最后那个按钮会掉到第二行，白白多占 40px 首屏高度。 */
 .tax-filter-bar {
-  grid-template-columns: 136px 144px minmax(220px, 1fr) auto auto;
+  grid-template-columns: 136px 144px minmax(220px, 1fr) auto auto auto;
   gap: 8px;
   padding: 10px;
   background: var(--finance-surface);
@@ -599,21 +705,36 @@
   border-radius: var(--finance-radius-md) var(--finance-radius-md) 0 0;
 }
 
+/* 三个计数压成一条细横杠。原来是 58px 高的三宫格大数字，可它讲的就是上面
+   生命周期页签角标里的同一批数，不该再占一屏顶部的一大块。 */
 .tax-ledger-summary {
-  min-height: 44px;
-  padding: 0 10px;
+  align-items: center;
+  min-height: 0;
+  padding: 0 12px;
   border-color: var(--finance-border);
 }
 
 .tax-ledger-summary > div {
-  min-width: 130px;
-  padding: 10px 18px 9px 0;
+  min-width: 0;
+  padding: 7px 0;
+}
+
+.tax-ledger-summary > div + div {
+  margin-left: 14px;
+  padding-left: 14px;
 }
 
 .tax-ledger-summary strong {
   font-family: var(--font-ui);
-  font-size: 18px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+.tax-ledger-summary-link {
+  height: auto;
+  margin-left: 2px;
+  padding: 0;
+  font-size: 11px;
 }
 
 .tax-ledger-main > .ant-table-wrapper {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ApiOutlined,
+  ArrowLeftOutlined,
   AuditOutlined,
   CalendarOutlined,
   CheckCircleOutlined,
@@ -922,6 +923,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     });
   }, [filteredInvoices, t]);
 
+  // 当前筛选下还需人工复核的张数。>0 时汇总条给出去批次复核的入口。
+  const needsReviewCount = filteredInvoices.filter(
+    (item) => item.status === "needs_review",
+  ).length;
+
   type MonthGroup = (typeof ledgerGroups)[number];
   // 钻进的那一月（找不到＝筛选把它筛没了，退回月份列表）。
   const monthDetail: MonthGroup | null = selectedMonth
@@ -1626,7 +1632,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
     setBusy(true);
     try {
-      await exportTaxInvoiceLedger({ status, period, query });
+      // 钻进某一月时导的必须只是那一月。后端按 revenue_period 相等过滤，
+      // 所以直接把钻进的期数当 period 传；不传的话导出会悄悄变成全部期数，
+      // 用户在「2026-02」这个页面上点导出却拿到全年，对不上账才会发现。
+      await exportTaxInvoiceLedger({
+        status,
+        period: selectedMonth && selectedMonth !== "none" ? selectedMonth : period,
+        query,
+      });
       message.success(t("tax.exportDone"));
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.exportFailed"));
@@ -1778,70 +1791,167 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
 
   const botUnconfigured = botStatus !== null && !botStatus.configured;
 
+  // 钻进某一月＝一个独立的整页视图，不是台账页里的一段。模块页头、子导航、
+  // 生命周期页签、筛选栏全部让位，只留一条返回条，剩下的高度整块归表格。
+  // 之前把它塞在台账页内，页头能堆到 400px 以上，表体被 .tax-ledger-main 的
+  // overflow:hidden 截掉一半，怎么滚都只看得见一小片。
+  const monthPage = view === "ledger" ? monthDetail : null;
+
   return (
-    <section className="tax-workspace" aria-label={t("nav.taxInvoice")}>
-      <header className="workspace-header">
-        <div>
-          {/* 页头格式与 WHT / 工资预支一致：英文模块码 + <small> 里的功能名。 */}
-          <h1>
-            <span>TAX INV</span>
-            <small>{t("tax.title")}</small>
-          </h1>
-          <p>{t("tax.subtitle")}</p>
+    <section
+      className={monthPage ? "tax-workspace is-drilldown" : "tax-workspace"}
+      aria-label={t("nav.taxInvoice")}
+    >
+      {monthPage ? (
+        // 整页视图的唯一头部：返回 + 月份 + 该月汇总 + 就地搜索/刷新/导出。
+        // 搜索仍写回同一个 query，所以筛完当月列表也跟着变。
+        <header className="tax-drill-bar">
+          <Button
+            className="tax-drill-back"
+            icon={<ArrowLeftOutlined />}
+            type="text"
+            onClick={() => {
+              setSelectedMonth(null);
+              setSelected(null);
+            }}
+          >
+            {t("tax.monthBackToList")}
+          </Button>
+          <div className="tax-drill-title">
+            <h1>{monthPage.label}</h1>
+            <span>
+              {t("tax.monthSummary", {
+                total: monthPage.rows.length,
+                review: monthPage.needsReview,
+              })}
+              {` · FOB THB ${money(monthPage.fobThbTotal, locale)}`}
+            </span>
+          </div>
+          <Input.Search
+            allowClear
+            className="tax-drill-search"
+            placeholder={t("tax.searchPlaceholder")}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loading}
+            onClick={() => void refreshInvoices()}
+          >
+            {t("common.refresh")}
+          </Button>
+          {/* 「无收入期间」那一组没有期数可传，后端过滤不出来，导出只会变成
+              全部期数。与其导错，不如在这一组里禁用并说明。 */}
+          <Tooltip
+            title={
+              monthPage.key === "none"
+                ? t("tax.exportNoPeriodTip")
+                : t("tax.exportLedgerTip")
+            }
+          >
+            <Button
+              disabled={monthPage.key === "none"}
+              icon={<DownloadOutlined />}
+              loading={busy}
+              onClick={() => void runLedgerExport()}
+            >
+              {t("tax.exportLedger")}
+            </Button>
+          </Tooltip>
+        </header>
+      ) : (
+        <>
+          <header className="workspace-header">
+            <div>
+              {/* 页头格式与 WHT / 工资预支一致：英文模块码 + <small> 里的功能名。 */}
+              <h1>
+                <span>TAX INV</span>
+                <small>{t("tax.title")}</small>
+              </h1>
+              <p>{t("tax.subtitle")}</p>
+            </div>
+            {/* 常驻规则说明压成一枚小胶囊：它是背景信息，不该和页面标题抢注意力。 */}
+            <Tooltip title={t("tax.rulesLocked")}>
+              <span className="tax-health-pill">
+                <span className="health-dot" />
+                {t("tax.rulesLocked")}
+              </span>
+            </Tooltip>
+          </header>
+
+          <nav className="workspace-subnav" aria-label={t("tax.navLabel")}>
+            <button
+              className={view === "ledger" ? "is-active" : ""}
+              type="button"
+              onClick={() => setView("ledger")}
+            >
+              <DatabaseOutlined />
+              {t("tax.ledger")}
+            </button>
+            <button
+              className={view === "review" ? "is-active" : ""}
+              type="button"
+              onClick={() => setView("review")}
+            >
+              <AuditOutlined />
+              {t("tax.review")}
+            </button>
+            <button
+              className={view === "recognition" ? "is-active" : ""}
+              type="button"
+              onClick={() => setView("recognition")}
+            >
+              <FileSearchOutlined />
+              {t("tax.recognition")}
+            </button>
+            <button
+              className={view === "batch" ? "is-active" : ""}
+              type="button"
+              onClick={() => setView("batch")}
+            >
+              <ImportOutlined />
+              {t("tax.batchNav")}
+            </button>
+            <button
+              className={view === "rates" ? "is-active" : ""}
+              type="button"
+              onClick={() => setView("rates")}
+            >
+              <ApiOutlined />
+              {t("tax.rates")}
+            </button>
+          </nav>
+        </>
+      )}
+
+      {/* 钻进某一月：页头已经换成 .tax-drill-bar，这里只剩一张占满剩余高度的表。
+          高度不再靠 calc(100vh - N) 猜，由 .tax-ledger-main 的 flex 链决定，
+          scroll.y 只是 CSS 没生效时的兜底值。 */}
+      {monthPage && (
+        <div className="tax-ledger-layout">
+          <main className="tax-ledger-main is-drill">
+            <Table
+              columns={columns}
+              dataSource={monthPage.rows}
+              loading={loading}
+              pagination={false}
+              rowClassName={(record) =>
+                record.id === selected?.id ? "selected-table-row" : ""
+              }
+              rowKey="id"
+              scroll={{ x: 1450, y: "calc(100vh - 130px)" }}
+              size="middle"
+              onChange={onLedgerFilterChange}
+              onRow={(record) => ({
+                onClick: () => void openInvoice(record.id),
+              })}
+            />
+          </main>
         </div>
-        {/* 常驻规则说明压成一枚小胶囊：它是背景信息，不该和页面标题抢注意力。 */}
-        <Tooltip title={t("tax.rulesLocked")}>
-          <span className="tax-health-pill">
-            <span className="health-dot" />
-            {t("tax.rulesLocked")}
-          </span>
-        </Tooltip>
-      </header>
+      )}
 
-      <nav className="workspace-subnav" aria-label={t("tax.navLabel")}>
-        <button
-          className={view === "ledger" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("ledger")}
-        >
-          <DatabaseOutlined />
-          {t("tax.ledger")}
-        </button>
-        <button
-          className={view === "review" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("review")}
-        >
-          <AuditOutlined />
-          {t("tax.review")}
-        </button>
-        <button
-          className={view === "recognition" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("recognition")}
-        >
-          <FileSearchOutlined />
-          {t("tax.recognition")}
-        </button>
-        <button
-          className={view === "batch" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("batch")}
-        >
-          <ImportOutlined />
-          {t("tax.batchNav")}
-        </button>
-        <button
-          className={view === "rates" ? "is-active" : ""}
-          type="button"
-          onClick={() => setView("rates")}
-        >
-          <ApiOutlined />
-          {t("tax.rates")}
-        </button>
-      </nav>
-
-      {view === "ledger" && (
+      {view === "ledger" && !monthPage && (
         <div className="tax-ledger-layout">
           <main className="tax-ledger-main">
             <FinanceLifecycleTabs
@@ -1920,114 +2030,72 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </Button>
               </Tooltip>
             </div>
-            {monthDetail ? (
-              // 钻进某一月：返回 + 月份汇总 + 该月全部票的全区域表（跟复核台钻进
-              // 一批同一套版式）。表体自己纵向滚，不再挤在一小块手风琴里。
-              <>
-                <div className="tax-review-head">
-                  <div>
-                    <Button
-                      className="tax-review-back"
-                      size="small"
-                      type="link"
-                      onClick={() => {
-                        setSelectedMonth(null);
-                        setSelected(null);
-                      }}
-                    >
-                      ← {t("tax.monthBackToList")}
-                    </Button>
-                    <h2>{monthDetail.label}</h2>
-                    <p>
-                      {t("tax.monthSummary", {
-                        total: monthDetail.rows.length,
-                        review: monthDetail.needsReview,
-                      })}
-                      {` · FOB THB ${money(monthDetail.fobThbTotal, locale)}`}
-                    </p>
-                  </div>
-                  <Tooltip title={t("tax.exportLedgerTip")}>
-                    <Button
-                      icon={<DownloadOutlined />}
-                      loading={busy}
-                      onClick={() => void runLedgerExport()}
-                    >
-                      {t("tax.exportLedger")}
-                    </Button>
-                  </Tooltip>
-                </div>
-                <Table
-                  columns={columns}
-                  dataSource={monthDetail.rows}
-                  loading={loading}
-                  pagination={false}
-                  rowClassName={(record) =>
-                    record.id === selected?.id ? "selected-table-row" : ""
-                  }
-                  rowKey="id"
-                  scroll={{ x: 1450, y: "calc(100vh - 350px)" }}
-                  size="middle"
-                  onChange={onLedgerFilterChange}
-                  onRow={(record) => ({
-                    onClick: () => void openInvoice(record.id),
-                  })}
-                />
-              </>
-            ) : (
-              <>
-                <div className="tax-ledger-summary">
-                  <div>
-                    <strong>{filteredInvoices.length}</strong>
-                    <span>{t("tax.countInvoices")}</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {filteredInvoices.filter((item) => item.status === "needs_review").length}
-                    </strong>
-                    <span>{t("tax.countNeedsReview")}</span>
-                  </div>
-                  <div>
-                    <strong>
-                      {filteredInvoices.filter((item) => item.status === "issued").length}
-                    </strong>
-                    <span>{t("tax.countIssued")}</span>
-                  </div>
-                </div>
-                {groupByMonth ? (
-                  // 第一层：每月一行（期间 / 张数 / 待复核 / FOB THB 小计），点行钻进详情。
-                  <Table<MonthGroup>
-                    className="tax-month-list"
-                    columns={monthColumns}
-                    dataSource={ledgerGroups}
-                    loading={loading}
-                    pagination={false}
-                    rowKey="key"
-                    scroll={{ y: "calc(100vh - 360px)" }}
-                    size="middle"
-                    locale={{ emptyText: <Empty description={t("tax.ledgerEmpty")} /> }}
-                    onRow={(group) => ({
-                      onClick: () => setSelectedMonth(group.key),
-                    })}
-                  />
-                ) : (
-                  <Table
-                    columns={columns}
-                    dataSource={filteredInvoices}
-                    loading={loading}
-                    pagination={{ pageSize: 15, showSizeChanger: false }}
-                    rowClassName={(record) =>
-                      record.id === selected?.id ? "selected-table-row" : ""
-                    }
-                    rowKey="id"
-                    scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
-                    size="middle"
-                    onChange={onLedgerFilterChange}
-                    onRow={(record) => ({
-                      onClick: () => void openInvoice(record.id),
-                    })}
-                  />
+            {/* 三个计数压成一行细条：原来是 58px 高的三宫格，跟上面生命周期页签
+                的角标讲的是同一批数字，占着首屏却不多给一点信息。
+                台账只负责「看」，批准要去批次复核，所以待复核数后面挂条明路。 */}
+            <div className="tax-ledger-summary">
+              <div>
+                <strong>{filteredInvoices.length}</strong>
+                <span>{t("tax.countInvoices")}</span>
+              </div>
+              <div>
+                <strong>{needsReviewCount}</strong>
+                <span>{t("tax.countNeedsReview")}</span>
+                {needsReviewCount > 0 && (
+                  <Button
+                    className="tax-ledger-summary-link"
+                    size="small"
+                    type="link"
+                    onClick={() => {
+                      setSelectedMonth(null);
+                      setSelected(null);
+                      setView("review");
+                    }}
+                  >
+                    {t("tax.ledgerGotoReview")}
+                  </Button>
                 )}
-              </>
+              </div>
+              <div>
+                <strong>
+                  {filteredInvoices.filter((item) => item.status === "issued").length}
+                </strong>
+                <span>{t("tax.countIssued")}</span>
+              </div>
+            </div>
+            {groupByMonth ? (
+              // 第一层：每月一行（期间 / 张数 / 待复核 / FOB THB 小计），点行钻进整页详情。
+              <Table<MonthGroup>
+                className="tax-month-list"
+                columns={monthColumns}
+                dataSource={ledgerGroups}
+                loading={loading}
+                pagination={false}
+                rowKey="key"
+                scroll={{ y: "calc(100vh - 340px)" }}
+                size="middle"
+                locale={{ emptyText: <Empty description={t("tax.ledgerEmpty")} /> }}
+                onRow={(group) => ({
+                  onClick: () => setSelectedMonth(group.key),
+                })}
+              />
+            ) : (
+              <Table
+                columns={columns}
+                dataSource={filteredInvoices}
+                loading={loading}
+                pagination={{ pageSize: 15, showSizeChanger: false }}
+                rowClassName={(record) =>
+                  record.id === selected?.id ? "selected-table-row" : ""
+                }
+                rowKey="id"
+                scroll={{ x: 1450, y: "calc(100vh - 340px)" }}
+                size="middle"
+                onChange={onLedgerFilterChange}
+                onRow={(record) => ({
+                  onClick: () => void openInvoice(record.id),
+                })}
+              />
             )}
           </main>
         </div>
@@ -2071,7 +2139,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                       align: "right",
                     },
                     {
-                      title: t("tax.countNeedsReview"),
+                      // 列头用「需复核」跟状态标签同词；「待人工复核」是台账
+                      // 汇总条那一层的说法，塞进列头既长又对不上标签。
+                      title: t("tax.reviewBatchNeedsReview"),
                       dataIndex: "needsReview",
                       width: 88,
                       align: "right",
@@ -2124,6 +2194,20 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                       })}
                     </p>
                   </div>
+                  {/* 批完这一批就该回台账按月核对：两个视图是同一批记录的两条轴
+                      （批次＝来源与出号闸门，台账＝收入期间与申报口径），
+                      给条明路，别让用户自己回子导航找。 */}
+                  <Button
+                    icon={<DatabaseOutlined />}
+                    onClick={() => {
+                      setSelectedBatch(null);
+                      setSelected(null);
+                      setSelectedMonth(null);
+                      setView("ledger");
+                    }}
+                  >
+                    {t("tax.reviewGotoLedger")}
+                  </Button>
                 </div>
                 <div className="tax-review-actions">
                   <Input.Search
