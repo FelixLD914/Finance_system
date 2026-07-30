@@ -54,7 +54,9 @@ FIELD_CELLS = {
 MAX_WIDTHS = {
     "first_name": 105.0,
     "surname": 105.0,
-    "position": 95.0,
+    # K8:L9 实测可绘宽度 113.04pt，留出左右各 1.5pt 内边距；
+    # 这个值同时决定 PDF 叠加层的折行位置，改列宽后要重新量。
+    "position": 110.0,
     "department": 300.0,
     "start_date": 150.0,
     "reason": 500.0,
