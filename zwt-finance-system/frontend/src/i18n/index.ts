@@ -47,6 +47,28 @@ const resources = {
     "common.activeRecords": "在用记录",
     "common.recycleBin": "回收站",
     "role.supervisor": "财务主管",
+
+    "login.tagline": "财务管理系统",
+    "login.username": "用户名",
+    "login.usernamePlaceholder": "请输入用户名",
+    "login.usernameRequired": "请输入用户名",
+    "login.password": "口令",
+    "login.passwordPlaceholder": "请输入口令",
+    "login.passwordRequired": "请输入口令",
+    "login.rememberUsername": "记住用户名",
+    "login.rememberUsernameHint": "只在本机记住用户名，口令永远不保存。",
+    "login.forgotPassword": "忘记口令？",
+    "login.forgotPasswordTitle": "口令由财务部重置",
+    "login.forgotPasswordBody":
+      "系统不提供自助重置。请联系财务部管理员，说明工号和用户名，由管理员重置后直接告知新口令。",
+    "login.submit": "登录",
+    "login.failed": "登录失败，请稍后重试",
+    "login.altDivider": "或",
+    "login.ssoDisabled": "单点登录尚未开通，请使用财务部分配的账号和口令登录",
+    "login.switchLanguage": "切换界面语言",
+    "login.copyright": "© {year} ZWT Finance",
+    "login.internalOnly": "内部系统，仅限授权人员使用",
+
     "admin.title": "配置维护",
     "admin.signatureScopeHint":
       "签名图库由 WHT、TAX INV 与工资预支单共用，因此统一在系统管理里维护；上传时必须勾选这张签名适用于哪些单据。",
@@ -693,6 +715,30 @@ const resources = {
     "common.activeRecords": "Active records",
     "common.recycleBin": "Recycle bin",
     "role.supervisor": "Finance Supervisor",
+
+    "login.tagline": "Financial Management System",
+    "login.username": "Username",
+    "login.usernamePlaceholder": "Enter your username",
+    "login.usernameRequired": "Enter your username",
+    "login.password": "Password",
+    "login.passwordPlaceholder": "Enter your password",
+    "login.passwordRequired": "Enter your password",
+    "login.rememberUsername": "Remember my username",
+    "login.rememberUsernameHint":
+      "Stores the username on this computer only. The password is never saved.",
+    "login.forgotPassword": "Forgot password?",
+    "login.forgotPasswordTitle": "Passwords are reset by Finance",
+    "login.forgotPasswordBody":
+      "There is no self-service reset. Contact a Finance administrator with your employee ID and username; they will reset it and give you the new password directly.",
+    "login.submit": "Login",
+    "login.failed": "Sign-in failed. Please try again.",
+    "login.altDivider": "or",
+    "login.ssoDisabled":
+      "Single sign-on is not enabled yet — use the username and password issued by Finance",
+    "login.switchLanguage": "Switch interface language",
+    "login.copyright": "© {year} ZWT Finance",
+    "login.internalOnly": "Internal system — authorised personnel only",
+
     "admin.title": "Configuration",
     "admin.signatureScopeHint":
       "The signature library is shared by WHT, TAX INV and Salary Advance, so it is maintained here. Every upload must declare which documents it applies to.",

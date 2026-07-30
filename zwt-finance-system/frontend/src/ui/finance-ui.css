@@ -653,14 +653,222 @@
   background: var(--finance-surface-muted);
 }
 
-.login-card {
-  border-color: var(--finance-border);
-  border-radius: var(--finance-radius-lg);
-  box-shadow: 0 4px 8px rgba(34, 34, 34, 0.08);
+/* --- 登录页 ------------------------------------------------------------- */
+
+/* 登录页是整个系统里唯一允许装饰的表面：它不承载台账数据，也不需要高密度。
+   这里的暖色画布、插画底图和宽阴影都限定在 .login-screen 作用域内，用局部
+   自定义属性而不是改 tokens.css，别让它们漏到业务页面上去。 */
+
+.login-screen {
+  --login-canvas: #f6efe6;
+  --login-hairline: #e3d8c8;
+  --login-placeholder: #a99d8c;
+
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 24px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 22px 32px 20px;
+  overflow: hidden;
+  background: var(--login-canvas);
 }
 
-.login-title {
-  font-family: var(--font-ui);
+.login-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* 插画分成上下两层，各自贴住视口的上下边、按视口宽度等比缩放。
+     不要合成一张用 background-size: cover：cover 从中心往外裁，四角器物被切掉
+     多少完全取决于视口宽高比 —— 16:9（最常见的显示器比例）上会裁掉上下各 170px，
+     左上角的计算器正好糊在页面自己的 ZWT Finance 标识后面。分层锚边之后，角上的
+     器物在任何宽高比下都完整可见，牺牲掉的只是中间那片本来就空着的画布：视口高时
+     中间留白，视口矮时两层在中间重叠，两种情况都发生在没有图案的区域。 */
+  background-image: url("/login-backdrop-top.svg"),
+    url("/login-backdrop-bottom.svg");
+  background-position: center top, center bottom;
+  background-repeat: no-repeat, no-repeat;
+  background-size: 100% auto, 100% auto;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.login-topbar,
+.login-card,
+.login-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.login-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.login-brand,
+.login-wordmark {
+  display: flex;
+  align-items: baseline;
+  font-family: var(--font-brand);
+}
+
+.login-brand {
+  gap: 8px;
+}
+
+.login-brand .brand-zwt {
+  font-size: 30px;
+}
+
+.login-brand .brand-finance {
+  margin-left: 0;
+  font-size: 20px;
+}
+
+.login-locale.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  color: var(--finance-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.login-locale-caret {
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.login-card {
+  place-self: center;
+  width: 100%;
+  max-width: 452px;
+  background: var(--finance-surface);
+  border: 1px solid var(--login-hairline);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(84, 64, 40, 0.1);
+}
+
+.login-card .ant-card-body {
+  padding: 40px 44px 36px;
+}
+
+.login-wordmark {
+  gap: 10px;
+  justify-content: center;
+  margin: 0;
+}
+
+.login-wordmark .brand-zwt {
+  font-size: 44px;
+  letter-spacing: -0.02em;
+}
+
+.login-wordmark .brand-finance {
+  margin-left: 0;
+  font-size: 30px;
+}
+
+.login-tagline {
+  margin: 8px 0 26px;
+  color: var(--finance-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-error {
+  margin-bottom: 18px;
+}
+
+.login-card .ant-form-item {
+  margin-bottom: 16px;
+}
+
+.login-card .ant-input-affix-wrapper {
+  height: 48px;
+  border-color: var(--login-hairline);
+  border-radius: var(--finance-radius-md);
+}
+
+.login-card .ant-input-prefix {
+  margin-inline-end: 10px;
+  color: var(--login-placeholder);
+  font-size: 15px;
+}
+
+.login-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 0 20px;
+  font-size: 13px;
+}
+
+.login-forgot.ant-btn {
+  height: auto;
+  padding: 0;
+  font-size: 13px;
+}
+
+.login-card .ant-btn-primary {
+  height: 48px;
+  border-radius: var(--finance-radius-md);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.login-divider.ant-divider {
+  margin: 24px 0 18px;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+}
+
+/* antd 6 的 Divider 用真实的 .ant-divider-rail 元素画横线，不再是 ::before /
+   ::after —— 按 v5 的写法改伪元素是不生效的。 */
+.login-divider .ant-divider-rail {
+  border-block-start-color: var(--login-hairline);
+}
+
+.login-federated {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.login-federated .ant-btn {
+  height: 44px;
+  padding: 0 6px;
+  border-radius: var(--finance-radius-md);
+  font-size: 13px;
+}
+
+.login-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+}
+
+/* 这里故意没有窄屏分支。整个系统在 global.css 里锁了 body { min-width: 1180px;
+   overflow: hidden }，是台账密度决定的桌面端产品。媒体查询看的是视口宽度而不是
+   这个 1180 的布局宽度，所以在手机视口上 max-width 分支会命中、页面却依然是
+   1180 宽再被裁掉 —— 只会做出一个既不是桌面也不是移动的中间态。要做移动端得从
+   那条 min-width 开始，不是从登录页开始。
+
+   矮窗口要处理：上下两层会在中间叠到一起，那时不如不画。 */
+@media (max-height: 640px) {
+  .login-backdrop {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

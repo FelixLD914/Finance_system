@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1456 470" width="1456" height="470" role="presentation">
+  <!--
+    登录页装饰底图（上半）。和 login-backdrop-bottom.svg 成对使用：这一张贴住视口
+    上边，那一张贴住下边，各自按视口宽度等比缩放。不要合成一张用 cover ——
+    详见 ui/finance-ui.css 里 .login-backdrop 的注释。
+
+    颜色必须写死：本文件是通过 CSS background-image 加载的外部 SVG，宿主文档的
+    自定义属性（finance-* 那一套）在这里取不到值。这里不铺底色矩形，画布底色由
+    .login-screen 的 background-color 提供。
+  -->
+  <defs>
+    <pattern id="zwt-dots" width="15" height="15" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.8" fill="#d8cbb6" />
+    </pattern>
+  </defs>
+
+  <!-- 柔和色块：压在所有线稿之下 -->
+  <g>
+    <circle cx="1300" cy="55" r="245" fill="#eee2d1" />
+    <circle cx="-10" cy="185" r="120" fill="#f1e7d9" />
+  </g>
+
+  <!-- ── 左上：计算器 + 曲线 + 点阵 ───────────────────────────────────
+       计算器压得比设计稿低：左上角要留给页面自己的 ZWT Finance 标识。 -->
+  <g transform="translate(44 98) rotate(-6)">
+    <rect x="0" y="0" width="146" height="176" rx="14" fill="#fdfbf8" stroke="#c9b8a0" stroke-width="2.2" />
+    <rect x="16" y="18" width="114" height="30" rx="6" fill="#e8dcc9" />
+    <g fill="none" stroke="#c9b8a0" stroke-width="1.8">
+      <rect x="16" y="64" width="22" height="19" rx="4" />
+      <rect x="47" y="64" width="22" height="19" rx="4" />
+      <rect x="78" y="64" width="22" height="19" rx="4" />
+      <rect x="109" y="64" width="22" height="19" rx="4" />
+      <rect x="16" y="91" width="22" height="19" rx="4" />
+      <rect x="47" y="91" width="22" height="19" rx="4" />
+      <rect x="78" y="91" width="22" height="19" rx="4" />
+      <rect x="109" y="91" width="22" height="19" rx="4" />
+      <rect x="16" y="118" width="22" height="19" rx="4" />
+      <rect x="47" y="118" width="22" height="19" rx="4" />
+      <rect x="78" y="118" width="22" height="19" rx="4" />
+      <rect x="109" y="118" width="22" height="19" rx="4" />
+      <rect x="16" y="145" width="22" height="19" rx="4" />
+      <rect x="47" y="145" width="22" height="19" rx="4" />
+      <rect x="78" y="145" width="22" height="19" rx="4" />
+    </g>
+    <rect x="109" y="145" width="22" height="19" rx="4" fill="#c19a6b" />
+  </g>
+
+  <g fill="none" stroke="#c9b8a0" stroke-width="1.8" stroke-linecap="round">
+    <path d="M150 30C250 5 330 40 392 52" />
+    <path d="M410 68C418 88 410 100 412 112" />
+  </g>
+  <circle cx="401" cy="59" r="9" fill="none" stroke="#c9b8a0" stroke-width="1.8" />
+  <circle cx="413" cy="120" r="7" fill="#c19a6b" />
+  <rect x="215" y="118" width="72" height="72" fill="url(#zwt-dots)" />
+
+  <!-- ── 右上：两张单据 + 曲线 + 饼图 + 点阵 ───────────────────────── -->
+  <g transform="translate(1268 50) rotate(8)">
+    <rect x="0" y="0" width="112" height="142" rx="4" fill="#fdfbf8" stroke="#c9b8a0" stroke-width="2" />
+    <g stroke="#d8cbb6" stroke-width="2.4" stroke-linecap="round" fill="none">
+      <path d="M18 34h66" />
+      <path d="M18 48h44" />
+    </g>
+  </g>
+  <g transform="translate(1246 66) rotate(-4)">
+    <path d="M0 4a4 4 0 0 1 4-4h74l26 26v112a4 4 0 0 1-4 4H4a4 4 0 0 1-4-4Z" fill="#fdfbf8" stroke="#c9b8a0" stroke-width="2" />
+    <path d="M78 0l26 26H82a4 4 0 0 1-4-4Z" fill="#eee2d1" stroke="#c9b8a0" stroke-width="2" />
+    <g stroke="#d8cbb6" stroke-width="2.4" stroke-linecap="round" fill="none">
+      <path d="M16 46h60" />
+      <path d="M16 58h44" />
+      <path d="M16 70h56" />
+    </g>
+    <g fill="#c19a6b">
+      <rect x="18" y="106" width="9" height="16" rx="1.5" />
+      <rect x="32" y="96" width="9" height="26" rx="1.5" />
+      <rect x="46" y="86" width="9" height="36" rx="1.5" />
+    </g>
+    <path d="M16 122h72" stroke="#c9b8a0" stroke-width="2" fill="none" />
+  </g>
+
+  <path d="M1046 224C1100 196 1160 214 1216 196" fill="none" stroke="#c9b8a0" stroke-width="1.8" stroke-linecap="round" />
+  <circle cx="1036" cy="228" r="7" fill="#c19a6b" />
+
+  <g>
+    <circle cx="1382" cy="308" r="52" fill="#fdfbf8" stroke="#c9b8a0" stroke-width="2" />
+    <path d="M1382 308V256a52 52 0 0 1 50.2 38.5Z" fill="#c19a6b" />
+    <g stroke="#c9b8a0" stroke-width="2" fill="none">
+      <path d="M1382 308V256" />
+      <path d="M1382 308l50.2-13.5" />
+    </g>
+  </g>
+  <rect x="1288" y="376" width="57" height="42" fill="url(#zwt-dots)" />
+</svg>

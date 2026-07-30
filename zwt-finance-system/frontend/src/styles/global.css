@@ -2799,38 +2799,15 @@ select {
   }
 }
 
-/* --- 登录与启动态 ------------------------------------------------------- */
+/* --- 启动态 ------------------------------------------------------------- */
 
-.app-bootstrap,
-.login-screen {
+/* 登录页的样式全部在 ui/finance-ui.css 里 —— 那份最后加载，同权重规则会赢，
+   在这里再写一套只会变成两个所有者。这里只留确认会话状态时的过渡页。 */
+
+.app-bootstrap {
   min-height: 100vh;
   display: grid;
   place-items: center;
   background: var(--paper);
   padding: 24px;
-}
-
-.login-card {
-  width: 100%;
-  max-width: 380px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 8px 4px;
-  box-shadow: 0 18px 48px rgba(36, 33, 30, 0.08);
-}
-
-.login-title {
-  margin-bottom: 4px !important;
-  font-family: var(--font-ui);
-  letter-spacing: 0.01em;
-}
-
-.login-subtitle {
-  margin-bottom: 20px !important;
-  font-size: 13px;
-}
-
-.login-error {
-  margin-bottom: 16px;
 }
