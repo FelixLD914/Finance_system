@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import {
   App as AntApp,
@@ -118,11 +118,10 @@ export function IssuanceConsole({
 }: IssuanceConsoleProps) {
   const { message } = AntApp.useApp();
   const [form] = Form.useForm();
-  const [statutoryRate, setStatutoryRate] = useState<number | null>(null);
-  const [incomeLabel, setIncomeLabel] = useState<string | null>(null);
 
   const issuanceType = Form.useWatch("issuanceType", form);
   const payeeId = Form.useWatch("payeeId", form);
+  const incomeType = Form.useWatch("incomeType", form);
   const totalAmount = Form.useWatch("totalAmount", form);
   const whtRate = Form.useWatch("whtRate", form);
 
@@ -192,20 +191,49 @@ export function IssuanceConsole({
     ].filter((group) => group.options.length > 0);
   }, [incomeTypes, locale, selectedPayee, t]);
 
-  const applyIncomeType = (value: string) => {
-    const option = incomeTypes.find((entry) => entry.labelTh === value);
-    const rate = option?.rates.find(
+  /**
+   * 法定税率按**字段当前的值**查目录，而不是记住「用户点过哪一项」。
+   *
+   * 收入类型是 AutoComplete，可以直接打字或粘贴泰文原文；服务端也是按值查
+   * （`income_types.find()` 认 code 或 strip 后的泰文标签）。之前这里把法定税率
+   * 存成 state、只在 `onSelect` 里赋值，于是「打字打对但没点下拉项」的人前端
+   * 看不到偏离提示、理由框也不渲染，提交却会被服务端以「必须填理由」422 挡下——
+   * 屏幕上没有那个框，人就出不去了。判定基准和服务端对齐到同一个值，
+   * 两边不会再分叉；先选 A 再手打成 B 时基准也不会停在 A 上。
+   */
+  const matchedIncomeType = useMemo(() => {
+    const raw = incomeType ?? "";
+    if (!raw.trim()) return null;
+    return (
+      incomeTypes.find(
+        (option) => option.code === raw || option.labelTh === raw.trim(),
+      ) ?? null
+    );
+  }, [incomeType, incomeTypes]);
+
+  const statutoryRate = useMemo(() => {
+    const rate = matchedIncomeType?.rates.find(
       (entry) => entry.whtType === selectedPayee?.whtType,
     )?.rate;
-    if (!option || !rate) {
-      setStatutoryRate(null);
-      setIncomeLabel(null);
-      return;
-    }
-    const percent = Number(rate) * 100;
-    form.setFieldValue("whtRate", percent);
-    setStatutoryRate(percent);
-    setIncomeLabel(locale === "en-US" ? option.labelEn : option.labelZh);
+    return rate == null ? null : Number(rate) * 100;
+  }, [matchedIncomeType, selectedPayee]);
+
+  const incomeLabel = matchedIncomeType
+    ? locale === "en-US"
+      ? matchedIncomeType.labelEn
+      : matchedIncomeType.labelZh
+    : null;
+
+  /**
+   * 从目录里选中时把法定税率回填进税率框——纯粹是省一次手输。
+   * 偏离与否不在这里判定，那是 `statutoryRate` 的事；打字的人拿不到这次回填，
+   * 但照样会看到偏离提示。
+   */
+  const applyIncomeType = (value: string) => {
+    const rate = incomeTypes
+      .find((entry) => entry.labelTh === value)
+      ?.rates.find((entry) => entry.whtType === selectedPayee?.whtType)?.rate;
+    if (rate != null) form.setFieldValue("whtRate", Number(rate) * 100);
   };
 
   const rateNote = describeRate(whtRate, statutoryRate, incomeLabel, t);
@@ -293,9 +321,8 @@ export function IssuanceConsole({
                 }
                 onChange={() => {
                   // 换收款方就可能换 PND 表，原来选的收入类型未必还适用。
+                  // 法定税率是从收入类型派生的，清掉字段它自己就跟着没了。
                   form.setFieldValue("incomeType", undefined);
-                  setStatutoryRate(null);
-                  setIncomeLabel(null);
                 }}
               />
             </Form.Item>
