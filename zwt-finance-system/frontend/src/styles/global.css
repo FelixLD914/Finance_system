@@ -1420,20 +1420,48 @@ select {
   background: var(--surface);
 }
 
-.tax-ledger-group + .tax-ledger-group {
-  border-top: 1px solid var(--line);
-}
-
+/* 月份行是可点的手风琴头：整行按钮，chevron 指示展开态，点一下收/放这一月的表。 */
 .tax-ledger-group-head {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding: 10px 18px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 18px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
   background: #f6efe6;
+  border: 0;
   border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.tax-ledger-group-head:hover {
+  background: #efe4d5;
+}
+
+.tax-ledger-group:last-child .tax-ledger-group-head {
+  border-bottom: 0;
+}
+
+.tax-ledger-group.is-open .tax-ledger-group-head {
+  border-bottom: 1px solid var(--line);
+}
+
+.tax-ledger-group-chevron {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.tax-ledger-group.is-open .tax-ledger-group-chevron {
+  transform: rotate(0deg);
 }
 
 .tax-ledger-group-head h3 {
@@ -1546,16 +1574,21 @@ select {
   border-color: #c5dadd;
 }
 
+/* 详情面板现在只在右侧抽屉里用：铺满抽屉正文、自己纵向滚；边框/阴影/入场动画
+   都交给 Drawer，不再自带（否则和抽屉的重叠）。 */
 .tax-inspector {
   display: flex;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   overflow: auto;
   flex-direction: column;
   background: #fffdf9;
-  border-left: 1px solid var(--line);
-  box-shadow: -14px 0 36px rgba(60, 42, 29, 0.04);
-  animation: inspector-enter 180ms ease-out both;
+}
+
+.tax-inspector-drawer-body {
+  padding: 0;
+  overflow: hidden;
 }
 
 .tax-inspector .inspector-header {
