@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   ApiOutlined,
   AuditOutlined,
+  CalendarOutlined,
   CheckCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
@@ -683,6 +684,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<TaxInvoiceStatus | "all">("all");
   const [period, setPeriod] = useState("all");
+  // 台账按收入期间（月）分组：每月一段、带小计。默认开，可切回平铺分页表。
+  const [groupByMonth, setGroupByMonth] = useState(true);
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   // 复核台：导入批次列表 → 钻进某一批的对账表。
   const [batches, setBatches] = useState<ImportBatch[]>([]);
@@ -830,6 +833,35 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
   }, [invoices, period, phase, query, status]);
+
+  // 台账按月分组：有收入期间的按月倒序，没期间的（空）永远垫底；每段带 FOB THB 小计。
+  const ledgerGroups = useMemo(() => {
+    const byPeriod = new Map<string, TaxInvoice[]>();
+    for (const invoice of filteredInvoices) {
+      const key = invoice.revenuePeriod ?? "";
+      const rows = byPeriod.get(key);
+      if (rows) rows.push(invoice);
+      else byPeriod.set(key, [invoice]);
+    }
+    const keys = Array.from(byPeriod.keys()).sort((a, b) => {
+      if (a === "") return 1;
+      if (b === "") return -1;
+      return b.localeCompare(a);
+    });
+    return keys.map((key) => {
+      const rows = byPeriod.get(key) ?? [];
+      const fobThbTotal = rows.reduce(
+        (sum, row) => sum + Number(row.fobRevenueThbTotal ?? 0),
+        0,
+      );
+      return {
+        key: key || "none",
+        label: key ? `${key.slice(0, 4)}-${key.slice(4)}` : t("tax.noPeriod"),
+        rows,
+        fobThbTotal: fobThbTotal.toFixed(2),
+      };
+    });
+  }, [filteredInvoices, t]);
 
   // 复核台对账表的客户端筛选：一个搜索框跨 编号/CI/CDN/客户 过滤。
   const reviewRows = useMemo(() => {
@@ -1643,6 +1675,15 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
+              <Tooltip title={t("tax.groupByMonthTip")}>
+                <Button
+                  icon={<CalendarOutlined />}
+                  type={groupByMonth ? "primary" : "default"}
+                  onClick={() => setGroupByMonth((on) => !on)}
+                >
+                  {t("tax.groupByMonth")}
+                </Button>
+              </Tooltip>
               <Button
                 icon={<ReloadOutlined />}
                 loading={loading}
@@ -1679,21 +1720,59 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 <span>{t("tax.countIssued")}</span>
               </div>
             </div>
-            <Table
-              columns={columns}
-              dataSource={filteredInvoices}
-              loading={loading}
-              pagination={{ pageSize: 15, showSizeChanger: false }}
-              rowClassName={(record) =>
-                record.id === selected?.id ? "selected-table-row" : ""
-              }
-              rowKey="id"
-              scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
-              size="middle"
-              onRow={(record) => ({
-                onClick: () => void openInvoice(record.id),
-              })}
-            />
+            {groupByMonth ? (
+              // 每月一段：段头写 期间 + 张数 + FOB THB 小计，段内一张不分页的表。
+              // 整个分组区自己纵向滚动（平铺表是表体内滚，两者的滚动容器不一样）。
+              <div className="tax-ledger-groups">
+                {ledgerGroups.map((group) => (
+                  <section className="tax-ledger-group" key={group.key}>
+                    <header className="tax-ledger-group-head">
+                      <h3>{group.label}</h3>
+                      <span className="tax-ledger-group-count">
+                        {t("tax.groupCount", { count: group.rows.length })}
+                      </span>
+                      <span className="tax-ledger-group-total">
+                        FOB THB {money(group.fobThbTotal, locale)}
+                      </span>
+                    </header>
+                    <Table
+                      columns={columns}
+                      dataSource={group.rows}
+                      loading={loading}
+                      pagination={false}
+                      rowClassName={(record) =>
+                        record.id === selected?.id ? "selected-table-row" : ""
+                      }
+                      rowKey="id"
+                      scroll={{ x: 1450 }}
+                      size="middle"
+                      onRow={(record) => ({
+                        onClick: () => void openInvoice(record.id),
+                      })}
+                    />
+                  </section>
+                ))}
+                {!ledgerGroups.length && (
+                  <Empty description={t("tax.ledgerEmpty")} />
+                )}
+              </div>
+            ) : (
+              <Table
+                columns={columns}
+                dataSource={filteredInvoices}
+                loading={loading}
+                pagination={{ pageSize: 15, showSizeChanger: false }}
+                rowClassName={(record) =>
+                  record.id === selected?.id ? "selected-table-row" : ""
+                }
+                rowKey="id"
+                scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
+                size="middle"
+                onRow={(record) => ({
+                  onClick: () => void openInvoice(record.id),
+                })}
+              />
+            )}
           </main>
           {selected && (
             <InvoiceInspector
