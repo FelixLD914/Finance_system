@@ -84,6 +84,15 @@ class TaxInvoiceResponse(ApiSchema):
     submission_date_low_confidence: bool
     submission_date_confidence: str | None
     submission_date_source: str | None
+    # 报关单侧留痕：不参与计价，只用于复核台的对账（海关按什么折的、谁报的关、
+    # 报关单自印的泰铢合计是多少，和本系统按 BOT 汇率算出来的并排看）。
+    declaration_ref_no: str | None = None
+    customs_exchange_rate: Decimal | None = None
+    forwarder_name: str | None = None
+    forwarder_tax_no: str | None = None
+    customs_fob_usd_total: Decimal | None = None
+    customs_fob_thb_line_total: Decimal | None = None
+    customs_fob_thb_printed_total: Decimal | None = None
     source_invoice_file_name: str | None
     source_customs_file_name: str | None
     version: int

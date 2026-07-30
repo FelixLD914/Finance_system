@@ -5,13 +5,17 @@ import {
   apiRequest,
 } from "../../shared/http";
 import type {
+  BatchApproveResult,
+  BatchRejectResult,
   BotApiStatus,
+  DualBatchImportResult,
   DualIdentifyResult,
   ExchangeRate,
   ExchangeRateInput,
   ExchangeRateImportResult,
   ExchangeRateMonth,
   ExchangeRateUpdate,
+  ImportBatch,
   TaxInvoice,
   TaxInvoiceDocument,
   TaxInvoiceImportResult,
@@ -28,6 +32,13 @@ export function listTaxInvoices(): Promise<TaxInvoiceList> {
   return request<TaxInvoiceList>("/v1/tax-invoice/invoices?pageSize=100");
 }
 
+/** 某一批导入的全部税票（复核台钻进一批时用）。 */
+export function listTaxInvoicesByBatch(batchId: string): Promise<TaxInvoiceList> {
+  return request<TaxInvoiceList>(
+    `/v1/tax-invoice/invoices?batchId=${batchId}&pageSize=100`,
+  );
+}
+
 export function getTaxInvoice(invoiceId: string): Promise<TaxInvoice> {
   return request<TaxInvoice>(`/v1/tax-invoice/invoices/${invoiceId}`);
 }
@@ -42,11 +53,13 @@ export async function exportTaxInvoiceLedger(filters: {
   status?: string;
   period?: string;
   query?: string;
+  batchId?: string;
 }): Promise<void> {
   const params = new URLSearchParams();
   if (filters.status && filters.status !== "all") params.set("status", filters.status);
   if (filters.period && filters.period !== "all") params.set("period", filters.period);
   if (filters.query?.trim()) params.set("query", filters.query.trim());
+  if (filters.batchId) params.set("batchId", filters.batchId);
   const suffix = params.toString() ? `?${params}` : "";
   const response = await apiFetch(`/v1/tax-invoice/invoices/export${suffix}`);
   const disposition = response.headers.get("Content-Disposition") ?? "";
@@ -109,6 +122,65 @@ export function voidTaxInvoice(
   });
 }
 
+/** 拒批一张未批准的税票：像软删除一样置为已拒批进历史，可再恢复。 */
+export function rejectTaxInvoice(
+  invoiceId: string,
+  version: number,
+  reason?: string,
+): Promise<TaxInvoice> {
+  return request<TaxInvoice>(`/v1/tax-invoice/invoices/${invoiceId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ version, reason: reason ?? null }),
+  });
+}
+
+/** 把已拒批的税票恢复回复核队列（后端按完整性重判 needs_review / ready）。 */
+export function restoreTaxInvoice(
+  invoiceId: string,
+  version: number,
+): Promise<TaxInvoice> {
+  return request<TaxInvoice>(`/v1/tax-invoice/invoices/${invoiceId}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ version }),
+  });
+}
+
+// ── 复核台：批次总览 + 单条/整批 批准·拒批 ────────────────────────────────────
+
+export function listImportBatches(limit = 50): Promise<ImportBatch[]> {
+  return request<ImportBatch[]>(`/v1/tax-invoice/batches?limit=${limit}`);
+}
+
+/** 批准某批的税票；invoiceIds 为 null＝批准这批所有未批准的。 */
+export function approveTaxInvoiceBatch(
+  batchId: string,
+  invoiceIds: string[] | null,
+  acceptWarnings: boolean,
+): Promise<BatchApproveResult> {
+  return request<BatchApproveResult>(
+    `/v1/tax-invoice/batches/${batchId}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ invoiceIds, acceptWarnings }),
+    },
+  );
+}
+
+/** 拒批某批的税票；invoiceIds 为 null＝拒批这批所有未批准的。 */
+export function rejectTaxInvoiceBatch(
+  batchId: string,
+  invoiceIds: string[] | null,
+  reason?: string,
+): Promise<BatchRejectResult> {
+  return request<BatchRejectResult>(
+    `/v1/tax-invoice/batches/${batchId}/reject`,
+    {
+      method: "POST",
+      body: JSON.stringify({ invoiceIds, reason: reason ?? null }),
+    },
+  );
+}
+
 export function createTaxInvoiceCorrection(
   invoiceId: string,
   version: number,
@@ -152,6 +224,26 @@ export function importDualFiles(
   form.append("invoiceFile", invoiceFile);
   if (customsFile) form.append("customsFile", customsFile);
   return request<TaxInvoiceImportResult>("/v1/tax-invoice/import/dual", {
+    method: "POST",
+    body: form,
+  });
+}
+
+/**
+ * 一次上传的所有可导入配对 → 一个复核批次（不自动出编号）。
+ *
+ * 取代逐组串行调 importDualFiles 的老做法：Excel 与 PDF 一起发给后端，后端一趟
+ * 识别 + 配对 + 匹配汇率 + 整批落进同一个批次。孤立关单/冲突进 skipped，读不了的
+ * 进 rejected；撞上重复业务键整批 409（走冲突弹窗）。
+ */
+export function importDualBatch(
+  files: File[],
+  currency = "USD",
+): Promise<DualBatchImportResult> {
+  const form = new FormData();
+  form.append("currency", currency);
+  for (const file of files) form.append("files", file);
+  return request<DualBatchImportResult>("/v1/tax-invoice/import/dual/batch", {
     method: "POST",
     body: form,
   });

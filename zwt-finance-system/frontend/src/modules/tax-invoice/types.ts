@@ -60,6 +60,14 @@ export interface TaxInvoice {
   submissionDateLowConfidence: boolean;
   submissionDateConfidence: string | null;
   submissionDateSource: string | null;
+  // 报关单侧留痕，仅供复核台对账（不参与计价）。
+  declarationRefNo: string | null;
+  customsExchangeRate: string | null;
+  forwarderName: string | null;
+  forwarderTaxNo: string | null;
+  customsFobUsdTotal: string | null;
+  customsFobThbLineTotal: string | null;
+  customsFobThbPrintedTotal: string | null;
   sourceInvoiceFileName: string | null;
   sourceCustomsFileName: string | null;
   version: number;
@@ -149,6 +157,65 @@ export interface DualIdentifyResult {
   invoiceOnlyCount: number;
   customsOnlyCount: number;
   conflictCount: number;
+}
+
+// ── 双文件批量导入：一次上传的全部可导入配对 → 一个复核批次（不自动出编号）──────
+
+/** 成功落库的一组：这一对文件建成的税票。 */
+export interface DualBatchPairResult {
+  key: string;
+  invoiceFileName: string;
+  customsFileName: string | null;
+  invoiceId: string;
+  itemCount: number;
+  needsReview: boolean;
+}
+
+/** 识别出来但没导入的一组：孤立关单（缺发票）或冲突（多份不同关单）。 */
+export interface DualSkippedPair {
+  key: string;
+  status: "customs_only" | "conflict";
+  reason: string;
+}
+
+export interface DualBatchImportResult {
+  /** 全批没有一组可导入时为 null（只有孤立关单/冲突/读不了的文件）。 */
+  batchId: string | null;
+  invoiceCount: number;
+  itemCount: number;
+  needsReviewCount: number;
+  results: DualBatchPairResult[];
+  rejected: DualRejectedFile[];
+  skipped: DualSkippedPair[];
+}
+
+// ── 复核台：批次总览 + 单条/整批 批准·拒批 ────────────────────────────────────
+
+/** 一个导入批次 + 当前各状态实时计数（随逐条批准/拒批变动）。 */
+export interface ImportBatch {
+  id: string;
+  importMode: string;
+  status: string;
+  currency: string;
+  sourceFileNames: string;
+  createdByName: string;
+  createdAt: string;
+  total: number;
+  pending: number;
+  needsReview: number;
+  approved: number;
+}
+
+export interface BatchApproveResult {
+  approvedCount: number;
+  approvedIds: string[];
+  /** 够不上批准的（缺字段/汇率/超 18 行），逐条附原因。 */
+  skipped: { invoiceId: string; reason: string }[];
+}
+
+export interface BatchRejectResult {
+  rejectedCount: number;
+  rejectedIds: string[];
 }
 
 export interface ExchangeRate {
