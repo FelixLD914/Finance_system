@@ -148,6 +148,42 @@ class BotApiError(TaxInvoiceServiceError):
         self.upstream_status = status_code
 
 
+@dataclass(frozen=True)
+class DualBatchPairInput:
+    """一次上传里、一组可导入的配对——已在识别阶段解析好，直接拿去落库。
+
+    孤立关单和 conflict 组不会走到这里（路由层已挡下）：能进来的都至少有发票。
+    关单缺失（待补关单）允许：customs_* 为 None。
+    """
+
+    key: str
+    invoice_data: dict[str, Any]
+    customs_data: dict[str, Any]
+    invoice_file_name: str
+    invoice_content: bytes
+    customs_file_name: str | None
+    customs_content: bytes | None
+
+
+@dataclass(frozen=True)
+class DualBatchPairOutcome:
+    key: str
+    invoice_id: uuid.UUID
+    invoice_file_name: str
+    customs_file_name: str | None
+    item_count: int
+    needs_review: bool
+
+
+@dataclass(frozen=True)
+class DualBatchResult:
+    batch_id: uuid.UUID
+    invoice_count: int
+    item_count: int
+    needs_review_count: int
+    pairs: list[DualBatchPairOutcome]
+
+
 @dataclass
 class InvoiceAggregate:
     invoice: TaxInvoice
@@ -306,6 +342,88 @@ class TaxInvoiceService:
             source_files=source_files,
         )
 
+    async def import_dual_batch(
+        self,
+        *,
+        inputs: list[DualBatchPairInput],
+        currency: str,
+    ) -> DualBatchResult:
+        """一次上传里的所有可导入配对 → 一个复核批次（不自动出编号）。
+
+        与逐对调用 /import/dual 的区别：整批落进同一个 import_batches 行、同一个
+        事务，复核台按批次展示。汇率沿用 import_dual 的匹配口径
+        （_bot_rate_window + combine_invoice_and_customs），先导票后同步汇率的
+        记录之后可在复核台按提交日重匹配。
+
+        整批一个事务＝「全进或全不进」：任一行撞上重复业务键（同一 C/I No.+CDN
+        已存在、或批内重复），_assert_importable 会整批退回并列全部冲突，改完再导。
+        解析失败或缺关单不在此列——那类文件在识别阶段已被摘出/降级为「待补关单」，
+        不会带进这个事务。
+        """
+        if not inputs:
+            raise TaxInvoiceStateError(
+                "no importable invoice/customs pairs were provided"
+            )
+        rows: list[dict[str, Any]] = []
+        per_pair: list[tuple[int, bool]] = []
+        source_files: list[tuple[str, bytes]] = []
+        seen_files: set[str] = set()
+        for pair in inputs:
+            submission_date = pair.customs_data.get("submission_date")
+            rates = (
+                await self._bot_rate_window(currency, submission_date)
+                if isinstance(submission_date, date)
+                else {}
+            )
+            recognized = combine_invoice_and_customs(
+                pair.invoice_data,
+                pair.customs_data,
+                rates,
+                currency=currency,
+            )
+            recognized["source_invoice_file_name"] = pair.invoice_file_name
+            recognized["source_customs_file_name"] = pair.customs_file_name
+            item_count = len(recognized.get("items") or [])
+            per_pair.append(
+                (item_count, self._review_status(recognized, item_count) == "needs_review")
+            )
+            rows.append(recognized)
+            for name, content in (
+                (pair.invoice_file_name, pair.invoice_content),
+                (pair.customs_file_name, pair.customs_content),
+            ):
+                if content is not None and name is not None and name not in seen_files:
+                    seen_files.add(name)
+                    source_files.append((name, content))
+        response = await self._create_import(
+            rows=rows,
+            import_mode="dual",
+            source_names=[name for name, _ in source_files],
+            source_files=source_files,
+        )
+        # combine 每对产出恰好一行，_create_import 按 rows 顺序建票，
+        # 所以 invoice_ids 与 inputs 一一对应、同序，可以直接 zip。
+        outcomes = [
+            DualBatchPairOutcome(
+                key=pair.key,
+                invoice_id=invoice_id,
+                invoice_file_name=pair.invoice_file_name,
+                customs_file_name=pair.customs_file_name,
+                item_count=item_count,
+                needs_review=needs_review,
+            )
+            for pair, invoice_id, (item_count, needs_review) in zip(
+                inputs, response.invoice_ids, per_pair, strict=True
+            )
+        ]
+        return DualBatchResult(
+            batch_id=response.batch_id,
+            invoice_count=response.invoice_count,
+            item_count=response.item_count,
+            needs_review_count=response.needs_review_count,
+            pairs=outcomes,
+        )
+
     async def import_sample(
         self,
         *,
@@ -447,6 +565,13 @@ class TaxInvoiceService:
                 item_rows = list(row.pop("items"))
                 # 只用于定位报错，不是 TaxInvoice 的列，落库前必须摘掉。
                 row.pop("source_rows", None)
+                # 逐票源文件名：服务端批量识别时每张票各有自己的一对文件，行里自带
+                # 这两个键；单票 dual / 表格导入不带，回退到批次级 source_names——
+                # 旧两条链路的行为一字不变。
+                invoice_source = row.pop("source_invoice_file_name", None) or source_names[0]
+                customs_source = row.pop("source_customs_file_name", None)
+                if customs_source is None and len(source_names) > 1:
+                    customs_source = source_names[1]
                 status = self._review_status(row, len(item_rows))
                 if status == "needs_review":
                     needs_review_count += 1
@@ -461,10 +586,8 @@ class TaxInvoiceService:
                     **row,
                     batch_id=batch.id,
                     status=status,
-                    source_invoice_file_name=source_names[0],
-                    source_customs_file_name=(
-                        source_names[1] if len(source_names) > 1 else None
-                    ),
+                    source_invoice_file_name=invoice_source,
+                    source_customs_file_name=customs_source,
                     created_by_name=self.actor_name,
                     updated_by_name=self.actor_name,
                 )
@@ -472,13 +595,19 @@ class TaxInvoiceService:
                 await self.session.flush()
                 for item in item_rows:
                     self.session.add(TaxInvoiceItem(invoice_id=invoice.id, **item))
+                # 时间线上记这张票自己的源文件即可；批量导入时整批清单几十个名字，
+                # 落到每张票上没法看。缺自身文件名（理论上不会）才退回批次清单。
+                imported_note = (
+                    " | ".join(name for name in (invoice_source, customs_source) if name)
+                    or " | ".join(source_names)
+                )
                 self.session.add(
                     self._event(
                         invoice,
                         "imported",
                         None,
                         invoice.status,
-                        " | ".join(source_names),
+                        imported_note,
                     )
                 )
                 invoice_ids.append(invoice.id)

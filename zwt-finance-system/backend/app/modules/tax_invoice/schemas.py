@@ -215,6 +215,41 @@ class DualIdentifyResponse(ApiSchema):
     conflict_count: int
 
 
+# ── 双文件批量导入：一次上传的全部可导入配对 → 一个复核批次 ────────────────────
+# 与 /import/dual/identify 的关系：identify 只预览不入库；/import/dual/batch 是真正
+# 落库那一步——整批一个事务、进 review 态、不自动出编号（编号仍只在 approve 事务里发）。
+
+
+class DualBatchPairResult(ApiSchema):
+    """成功落库的一组：这一对文件建成的税票。"""
+
+    key: str
+    invoice_file_name: str
+    customs_file_name: str | None
+    invoice_id: uuid.UUID
+    item_count: int
+    needs_review: bool
+
+
+class DualSkippedPair(ApiSchema):
+    """识别出来但没导入的一组：孤立关单（缺发票）或冲突（多份不同关单）。"""
+
+    key: str
+    status: Literal["customs_only", "conflict"]
+    reason: str
+
+
+class DualBatchImportResponse(ApiSchema):
+    # 全批没有一组可导入（只有孤立关单/冲突/读不了的文件）时 batch_id 为空。
+    batch_id: uuid.UUID | None = None
+    invoice_count: int
+    item_count: int
+    needs_review_count: int
+    results: list[DualBatchPairResult]
+    rejected: list[DualRejectedFile]
+    skipped: list[DualSkippedPair]
+
+
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 
