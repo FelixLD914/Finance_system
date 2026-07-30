@@ -530,7 +530,26 @@ class WhtService:
             if row["issuance_type"] == "normal" and row["supplement_run"] != 0:
                 errors.append(f"row {row_number}: normal issuance must use SupplementRun 0")
                 continue
-            prepared.append({"row": row, "payee": payee, "wht_rate": wht_rate})
+            # 与单条录入同一条口径：税率偏离法定值必须留痕。批量这里收集错误
+            # 而不是抛，好让用户一次看到所有行的问题（全表退回）。
+            deviation = self._rate_deviation(row["income_type"], payee.wht_type, wht_rate)
+            reason = (row.get("rate_reason") or "").strip() or None
+            if deviation is not None and reason is None:
+                entered, statutory = deviation
+                errors.append(
+                    f"row {row_number}: TaxRateReason is required because {entered} "
+                    f'deviates from the statutory {statutory} for "{row["income_type"]}" '
+                    f"under {payee.wht_type}"
+                )
+                continue
+            prepared.append(
+                {
+                    "row": row,
+                    "payee": payee,
+                    "wht_rate": wht_rate,
+                    "rate_note": self._stamp_rate_note(deviation, reason),
+                }
+            )
 
         if errors:
             raise WhtStateError("; ".join(errors))
@@ -564,8 +583,19 @@ class WhtService:
             self.session.add(task)
             created.append(task)
         await self.session.flush()
-        for task in created:
-            self.session.add(self._event(task, "batch_created", None, "draft", source_file_name))
+        # created 与 prepared 一一对应且同序。事件 note 本来就放来源文件名，
+        # 有税率理由时接在后面，不覆盖掉文件名——两者事后都要能查。
+        for task, entry in zip(created, prepared, strict=True):
+            rate_note = entry["rate_note"]
+            self.session.add(
+                self._event(
+                    task,
+                    "batch_created",
+                    None,
+                    "draft",
+                    f"{source_file_name}；{rate_note}" if rate_note else source_file_name,
+                )
+            )
         await self.session.commit()
         return BatchCreateResult(
             source_file_name=source_file_name,
@@ -664,32 +694,59 @@ class WhtService:
             raise WhtStateError(f"task is incomplete; required fields: {', '.join(missing)}")
 
     @staticmethod
+    def _rate_deviation(
+        income_type: str | None,
+        wht_type: str | None,
+        wht_rate: Decimal | None,
+    ) -> tuple[str, str] | None:
+        """偏离目录法定税率时返回 (实际, 法定) 的百分比文本，没偏离则 None。
+
+        「什么算偏离」只在这里定义一次，单条录入和批量导入共用同一判定，
+        免得两条路各写一份、口径慢慢漂开。目录里查不到这个收入类型
+        （自由输入的类型）时无从比对，一律算不偏离。
+        """
+        if income_type is None or wht_rate is None:
+            return None
+        statutory = income_types.default_rate(income_type, wht_type)
+        if statutory is None or statutory == wht_rate:
+            return None
+        return f"{wht_rate * 100:.2f}%", f"{statutory * 100:.2f}%"
+
+    @staticmethod
+    def _stamp_rate_note(deviation: tuple[str, str] | None, note: str | None) -> str | None:
+        """把实际税率与法定税率盖在理由前面。
+
+        事后审计只看事件 note，只留一句「合同约定 5%」是看不出法定值是多少的，
+        所以两个税率都要写进去。
+        """
+        if deviation is None:
+            return note
+        entered, statutory = deviation
+        return f"税率 {entered}（法定 {statutory}）：{note}"
+
+    @staticmethod
     def _rate_override_note(
         income_type: str | None,
         wht_type: str | None,
         wht_rate: Decimal | None,
         supplied_note: str | None,
     ) -> str | None:
-        """税率偏离目录法定值时要求填理由，返回要写进建单事件的 note。
+        """单条录入路径：税率偏离目录法定值时要求填理由，返回事件 note。
 
         偏离与否由服务端按目录自己判定 —— 前端的警示只是提醒，直接打 API 的
-        调用方绕不过去。目录里查不到这个收入类型（自由输入的类型）时无从比对，
-        不强制；此时理由若有仍然记下。
+        调用方绕不过去。没偏离时理由若有仍然记下。
         """
         note = (supplied_note or "").strip() or None
-        if income_type is None or wht_rate is None:
+        deviation = WhtService._rate_deviation(income_type, wht_type, wht_rate)
+        if deviation is None:
             return note
-        statutory = income_types.default_rate(income_type, wht_type)
-        if statutory is None or statutory == wht_rate:
-            return note
-        entered_pct = f"{wht_rate * 100:.2f}%"
-        statutory_pct = f"{statutory * 100:.2f}%"
         if note is None:
+            entered, statutory = deviation
             raise WhtStateError(
-                f"rateOverrideNote is required: {entered_pct} deviates from the "
-                f'statutory {statutory_pct} for "{income_type}" under {wht_type}'
+                f"rateOverrideNote is required: {entered} deviates from the "
+                f'statutory {statutory} for "{income_type}" under {wht_type}'
             )
-        return f"税率 {entered_pct}（法定 {statutory_pct}）：{note}"
+        return WhtService._stamp_rate_note(deviation, note)
 
     @staticmethod
     def _calculated_wht_amount(
