@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ApiOutlined,
+  AuditOutlined,
   CheckCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
@@ -65,8 +66,14 @@ import {
   importSample,
   listRateCurrencies,
   matchTaxInvoiceRate,
+  listImportBatches,
   listTaxInvoiceDocuments,
   listTaxInvoices,
+  listTaxInvoicesByBatch,
+  approveTaxInvoiceBatch,
+  rejectTaxInvoiceBatch,
+  rejectTaxInvoice,
+  restoreTaxInvoice,
   updateTaxInvoice,
   voidTaxInvoice,
 } from "./api";
@@ -80,6 +87,7 @@ import type {
   BotApiStatus,
   DualIdentifyResult,
   DualPairPreview,
+  ImportBatch,
   TaxInvoice,
   TaxInvoiceDocument,
   TaxInvoiceItem,
@@ -87,7 +95,7 @@ import type {
 } from "./types";
 import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
-type WorkspaceView = "ledger" | "recognition" | "batch" | "rates";
+type WorkspaceView = "ledger" | "review" | "recognition" | "batch" | "rates";
 
 /**
  * Sample 表格的表头要求，与后端 parse_sample_workbook 一一对应
@@ -423,6 +431,8 @@ function InvoiceInspector({
   onVoid,
   onCorrection,
   onMatchRate,
+  onReject,
+  onRestore,
 }: {
   invoice: TaxInvoice;
   documents: TaxInvoiceDocument[];
@@ -437,6 +447,8 @@ function InvoiceInspector({
   onVoid: () => void;
   onCorrection: () => void;
   onMatchRate: () => void;
+  onReject: () => void;
+  onRestore: () => void;
 }) {
   const warnings = warningCount(invoice);
   const canApprove = ["draft", "needs_review", "ready"].includes(invoice.status);
@@ -632,6 +644,23 @@ function InvoiceInspector({
             {t("tax.approve")}
           </Button>
         )}
+        {/* 拒批＝软删除：未批准的可拒批进历史，编号未发、可再恢复。 */}
+        {canApprove && (
+          <Button block danger disabled={busy} onClick={onReject}>
+            {t("tax.reject")}
+          </Button>
+        )}
+        {invoice.status === "rejected" && (
+          <Button
+            block
+            icon={<ReloadOutlined />}
+            loading={busy}
+            type="primary"
+            onClick={onRestore}
+          >
+            {t("tax.restore")}
+          </Button>
+        )}
         {["approved", "issued"].includes(invoice.status) && (
           <Button block danger disabled={busy} onClick={onVoid}>
             {t("tax.void")}
@@ -673,6 +702,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [status, setStatus] = useState<TaxInvoiceStatus | "all">("all");
   const [period, setPeriod] = useState("all");
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
+  // 复核台：导入批次列表 → 钻进某一批的对账表。
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const [selectedBatch, setSelectedBatch] = useState<ImportBatch | null>(null);
+  const [batchInvoices, setBatchInvoices] = useState<TaxInvoice[]>([]);
+  const [batchInvoicesLoading, setBatchInvoicesLoading] = useState(false);
+  const [reviewSelectedKeys, setReviewSelectedKeys] = useState<string[]>([]);
+  const [reviewQuery, setReviewQuery] = useState("");
   // 识别建单的文件队列。Excel 与 PDF 分开放：配对键在文件内容里（C/I No.），
   // 浏览器解析不了，得整批发给后端识别才知道谁跟谁一组。
   const [dualQueue, setDualQueue] = useState<{
@@ -716,6 +753,35 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   }, [message, t]);
 
+  const refreshBatches = useCallback(async () => {
+    setBatchesLoading(true);
+    try {
+      setBatches(await listImportBatches());
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.batchesLoadFailed"));
+    } finally {
+      setBatchesLoading(false);
+    }
+  }, [message, t]);
+
+  const openBatch = useCallback(
+    async (batch: ImportBatch) => {
+      setSelectedBatch(batch);
+      setReviewSelectedKeys([]);
+      setSelected(null);
+      setBatchInvoicesLoading(true);
+      try {
+        const response = await listTaxInvoicesByBatch(batch.id);
+        setBatchInvoices(response.items);
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : t("tax.detailLoadFailed"));
+      } finally {
+        setBatchInvoicesLoading(false);
+      }
+    },
+    [message, t],
+  );
+
   useEffect(() => {
     void refreshInvoices();
     // 配置自检和币种列表失败都不该打断页面：拿不到就退化，不弹错。
@@ -726,6 +792,20 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       .then((items) => setCurrencies(items.length ? items : ["USD"]))
       .catch(() => setCurrencies(["USD"]));
   }, [refreshInvoices]);
+
+  // 进复核台时拉批次列表（首次进入、或从别的视图切回都刷新一遍）。
+  useEffect(() => {
+    if (view === "review") void refreshBatches();
+  }, [view, refreshBatches]);
+
+  // 台账里某张票被单条操作（批准/拒批/恢复/改…）后，把变化镜像进复核台的
+  // 对账表——省得每个单条 handler 都各自去动 batchInvoices。只更新两边都在的行。
+  useEffect(() => {
+    if (!selectedBatch) return;
+    setBatchInvoices((current) =>
+      current.map((row) => invoices.find((item) => item.id === row.id) ?? row),
+    );
+  }, [invoices, selectedBatch]);
 
   // 汇率的拉取已随 UI 一起移进 ExchangeRateDirectory，这里不再有 refreshRates。
 
@@ -772,6 +852,17 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
   }, [invoices, period, phase, query, status]);
+
+  // 复核台对账表的客户端筛选：一个搜索框跨 编号/CI/CDN/客户 过滤。
+  const reviewRows = useMemo(() => {
+    const normalized = reviewQuery.trim().toLocaleLowerCase();
+    if (!normalized) return batchInvoices;
+    return batchInvoices.filter((invoice) =>
+      [invoice.documentNo, invoice.ciNo, invoice.cdn, invoice.customerName].some(
+        (value) => value?.toLocaleLowerCase().includes(normalized),
+      ),
+    );
+  }, [batchInvoices, reviewQuery]);
 
   const lifecycleCounts = useMemo(
     () => ({
@@ -827,6 +918,67 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       fixed: "right",
       width: 105,
       render: (value: TaxInvoiceStatus) => <StatusTag status={value} t={t} />,
+    },
+  ];
+
+  // 复核台对账表的列。除台账那几列外，末尾并排「海关汇率 / 报关单 THB」，
+  // 让本系统按 BOT 汇率算出来的 FOB THB 与报关单自印的泰铢直接对照。
+  const reviewColumns: ColumnsType<TaxInvoice> = [
+    {
+      title: t("tax.colStatus"),
+      dataIndex: "status",
+      width: 96,
+      fixed: "left",
+      filters: STATUS_ORDER.map((value) => ({ text: statusLabel(value, t), value })),
+      onFilter: (value, record) => record.status === value,
+      render: (value: TaxInvoiceStatus) => <StatusTag status={value} t={t} />,
+    },
+    {
+      title: t("tax.colDocumentNo"),
+      dataIndex: "documentNo",
+      width: 175,
+      ellipsis: true,
+      render: (value: string | null) => value ?? t("tax.pendingNumber"),
+    },
+    { title: "C/I No.", dataIndex: "ciNo", width: 140, ellipsis: true },
+    { title: t("tax.colCdn"), dataIndex: "cdn", width: 150, ellipsis: true },
+    { title: t("tax.colInvoiceDate"), dataIndex: "invoiceDate", width: 125, render: dateLabel },
+    {
+      title: t("tax.colCustomer"),
+      dataIndex: "customerName",
+      width: 200,
+      ellipsis: true,
+      render: (value: string) => <ThaiText>{value}</ThaiText>,
+    },
+    { title: t("tax.colIncoterms"), dataIndex: "incoterms", width: 88 },
+    {
+      title: t("tax.botRate"),
+      dataIndex: "exchangeRate",
+      width: 104,
+      align: "right",
+      render: (value: string | null) =>
+        value ? Number(value).toFixed(4) : t("tax.rateUnmatched"),
+    },
+    {
+      title: "FOB THB",
+      dataIndex: "fobRevenueThbTotal",
+      width: 128,
+      align: "right",
+      render: (value: string | null) => money(value, locale),
+    },
+    {
+      title: t("tax.colCustomsRate"),
+      dataIndex: "customsExchangeRate",
+      width: 104,
+      align: "right",
+      render: (value: string | null) => (value ? Number(value).toFixed(4) : "—"),
+    },
+    {
+      title: t("tax.colCustomsThb"),
+      dataIndex: "customsFobThbPrintedTotal",
+      width: 138,
+      align: "right",
+      render: (value: string | null) => money(value, locale),
     },
   ];
 
@@ -908,6 +1060,50 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       );
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.matchRateFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectSelected = () => {
+    if (!selected) return;
+    modal.confirm({
+      title: t("tax.rejectTitle"),
+      content: t("tax.rejectBody"),
+      okText: t("tax.reject"),
+      okButtonProps: { danger: true },
+      cancelText: t("common.cancel"),
+      async onOk() {
+        setBusy(true);
+        try {
+          const updated = await rejectTaxInvoice(selected.id, selected.version);
+          setSelected(updated);
+          setInvoices((current) =>
+            current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
+          );
+          message.success(t("tax.rejected"));
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : t("tax.rejectFailed"));
+          throw error;
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
+  const restoreSelected = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const updated = await restoreTaxInvoice(selected.id, selected.version);
+      setSelected(updated);
+      setInvoices((current) =>
+        current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
+      );
+      message.success(t("tax.restored"));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.restoreFailed"));
     } finally {
       setBusy(false);
     }
@@ -1265,6 +1461,96 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
+  // 批量批准/拒批后：批次计数、对账表、台账全变了，一起刷新并清空勾选。
+  const reloadAfterBatchAction = useCallback(async () => {
+    await Promise.all([refreshBatches(), refreshInvoices()]);
+    if (selectedBatch) {
+      try {
+        const response = await listTaxInvoicesByBatch(selectedBatch.id);
+        setBatchInvoices(response.items);
+      } catch {
+        // 对账表刷新失败不致命：批次列表和台账已更新，用户可手动重进这批。
+      }
+    }
+    setReviewSelectedKeys([]);
+  }, [refreshBatches, refreshInvoices, selectedBatch]);
+
+  const runBatchApprove = async (scope: "all" | "selected") => {
+    if (!selectedBatch) return;
+    if (scope === "selected" && !reviewSelectedKeys.length) {
+      message.warning(t("tax.reviewSelectNone"));
+      return;
+    }
+    setBusy(true);
+    try {
+      // acceptWarnings=false：有警告（DAP / FOB 不符 / 提交日低可信）的不在批量里
+      // 静默批准，会被跳过并列出，交给用户逐条在详情里确认。
+      const result = await approveTaxInvoiceBatch(
+        selectedBatch.id,
+        scope === "selected" ? reviewSelectedKeys : null,
+        false,
+      );
+      if (result.skipped.length) {
+        message.warning(
+          t("tax.batchApprovePartial", {
+            ok: result.approvedCount,
+            skipped: result.skipped.length,
+          }),
+        );
+      } else {
+        message.success(t("tax.batchApproveDone", { count: result.approvedCount }));
+      }
+      await reloadAfterBatchAction();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.approveFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runBatchReject = (scope: "all" | "selected") => {
+    if (!selectedBatch) return;
+    if (scope === "selected" && !reviewSelectedKeys.length) {
+      message.warning(t("tax.reviewSelectNone"));
+      return;
+    }
+    const batchId = selectedBatch.id;
+    const ids = scope === "selected" ? reviewSelectedKeys : null;
+    modal.confirm({
+      title: t("tax.batchRejectTitle"),
+      content: t("tax.batchRejectBody"),
+      okText: t("tax.reject"),
+      okButtonProps: { danger: true },
+      cancelText: t("common.cancel"),
+      async onOk() {
+        setBusy(true);
+        try {
+          const result = await rejectTaxInvoiceBatch(batchId, ids);
+          message.success(t("tax.batchRejectDone", { count: result.rejectedCount }));
+          await reloadAfterBatchAction();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : t("tax.rejectFailed"));
+          throw error;
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
+  const runBatchExport = async () => {
+    if (!selectedBatch) return;
+    setBusy(true);
+    try {
+      await exportTaxInvoiceLedger({ batchId: selectedBatch.id });
+      message.success(t("tax.exportDone"));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.exportFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runRateImport = async () => {
     if (!rateFile) {
       message.warning(t("tax.rateFileRequired"));
@@ -1346,6 +1632,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         >
           <DatabaseOutlined />
           {t("tax.ledger")}
+        </button>
+        <button
+          className={view === "review" ? "is-active" : ""}
+          type="button"
+          onClick={() => setView("review")}
+        >
+          <AuditOutlined />
+          {t("tax.review")}
         </button>
         <button
           className={view === "recognition" ? "is-active" : ""}
@@ -1486,6 +1780,192 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               onEdit={openEdit}
               onGenerate={() => void generateSelected()}
               onMatchRate={() => void matchRateSelected()}
+              onReject={rejectSelected}
+              onRestore={() => void restoreSelected()}
+              onCorrection={() => {
+                setWorkflowReason("");
+                setWorkflowAction("correction");
+              }}
+              onVoid={() => {
+                setWorkflowReason("");
+                setWorkflowAction("void");
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {view === "review" && (
+        <div className={`tax-ledger-layout${selected ? " has-inspector" : ""}`}>
+          <main className="tax-ledger-main">
+            {!selectedBatch ? (
+              <>
+                <div className="tax-review-head">
+                  <div>
+                    <h2>{t("tax.reviewBatches")}</h2>
+                    <p>{t("tax.reviewBatchesHint")}</p>
+                  </div>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    loading={batchesLoading}
+                    onClick={() => void refreshBatches()}
+                  >
+                    {t("common.refresh")}
+                  </Button>
+                </div>
+                <Table<ImportBatch>
+                  columns={[
+                    {
+                      title: t("tax.reviewBatchFiles"),
+                      dataIndex: "sourceFileNames",
+                      ellipsis: true,
+                      render: (value: string) => <span title={value}>{value}</span>,
+                    },
+                    {
+                      title: t("tax.reviewBatchMode"),
+                      dataIndex: "importMode",
+                      width: 96,
+                    },
+                    {
+                      title: t("tax.reviewBatchTotal"),
+                      dataIndex: "total",
+                      width: 72,
+                      align: "right",
+                    },
+                    {
+                      title: t("tax.countNeedsReview"),
+                      dataIndex: "needsReview",
+                      width: 88,
+                      align: "right",
+                    },
+                    {
+                      title: t("tax.reviewBatchApproved"),
+                      dataIndex: "approved",
+                      width: 88,
+                      align: "right",
+                    },
+                    {
+                      title: t("tax.reviewBatchCreated"),
+                      dataIndex: "createdAt",
+                      width: 150,
+                      render: (value: string) => dateTime(value, locale),
+                    },
+                  ]}
+                  dataSource={batches}
+                  loading={batchesLoading}
+                  pagination={{ pageSize: 12, showSizeChanger: false }}
+                  rowKey="id"
+                  size="middle"
+                  onRow={(record) => ({ onClick: () => void openBatch(record) })}
+                  locale={{ emptyText: <Empty description={t("tax.reviewNoBatches")} /> }}
+                />
+              </>
+            ) : (
+              <>
+                <div className="tax-review-head">
+                  <div>
+                    <Button
+                      className="tax-review-back"
+                      size="small"
+                      type="link"
+                      onClick={() => {
+                        setSelectedBatch(null);
+                        setSelected(null);
+                      }}
+                    >
+                      ← {t("tax.reviewBackToList")}
+                    </Button>
+                    <h2 title={selectedBatch.sourceFileNames}>
+                      {selectedBatch.sourceFileNames}
+                    </h2>
+                    <p>
+                      {t("tax.reviewBatchSummary", {
+                        total: selectedBatch.total,
+                        pending: selectedBatch.pending,
+                        approved: selectedBatch.approved,
+                      })}
+                    </p>
+                  </div>
+                </div>
+                <div className="tax-review-actions">
+                  <Input.Search
+                    allowClear
+                    placeholder={t("tax.searchPlaceholder")}
+                    value={reviewQuery}
+                    onChange={(event) => setReviewQuery(event.target.value)}
+                  />
+                  <span className="tax-review-spacer" />
+                  <Button
+                    icon={<DownloadOutlined />}
+                    loading={busy}
+                    onClick={() => void runBatchExport()}
+                  >
+                    {t("tax.reviewExport")}
+                  </Button>
+                  <Button
+                    danger
+                    disabled={busy}
+                    onClick={() =>
+                      runBatchReject(reviewSelectedKeys.length ? "selected" : "all")
+                    }
+                  >
+                    {reviewSelectedKeys.length
+                      ? t("tax.reviewRejectSelected", { count: reviewSelectedKeys.length })
+                      : t("tax.reviewRejectAll")}
+                  </Button>
+                  <Button
+                    loading={busy}
+                    type="primary"
+                    onClick={() =>
+                      void runBatchApprove(reviewSelectedKeys.length ? "selected" : "all")
+                    }
+                  >
+                    {reviewSelectedKeys.length
+                      ? t("tax.reviewApproveSelected", { count: reviewSelectedKeys.length })
+                      : t("tax.reviewApproveAll")}
+                  </Button>
+                </div>
+                <Table<TaxInvoice>
+                  columns={reviewColumns}
+                  dataSource={reviewRows}
+                  loading={batchInvoicesLoading}
+                  pagination={{ pageSize: 15, showSizeChanger: false }}
+                  rowClassName={(record) =>
+                    record.id === selected?.id ? "selected-table-row" : ""
+                  }
+                  rowKey="id"
+                  rowSelection={{
+                    selectedRowKeys: reviewSelectedKeys,
+                    onChange: (keys) => setReviewSelectedKeys(keys.map(String)),
+                    // 只有未批准的才能被批量批准/拒批；已批准/已开具/已拒批的不给勾。
+                    getCheckboxProps: (record) => ({
+                      disabled: !["draft", "needs_review", "ready"].includes(
+                        record.status,
+                      ),
+                    }),
+                  }}
+                  scroll={{ x: 1500, y: "calc(100vh - 430px)" }}
+                  size="middle"
+                  onRow={(record) => ({ onClick: () => void openInvoice(record.id) })}
+                />
+              </>
+            )}
+          </main>
+          {selected && (
+            <InvoiceInspector
+              busy={busy}
+              documents={documents}
+              invoice={selected}
+              locale={locale}
+              t={t}
+              onApprove={approveSelected}
+              onClose={() => setSelected(null)}
+              onDownload={(document) => void downloadTaxInvoiceDocument(document)}
+              onEdit={openEdit}
+              onGenerate={() => void generateSelected()}
+              onMatchRate={() => void matchRateSelected()}
+              onReject={rejectSelected}
+              onRestore={() => void restoreSelected()}
               onCorrection={() => {
                 setWorkflowReason("");
                 setWorkflowAction("correction");

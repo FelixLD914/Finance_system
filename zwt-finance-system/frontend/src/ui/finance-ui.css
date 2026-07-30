@@ -543,6 +543,51 @@
   padding-inline: 0;
 }
 
+/* 复核台：批次列表 / 详情的头部与操作条。 */
+.tax-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 20px 10px;
+}
+
+.tax-review-head h2 {
+  margin: 2px 0;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+}
+
+.tax-review-head p {
+  margin: 0;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+}
+
+.tax-review-back {
+  height: auto;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.tax-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px 12px;
+}
+
+.tax-review-actions .ant-input-search {
+  max-width: 260px;
+}
+
+.tax-review-spacer {
+  flex: 1;
+}
+
 /* 末尾两列是「刷新」和「导出台账」。这条规则覆盖 global.css 里的同名选择器
    （main.tsx 里 finance-ui.css 排最后），列数要跟着筛选栏的按钮数一起改。 */
 .tax-filter-bar {
