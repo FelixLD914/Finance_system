@@ -2,11 +2,8 @@ import { useState } from "react";
 import {
   DownOutlined,
   GlobalOutlined,
-  GoogleOutlined,
   LockOutlined,
-  SafetyOutlined,
   UserOutlined,
-  WindowsFilled,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -14,7 +11,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Divider,
   Form,
   Input,
   Tooltip,
@@ -40,17 +36,6 @@ const REMEMBERED_USERNAME_KEY = "zwt.login.username";
 function rememberedUsername(): string {
   return window.localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? "";
 }
-
-/**
- * 后端只有账号口令一条登录路径（POST /v1/auth/login），没有任何联合登录端点。
- * 这三个入口按设计稿保留位置，但必须保持 disabled：点了没反应的按钮比不画更糟，
- * 禁用态加上 tooltip 至少把"还没开通"说清楚。真接了 SSO 再逐个放开。
- */
-const federatedProviders = [
-  { key: "windows", label: "Windows", icon: <WindowsFilled /> },
-  { key: "google", label: "Google", icon: <GoogleOutlined /> },
-  { key: "sso", label: "SSO", icon: <SafetyOutlined /> },
-] as const;
 
 interface LoginScreenProps {
   onToggleLocale: () => void;
@@ -193,21 +178,6 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
             {t("login.submit")}
           </Button>
         </Form>
-
-        <Divider className="login-divider" plain>
-          {t("login.altDivider")}
-        </Divider>
-
-        {/* Tooltip 挂在外层容器上：disabled 按钮自己收不到 hover 事件。 */}
-        <Tooltip title={t("login.ssoDisabled")}>
-          <div className="login-federated">
-            {federatedProviders.map((provider) => (
-              <Button disabled icon={provider.icon} key={provider.key} size="large">
-                {provider.label}
-              </Button>
-            ))}
-          </div>
-        </Tooltip>
       </Card>
 
       <footer className="login-footer">

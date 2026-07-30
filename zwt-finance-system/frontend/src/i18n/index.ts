@@ -63,8 +63,6 @@ const resources = {
       "系统不提供自助重置。请联系财务部管理员，说明工号和用户名，由管理员重置后直接告知新口令。",
     "login.submit": "登录",
     "login.failed": "登录失败，请稍后重试",
-    "login.altDivider": "或",
-    "login.ssoDisabled": "单点登录尚未开通，请使用财务部分配的账号和口令登录",
     "login.switchLanguage": "切换界面语言",
     "login.copyright": "© {year} ZWT Finance",
     "login.internalOnly": "内部系统，仅限授权人员使用",
@@ -732,9 +730,6 @@ const resources = {
       "There is no self-service reset. Contact a Finance administrator with your employee ID and username; they will reset it and give you the new password directly.",
     "login.submit": "Login",
     "login.failed": "Sign-in failed. Please try again.",
-    "login.altDivider": "or",
-    "login.ssoDisabled":
-      "Single sign-on is not enabled yet — use the username and password issued by Finance",
     "login.switchLanguage": "Switch interface language",
     "login.copyright": "© {year} ZWT Finance",
     "login.internalOnly": "Internal system — authorised personnel only",
