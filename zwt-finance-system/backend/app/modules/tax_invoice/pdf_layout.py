@@ -3,7 +3,7 @@
 由 scripts/build_tax_inv_underlay.py 从 TAX-INV-Template.pdf 的制版过程中量出，
 和同目录下的底版一一对应。模板 xlsx 一旦改动，底版和这张表必须一起重新生成。
 
-源模板 sha256: b3642c712dc59cbee63fd483ac25863436a0c6b052a534e221958b3ea9643605
+源模板 sha256: a0646b43dc338ff5397919fbccf4baf41c109931e7f179c22722e3b2030f75c0
 
 坐标单位是 PDF 点，原点在页面左下角——正好是 ReportLab 的坐标系。
 baseline 是文字基线的 y，直接喂给 drawString 即可。三联在同一张工作表的
