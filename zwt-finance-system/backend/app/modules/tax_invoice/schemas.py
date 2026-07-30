@@ -125,6 +125,10 @@ class TaxInvoiceApproveRequest(ApiSchema):
     note: str | None = Field(default=None, max_length=1000)
 
 
+class TaxInvoiceMatchRateRequest(ApiSchema):
+    version: int = Field(ge=1)
+
+
 class TaxInvoiceVoidRequest(ApiSchema):
     version: int = Field(ge=1)
     reason: str = Field(min_length=2, max_length=1000)

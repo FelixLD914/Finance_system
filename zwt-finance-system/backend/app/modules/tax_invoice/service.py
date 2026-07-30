@@ -24,7 +24,11 @@ from app.modules.tax_invoice.models import (
     TaxInvoiceItem,
 )
 from app.modules.tax_invoice.number_service import assign_tax_invoice_number
-from app.modules.tax_invoice.recognition import combine_invoice_and_customs
+from app.modules.tax_invoice.recognition import (
+    combine_invoice_and_customs,
+    lookup_fx_rate,
+    recompute_line_thb,
+)
 from app.modules.tax_invoice.schemas import (
     BotApiStatus,
     ExchangeRateFetchRequest,
@@ -58,6 +62,10 @@ class TaxInvoiceStateError(TaxInvoiceServiceError):
 # 一次导出最多带走这么多张税票。纯粹是内存护栏：整份台账都摊平成商品行
 # 塞进一个 openpyxl 工作簿，没有上限的话总有一天会把进程撑爆。
 MAX_EXPORT_INVOICES = 2000
+
+# BOT 汇率最多往报关提交日之前回溯这么多天。查询窗口与 lookup_fx_rate 的
+# 回溯步数必须同源——分开写两个 9，改一处漏一处就会一边查得到、一边取不到。
+RATE_LOOKBACK_DAYS = 9
 
 # 正式模板的物理容量。超过就必须拒绝批准，不得截断。
 APPROVAL_ITEM_LIMIT = 18
@@ -279,24 +287,7 @@ class TaxInvoiceService:
         submission_date = customs_data.get("submission_date")
         rates: dict[date, Decimal] = {}
         if isinstance(submission_date, date):
-            rate_rows = list(
-                (
-                    await self.session.scalars(
-                        select(ExchangeRate).where(
-                            ExchangeRate.currency == currency.upper(),
-                            ExchangeRate.rate_date.between(
-                                submission_date - timedelta(days=9),
-                                submission_date,
-                            ),
-                            # 停用或已删的汇率不参与计价。这是「停用」在汇率上
-                            # 唯一有业务后果的地方：查得到、但不再被税票取用。
-                            ExchangeRate.is_active.is_(True),
-                            ExchangeRate.deleted_at.is_(None),
-                        )
-                    )
-                ).all()
-            )
-            rates = {row.rate_date: row.buying_transfer for row in rate_rows}
+            rates = await self._bot_rate_window(currency, submission_date)
         recognized = combine_invoice_and_customs(
             invoice_data,
             customs_data,
@@ -564,6 +555,111 @@ class TaxInvoiceService:
         invoice.updated_by_name = self.actor_name
         self.session.add(
             self._event(invoice, "updated", None, invoice.status)
+        )
+        await self.session.commit()
+        await self.session.refresh(invoice)
+        return await self.aggregate(invoice)
+
+    async def _bot_rate_window(
+        self,
+        currency: str,
+        target: date,
+    ) -> dict[date, Decimal]:
+        """报关提交日往前 RATE_LOOKBACK_DAYS 天内、该币种在用的 BOT 买入汇率。
+
+        识别建单（import_dual）和事后重匹配（match_exchange_rate）共用这一段查询，
+        计价口径才只有一处。停用/已删的汇率查得到但不参与计价，所以在这里就滤掉。
+        """
+        rate_rows = list(
+            (
+                await self.session.scalars(
+                    select(ExchangeRate).where(
+                        ExchangeRate.currency == currency.upper(),
+                        ExchangeRate.rate_date.between(
+                            target - timedelta(days=RATE_LOOKBACK_DAYS),
+                            target,
+                        ),
+                        ExchangeRate.is_active.is_(True),
+                        ExchangeRate.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        return {row.rate_date: row.buying_transfer for row in rate_rows}
+
+    async def match_exchange_rate(
+        self,
+        invoice_id: uuid.UUID,
+        *,
+        version: int,
+    ) -> InvoiceAggregate:
+        """事后按报关提交日重新匹配 BOT 汇率，并重算每一行的 THB。
+
+        为什么需要它：识别建单时的汇率匹配是一次性的——若那时汇率表里还没有
+        当期数据（常见：先导票、后同步 BOT 汇率），这张票就一直空着汇率，只能
+        逐张手填。这里把同一套匹配逻辑做成可重跑的动作，接在「同步汇率」之后用。
+
+        只动未批准的记录：已批准/已开具的编号和金额都定了，要改必须走作废→更正。
+        """
+        invoice = await self._load_invoice(invoice_id, for_update=True)
+        self._check_version(invoice, version)
+        if invoice.status not in {"draft", "needs_review", "ready"}:
+            raise TaxInvoiceStateError(
+                "only an unapproved invoice can be re-matched to a rate"
+            )
+        target = invoice.exchange_target_date
+        if target is None:
+            raise TaxInvoiceStateError(
+                "set the exchange target date (customs submission date) "
+                "before matching a rate"
+            )
+        rates = await self._bot_rate_window(invoice.currency, target)
+        rate, matched = lookup_fx_rate(rates, target)
+        if rate is None:
+            raise TaxInvoiceStateError(
+                f"no active BOT {invoice.currency} rate within "
+                f"{RATE_LOOKBACK_DAYS} days before {target:%Y-%m-%d}; "
+                "sync or import the BOT rate table for that period first"
+            )
+        items = list(
+            (
+                await self.session.scalars(
+                    select(TaxInvoiceItem)
+                    .where(TaxInvoiceItem.invoice_id == invoice.id)
+                    .order_by(TaxInvoiceItem.line_number)
+                )
+            ).all()
+        )
+        invoice.exchange_rate = rate
+        invoice.exchange_rate_date = matched
+        thb_total = Decimal("0")
+        for item in items:
+            item.fob_revenue_thb = recompute_line_thb(item.fob_revenue_usd, rate)
+            thb_total += item.fob_revenue_thb or Decimal("0")
+        invoice.fob_revenue_thb_total = thb_total
+        # 填上汇率后可能就从「需复核」升到「就绪」，用同一套口径重判一次。
+        invoice.status = self._review_status(
+            {
+                "invoice_date": invoice.invoice_date,
+                "exchange_target_date": invoice.exchange_target_date,
+                "exchange_rate": invoice.exchange_rate,
+                "customer_name": invoice.customer_name,
+                "customer_address": invoice.customer_address,
+                "fob_verification_failed": invoice.fob_verification_failed,
+                "submission_date_low_confidence": invoice.submission_date_low_confidence,
+            },
+            len(items),
+        )
+        invoice.version += 1
+        invoice.updated_by_name = self.actor_name
+        self.session.add(
+            self._event(
+                invoice,
+                "rate_matched",
+                None,
+                invoice.status,
+                f"{invoice.currency} {rate} @ {matched:%Y-%m-%d}",
+            )
         )
         await self.session.commit()
         await self.session.refresh(invoice)

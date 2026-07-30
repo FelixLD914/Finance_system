@@ -580,6 +580,21 @@ def lookup_fx_rate(
     return None, target_date
 
 
+def recompute_line_thb(
+    fob_usd: Decimal | None,
+    rate: Decimal | None,
+) -> Decimal | None:
+    """一行 USD 金额 × 汇率 → THB，四舍五入到分。
+
+    THB 折算的舍入口径只应有这一处：识别建单（combine_invoice_and_customs）与
+    事后的汇率重匹配（service.match_exchange_rate）都从这里取，别再各写一遍
+    quantize——两处一旦漂移，台账和 PDF 印出来就会差一分，而这种差异是静默的。
+    """
+    if fob_usd is None or rate is None:
+        return None
+    return (fob_usd * rate).quantize(MONEY, rounding=ROUND_HALF_UP)
+
+
 def combine_invoice_and_customs(
     invoice: Mapping[str, Any],
     customs: Mapping[str, Any],
@@ -623,11 +638,7 @@ def combine_invoice_and_customs(
             if fob_unit_price is not None and quantity is not None
             else None
         )
-        fob_thb = (
-            (fob_usd * exchange_rate).quantize(MONEY, rounding=ROUND_HALF_UP)
-            if fob_usd is not None and exchange_rate is not None
-            else None
-        )
+        fob_thb = recompute_line_thb(fob_usd, exchange_rate)
         items.append(
             {
                 **source,

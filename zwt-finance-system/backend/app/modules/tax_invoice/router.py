@@ -60,6 +60,7 @@ from app.modules.tax_invoice.schemas import (
     TaxInvoiceImportResponse,
     TaxInvoiceItemResponse,
     TaxInvoiceListResponse,
+    TaxInvoiceMatchRateRequest,
     TaxInvoiceResponse,
     TaxInvoiceUpdate,
     TaxInvoiceVoidRequest,
@@ -247,6 +248,22 @@ async def approve_invoice(
             accept_warnings=payload.accept_warnings,
             note=payload.note,
         )
+    )
+
+
+@router.post(
+    "/invoices/{invoice_id}/match-rate",
+    response_model=TaxInvoiceResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def match_invoice_rate(
+    invoice_id: uuid.UUID,
+    payload: TaxInvoiceMatchRateRequest,
+    service: ServiceDependency,
+) -> TaxInvoiceResponse:
+    """按报关提交日重新匹配 BOT 汇率并重算 THB。用于「先导票、后同步汇率」。"""
+    return _response(
+        await service.match_exchange_rate(invoice_id, version=payload.version)
     )
 
 

@@ -64,6 +64,7 @@ import {
   importExchangeRates,
   importSample,
   listRateCurrencies,
+  matchTaxInvoiceRate,
   listTaxInvoiceDocuments,
   listTaxInvoices,
   updateTaxInvoice,
@@ -417,6 +418,7 @@ function InvoiceInspector({
   onEdit,
   onVoid,
   onCorrection,
+  onMatchRate,
 }: {
   invoice: TaxInvoice;
   documents: TaxInvoiceDocument[];
@@ -430,6 +432,7 @@ function InvoiceInspector({
   onEdit: () => void;
   onVoid: () => void;
   onCorrection: () => void;
+  onMatchRate: () => void;
 }) {
   const warnings = warningCount(invoice);
   const canApprove = ["draft", "needs_review", "ready"].includes(invoice.status);
@@ -483,9 +486,26 @@ function InvoiceInspector({
             {dateLabel(invoice.exchangeRateDate)}
           </Descriptions.Item>
           <Descriptions.Item label={t("tax.botRate")}>
-            {invoice.exchangeRate
-              ? `${invoice.currency} / THB ${Number(invoice.exchangeRate).toFixed(4)}`
-              : t("tax.rateUnmatched")}
+            {invoice.exchangeRate ? (
+              `${invoice.currency} / THB ${Number(invoice.exchangeRate).toFixed(4)}`
+            ) : (
+              // 汇率是一次性在识别建单时匹配的；那时汇率表若无当期数据就一直空着。
+              // 未批准的记录给一个「按提交日重新匹配」的入口，省得逐张手抄。
+              <span className="tax-rate-unmatched">
+                {t("tax.rateUnmatched")}
+                {canApprove && (
+                  <Button
+                    icon={<ApiOutlined />}
+                    loading={busy}
+                    size="small"
+                    type="link"
+                    onClick={onMatchRate}
+                  >
+                    {t("tax.matchRate")}
+                  </Button>
+                )}
+              </span>
+            )}
           </Descriptions.Item>
         </Descriptions>
       </section>
@@ -863,6 +883,27 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       message.success(t("tax.documentsGenerated"));
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.generateFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const matchRateSelected = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const updated = await matchTaxInvoiceRate(selected.id, selected.version);
+      setSelected(updated);
+      setInvoices((current) =>
+        current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
+      );
+      message.success(
+        t("tax.matchRateDone", {
+          rate: updated.exchangeRate ? Number(updated.exchangeRate).toFixed(4) : "",
+        }),
+      );
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.matchRateFailed"));
     } finally {
       setBusy(false);
     }
@@ -1440,6 +1481,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               onDownload={(document) => void downloadTaxInvoiceDocument(document)}
               onEdit={openEdit}
               onGenerate={() => void generateSelected()}
+              onMatchRate={() => void matchRateSelected()}
               onCorrection={() => {
                 setWorkflowReason("");
                 setWorkflowAction("correction");
