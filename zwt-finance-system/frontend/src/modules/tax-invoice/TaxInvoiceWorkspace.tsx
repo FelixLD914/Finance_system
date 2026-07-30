@@ -40,7 +40,7 @@ import {
   Tooltip,
   Upload,
 } from "antd";
-import type { UploadFile } from "antd";
+import type { TableProps, UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { Locale, Translate } from "../../i18n";
@@ -97,6 +97,21 @@ import type {
 import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
 type WorkspaceView = "ledger" | "review" | "recognition" | "batch" | "rates";
+
+// 台账里可行内编辑的字段（都在后端 TaxInvoiceUpdate 里、且是 date/文本类）。
+// 编号/CI/CDN 不在更新 schema 里，FOB THB 由明细算出，状态另有流程——都不给编辑。
+type EditableCellField =
+  | "invoiceDate"
+  | "exchangeRateDate"
+  | "customerName"
+  | "incoterms";
+
+// 只有未批准（草稿/待复核/待批准）能改，与后端 update_invoice 的门禁一致。
+const EDITABLE_STATUSES = new Set<TaxInvoiceStatus>([
+  "draft",
+  "needs_review",
+  "ready",
+]);
 
 /**
  * Sample 表格的表头要求，与后端 parse_sample_workbook 一一对应
@@ -686,6 +701,19 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [period, setPeriod] = useState("all");
   // 台账按收入期间（月）分组：每月一段、带小计。默认开，可切回平铺分页表。
   const [groupByMonth, setGroupByMonth] = useState(true);
+  // 列头筛选（客户 / incoterms）：受控且在 filteredInvoices 里集中过滤，
+  // 这样分组视图下一处勾选对全部月份生效（antd 各表自带筛选只作用于本表）。
+  const [colFilters, setColFilters] = useState<{
+    customerName: string[];
+    incoterms: string[];
+  }>({ customerName: [], incoterms: [] });
+  // 行内单元格编辑：一次只编一格（哪一行的哪个字段），编辑中的值单独存，保存时置忙。
+  const [editingCell, setEditingCell] = useState<{
+    id: string;
+    field: EditableCellField;
+  } | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [savingCell, setSavingCell] = useState(false);
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   // 复核台：导入批次列表 → 钻进某一批的对账表。
   const [batches, setBatches] = useState<ImportBatch[]>([]);
@@ -818,12 +846,38 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     [invoices],
   );
 
+  // 列头筛选可选值：从当前台账里去重取，客户名单较长时配 filterSearch 搜索。
+  const customerOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(invoices.map((invoice) => invoice.customerName).filter(Boolean)),
+      ).sort() as string[],
+    [invoices],
+  );
+  const incotermsOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(invoices.map((invoice) => invoice.incoterms).filter(Boolean)),
+      ).sort() as string[],
+    [invoices],
+  );
+
   const filteredInvoices = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return invoices.filter((invoice) => {
       if (!isInvoiceInPhase(invoice, phase)) return false;
       if (status !== "all" && invoice.status !== status) return false;
       if (period !== "all" && invoice.revenuePeriod !== period) return false;
+      if (
+        colFilters.customerName.length &&
+        !colFilters.customerName.includes(invoice.customerName ?? "")
+      )
+        return false;
+      if (
+        colFilters.incoterms.length &&
+        !colFilters.incoterms.includes(invoice.incoterms ?? "")
+      )
+        return false;
       if (!normalized) return true;
       return [
         invoice.documentNo,
@@ -832,7 +886,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         invoice.customerName,
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
-  }, [invoices, period, phase, query, status]);
+  }, [colFilters, invoices, period, phase, query, status]);
 
   // 台账按月分组：有收入期间的按月倒序，没期间的（空）永远垫底；每段带 FOB THB 小计。
   const ledgerGroups = useMemo(() => {
@@ -884,6 +938,91 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     [invoices],
   );
 
+  // 保存一格的改动：只发 {version, 该字段} 的最小 patch，后端 exclude_unset
+  // 保证其余字段和明细一字不动；改 invoiceDate 会被后端重算期间/状态，行会自动
+  // 归到新月份。乐观锁冲突或校验失败弹错并刷新一次，拿到最新 version 免反复 409。
+  const commitCellEdit = async (row: TaxInvoice, field: EditableCellField) => {
+    const trimmed = editingValue.trim();
+    // 客户名后端要求非空：清空当撤销处理，不真发上去把名字抹掉。
+    const next = trimmed === "" ? (field === "customerName" ? undefined : null) : trimmed;
+    if (next === undefined) {
+      setEditingCell(null);
+      return;
+    }
+    if (next === ((row[field] as string | null) ?? null)) {
+      setEditingCell(null);
+      return;
+    }
+    setSavingCell(true);
+    try {
+      const updated = await updateTaxInvoice(row.id, {
+        version: row.version,
+        [field]: next,
+      });
+      setInvoices((current) =>
+        current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
+      );
+      if (selected?.id === updated.id) setSelected(updated);
+      setEditingCell(null);
+      message.success(t("tax.editSaved"));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.saveFailed"));
+      void refreshInvoices();
+    } finally {
+      setSavingCell(false);
+    }
+  };
+
+  // 一格的渲染：不可编辑（已批准/已开具等）就只显示；可编辑时值旁挂个铅笔，
+  // 点开变成行内输入框。铅笔与输入框都 stopPropagation，免得连带触发整行点击（打开详情）。
+  const renderEditableCell = (
+    record: TaxInvoice,
+    field: EditableCellField,
+    display: ReactNode,
+    inputType: "date" | "text",
+  ): ReactNode => {
+    if (!EDITABLE_STATUSES.has(record.status)) return display;
+    const isEditing =
+      editingCell?.id === record.id && editingCell.field === field;
+    if (isEditing) {
+      return (
+        <span
+          className="tax-cell-edit"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Input
+            autoFocus
+            className={field === "customerName" ? "thai-input" : undefined}
+            disabled={savingCell}
+            size="small"
+            type={inputType === "date" ? "date" : undefined}
+            value={editingValue}
+            onBlur={() => void commitCellEdit(record, field)}
+            onChange={(event) => setEditingValue(event.target.value)}
+            onPressEnter={() => void commitCellEdit(record, field)}
+          />
+        </span>
+      );
+    }
+    return (
+      <span className="tax-cell-editable">
+        <span className="tax-cell-value">{display}</span>
+        <button
+          className="tax-cell-edit-btn"
+          title={t("tax.editCell")}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setEditingCell({ id: record.id, field });
+            setEditingValue((record[field] as string | null) ?? "");
+          }}
+        >
+          <EditOutlined />
+        </button>
+      </span>
+    );
+  };
+
   const columns: ColumnsType<TaxInvoice> = [
     {
       title: t("tax.colDocumentNo"),
@@ -897,7 +1036,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       title: t("tax.colInvoiceDate"),
       dataIndex: "invoiceDate",
       width: 180,
-      render: dateLabel,
+      render: (value: string | null, record) =>
+        renderEditableCell(record, "invoiceDate", dateLabel(value), "date"),
     },
     { title: "C/I No.", dataIndex: "ciNo", width: 145, ellipsis: true },
     { title: t("tax.colCdn"), dataIndex: "cdn", width: 165, ellipsis: true },
@@ -906,14 +1046,27 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       dataIndex: "customerName",
       width: 260,
       ellipsis: true,
-      render: (value: string) => <ThaiText>{value}</ThaiText>,
+      filters: customerOptions.map((value) => ({ text: value, value })),
+      filteredValue: colFilters.customerName.length ? colFilters.customerName : null,
+      filterSearch: true,
+      render: (value: string, record) =>
+        renderEditableCell(record, "customerName", <ThaiText>{value}</ThaiText>, "text"),
     },
-    { title: t("tax.colIncoterms"), dataIndex: "incoterms", width: 95 },
+    {
+      title: t("tax.colIncoterms"),
+      dataIndex: "incoterms",
+      width: 118,
+      filters: incotermsOptions.map((value) => ({ text: value, value })),
+      filteredValue: colFilters.incoterms.length ? colFilters.incoterms : null,
+      render: (value: string | null, record) =>
+        renderEditableCell(record, "incoterms", value ?? "—", "text"),
+    },
     {
       title: t("tax.colRateDate"),
       dataIndex: "exchangeRateDate",
-      width: 130,
-      render: dateLabel,
+      width: 152,
+      render: (value: string | null, record) =>
+        renderEditableCell(record, "exchangeRateDate", dateLabel(value), "date"),
     },
     {
       title: "FOB THB",
@@ -930,6 +1083,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       render: (value: TaxInvoiceStatus) => <StatusTag status={value} t={t} />,
     },
   ];
+
+  // 列头筛选是受控的：把 antd 回传的选中值收进 colFilters，真正过滤在
+  // filteredInvoices 里做。分组视图每段一张表都挂这个 handler，任意一张改都对全部生效。
+  const onLedgerFilterChange: TableProps<TaxInvoice>["onChange"] = (
+    _pagination,
+    filters,
+  ) => {
+    setColFilters({
+      customerName: (filters.customerName as string[] | null) ?? [],
+      incoterms: (filters.incoterms as string[] | null) ?? [],
+    });
+  };
 
   // 复核台对账表的列。除台账那几列外，末尾并排「海关汇率 / 报关单 THB」，
   // 让本系统按 BOT 汇率算出来的 FOB THB 与报关单自印的泰铢直接对照。
@@ -1746,6 +1911,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                       rowKey="id"
                       scroll={{ x: 1450 }}
                       size="middle"
+                      onChange={onLedgerFilterChange}
                       onRow={(record) => ({
                         onClick: () => void openInvoice(record.id),
                       })}
@@ -1768,6 +1934,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 rowKey="id"
                 scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
                 size="middle"
+                onChange={onLedgerFilterChange}
                 onRow={(record) => ({
                   onClick: () => void openInvoice(record.id),
                 })}

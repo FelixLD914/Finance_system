@@ -393,6 +393,7 @@ const resources = {
     "tax.detailLoadFailed": "明细加载失败",
     "tax.editSaved": "税票复核资料已保存",
     "tax.saveFailed": "保存失败",
+    "tax.editCell": "改这一格",
     "tax.dualFilesRequired": "至少要有一组配齐的 Export Invoice Excel + 报关单 PDF",
     "tax.unsupportedFiles": "已忽略无法识别的文件（只收 .xlsx/.xls/.pdf）：{files}",
     "tax.duplicateIgnored": "同一组里同类型文件只保留先选中的一个，已忽略：{files}",
@@ -1124,6 +1125,7 @@ const resources = {
     "tax.detailLoadFailed": "Unable to load details",
     "tax.editSaved": "Review data saved",
     "tax.saveFailed": "Save failed",
+    "tax.editCell": "Edit this cell",
     "tax.dualFilesRequired":
       "At least one complete pair (Export Invoice Excel + customs PDF) is required",
     "tax.unsupportedFiles":
