@@ -1410,83 +1410,42 @@ select {
   box-shadow: 0 12px 32px rgba(62, 43, 29, 0.04);
 }
 
-/* 按月分组：平铺表是表体内滚（scroll.y），分组区没有 y，得让这个容器自己滚。 */
-.tax-ledger-groups {
-  max-height: calc(100vh - 320px);
-  overflow-y: auto;
-  border: 1px solid var(--line);
-  border-top: 0;
-  border-radius: 0 0 12px 12px;
-  background: var(--surface);
+/* 按月分组第一层：每月一行的月份列表，点行钻进那一月的全区域详情。 */
+.tax-month-list .ant-table-tbody > tr > td {
+  padding-top: 15px;
+  padding-bottom: 15px;
 }
 
-/* 月份行是可点的手风琴头：整行按钮，chevron 指示展开态，点一下收/放这一月的表。 */
-.tax-ledger-group-head {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 13px 18px;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  background: #f6efe6;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  cursor: pointer;
-  transition: background 0.12s ease;
-}
-
-.tax-ledger-group-head:hover {
-  background: #efe4d5;
-}
-
-.tax-ledger-group:last-child .tax-ledger-group-head {
-  border-bottom: 0;
-}
-
-.tax-ledger-group.is-open .tax-ledger-group-head {
-  border-bottom: 1px solid var(--line);
-}
-
-.tax-ledger-group-chevron {
-  flex: none;
-  color: var(--muted);
-  font-size: 12px;
-  transform: rotate(-90deg);
-  transition: transform 0.15s ease;
-}
-
-.tax-ledger-group.is-open .tax-ledger-group-chevron {
-  transform: rotate(0deg);
-}
-
-.tax-ledger-group-head h3 {
-  margin: 0;
+.tax-month-label {
   color: #352a22;
   font-family: var(--font-ui);
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
 
-.tax-ledger-group-count {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.tax-ledger-group-total {
-  margin-left: auto;
-  color: #4a3f35;
+/* 待复核张数做成小胶囊，一眼看出哪个月还有活。 */
+.tax-month-review {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 1px 9px;
+  color: #8a5a1e;
+  background: #f7ecd9;
+  border-radius: 999px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-/* 段内的表贴合分组容器：去掉自身边框，圆角交给外层。 */
-.tax-ledger-group .ant-table-wrapper {
-  background: transparent;
+.tax-month-arrow {
+  color: var(--muted);
+  font-size: 12px;
+  transition: color 0.12s ease, transform 0.12s ease;
+}
+
+.tax-month-list .ant-table-tbody > tr:hover .tax-month-arrow {
+  color: var(--camel);
+  transform: translateX(2px);
 }
 
 .tax-ledger-main .ant-table-thead > tr > th,
