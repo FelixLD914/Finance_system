@@ -14,7 +14,7 @@ import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { useI18n } from "../../i18n";
-import type { DualIdentifyResult, TaxInvoiceImportResult } from "./types";
+import type { DualBatchImportResult, DualIdentifyResult } from "./types";
 
 // 这两个真实文件名取自 Sample_reg 归档，刻意保留最容易踩坑的那一组：
 // 发票 Excel 与「发票自己的 PDF 打印件」同名，真报关单叫 QECL603151144.pdf。
@@ -128,14 +128,25 @@ const identifyResult: DualIdentifyResult = {
 // 给足签名，断言时才能直接读 mock.calls 的参数类型（不用 as 硬转）。
 const identifyDualFiles =
   vi.fn<(files: File[]) => Promise<DualIdentifyResult>>(async () => identifyResult);
-const importDualFiles = vi.fn<
-  (invoiceFile: File, customsFile: File | null, currency?: string) => Promise<TaxInvoiceImportResult>
+const importDualBatch = vi.fn<
+  (files: File[], currency?: string) => Promise<DualBatchImportResult>
 >(async () => ({
   batchId: "b1",
-  invoiceIds: ["i1"],
   invoiceCount: 1,
   itemCount: 1,
   needsReviewCount: 0,
+  results: [
+    {
+      key: "ZWT-NSB26012304",
+      invoiceFileName: INVOICE_NAME,
+      customsFileName: DECLARATION_NAME,
+      invoiceId: "i1",
+      itemCount: 1,
+      needsReview: false,
+    },
+  ],
+  rejected: [],
+  skipped: [],
 }));
 
 // 只替掉这条链路要用的几个导出，其余原样透传。手写一整份 mock 会漏导出
@@ -145,7 +156,7 @@ vi.mock("./api", async (importOriginal) => {
   return {
     ...actual,
     identifyDualFiles,
-    importDualFiles,
+    importDualBatch,
     listTaxInvoices: async () => ({ items: [], total: 0, page: 1, pageSize: 100 }),
     listExchangeRateMonths: async () => [],
     listExchangeRates: async () => [],
@@ -207,7 +218,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   identifyDualFiles.mockClear();
-  importDualFiles.mockClear();
+  importDualBatch.mockClear();
 });
 
 function Harness() {

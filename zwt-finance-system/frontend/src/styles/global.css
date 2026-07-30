@@ -1357,7 +1357,7 @@ select {
 /* 末尾两列是「刷新」和「导出台账」两个按钮，各占一格，别让导出掉到第二行。 */
 .tax-filter-bar {
   display: grid;
-  grid-template-columns: 150px 150px minmax(220px, 1fr) auto auto;
+  grid-template-columns: 150px 150px minmax(220px, 1fr) auto auto auto;
   gap: 10px;
   padding: 14px;
   background: rgba(255, 253, 249, 0.9);
@@ -1408,6 +1408,57 @@ select {
   border: 1px solid var(--line);
   border-radius: 0 0 12px 12px;
   box-shadow: 0 12px 32px rgba(62, 43, 29, 0.04);
+}
+
+/* 按月分组：平铺表是表体内滚（scroll.y），分组区没有 y，得让这个容器自己滚。 */
+.tax-ledger-groups {
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  background: var(--surface);
+}
+
+.tax-ledger-group + .tax-ledger-group {
+  border-top: 1px solid var(--line);
+}
+
+.tax-ledger-group-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 18px;
+  background: #f6efe6;
+  border-bottom: 1px solid var(--line);
+}
+
+.tax-ledger-group-head h3 {
+  margin: 0;
+  color: #352a22;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tax-ledger-group-count {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tax-ledger-group-total {
+  margin-left: auto;
+  color: #4a3f35;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 段内的表贴合分组容器：去掉自身边框，圆角交给外层。 */
+.tax-ledger-group .ant-table-wrapper {
+  background: transparent;
 }
 
 .tax-ledger-main .ant-table-thead > tr > th,
@@ -2035,6 +2086,53 @@ select {
   margin: 0;
   padding-left: 18px;
   font-size: var(--tax-fs-micro);
+}
+
+/* 结果卡片里「未导入的配对 / 退回的文件」两小节：标题 + 逐条列出原因。 */
+.dual-result-block {
+  margin-top: 12px;
+}
+
+.dual-result-block h4 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: var(--tax-fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dual-result-block ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dual-result-block li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: var(--tax-fs-micro);
+  line-height: 1.5;
+  border-top: 1px solid rgba(58, 50, 43, 0.08);
+}
+
+.dual-result-block li:first-child {
+  border-top: none;
+}
+
+.dual-result-block li strong {
+  flex: none;
+  color: #3a322b;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/* 待补关单：不是空白，标成灰字提示，跟真缺字段区分开。 */
+.tax-pending-customs {
+  color: var(--muted);
+  font-style: italic;
 }
 
 .dual-pair-index {

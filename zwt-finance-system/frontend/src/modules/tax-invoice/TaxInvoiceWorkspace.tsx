@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   ApiOutlined,
   AuditOutlined,
+  CalendarOutlined,
   CheckCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
@@ -32,7 +33,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Progress,
   Select,
   Space,
   Table,
@@ -61,7 +61,7 @@ import {
   getBotApiStatus,
   getTaxInvoice,
   identifyDualFiles,
-  importDualFiles,
+  importDualBatch,
   importExchangeRates,
   importSample,
   listRateCurrencies,
@@ -79,12 +79,13 @@ import {
 } from "./api";
 import {
   classifyDualFile,
-  findQueuedFile,
   mergeDualFiles,
   type QueuedFile,
 } from "./dualPairing";
 import type {
   BotApiStatus,
+  DualBatchImportResult,
+  DualBatchPairResult,
   DualIdentifyResult,
   DualPairPreview,
   ImportBatch,
@@ -224,24 +225,6 @@ function dateTime(value: string | null, locale: Locale): string {
 
 function dateLabel(value: string | null): string {
   return value || "—";
-}
-
-/** 一组导入的结果。成功失败都留一条，界面按原顺序全部列出来。 */
-interface DualImportOutcome {
-  key: string;
-  label: string;
-  invoiceFileName: string;
-  /** 关单缺失时为 null——这一组是"待补关单"，不是漏了字段。 */
-  customsFileName: string | null;
-  ok: boolean;
-  invoiceCount: number;
-  itemCount: number;
-  needsReviewCount: number;
-  invoiceIds: string[];
-  /** 失败时的主提示；成功为 null。 */
-  error: string | null;
-  /** 后端逐条退回的明细，展开后显示。 */
-  details: string[];
 }
 
 /** 一份清单（Excel 或 PDF）。两份清单单独列出是这次改版的要点之一。 */
@@ -701,6 +684,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<TaxInvoiceStatus | "all">("all");
   const [period, setPeriod] = useState("all");
+  // 台账按收入期间（月）分组：每月一段、带小计。默认开，可切回平铺分页表。
+  const [groupByMonth, setGroupByMonth] = useState(true);
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   // 复核台：导入批次列表 → 钻进某一批的对账表。
   const [batches, setBatches] = useState<ImportBatch[]>([]);
@@ -719,13 +704,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // 后端算好的配对结果。null 表示还没识别过。
   const [dualIdentify, setDualIdentify] = useState<DualIdentifyResult | null>(null);
   const [identifying, setIdentifying] = useState(false);
-  // 跑完一批的逐组结果。null 表示还没跑过，空数组不会出现。
-  const [dualResults, setDualResults] = useState<DualImportOutcome[] | null>(null);
-  const [dualProgress, setDualProgress] = useState<{ done: number; total: number } | null>(
-    null,
-  );
-  // 结果清单展开哪几组。默认只展开失败的：成功的看一眼汇总就够了。
-  const [dualExpanded, setDualExpanded] = useState<string[]>([]);
+  // 整批导入的结果：一趟请求落进一个复核批次。null 表示还没跑过。
+  const [dualBatchResult, setDualBatchResult] =
+    useState<DualBatchImportResult | null>(null);
   const [sampleFile, setSampleFile] = useState<File | null>(null);
   const [conflicts, setConflicts] = useState<ApiIssue[]>([]);
   const [rateFile, setRateFile] = useState<File | null>(null);
@@ -852,6 +833,35 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
   }, [invoices, period, phase, query, status]);
+
+  // 台账按月分组：有收入期间的按月倒序，没期间的（空）永远垫底；每段带 FOB THB 小计。
+  const ledgerGroups = useMemo(() => {
+    const byPeriod = new Map<string, TaxInvoice[]>();
+    for (const invoice of filteredInvoices) {
+      const key = invoice.revenuePeriod ?? "";
+      const rows = byPeriod.get(key);
+      if (rows) rows.push(invoice);
+      else byPeriod.set(key, [invoice]);
+    }
+    const keys = Array.from(byPeriod.keys()).sort((a, b) => {
+      if (a === "") return 1;
+      if (b === "") return -1;
+      return b.localeCompare(a);
+    });
+    return keys.map((key) => {
+      const rows = byPeriod.get(key) ?? [];
+      const fobThbTotal = rows.reduce(
+        (sum, row) => sum + Number(row.fobRevenueThbTotal ?? 0),
+        0,
+      );
+      return {
+        key: key || "none",
+        label: key ? `${key.slice(0, 4)}-${key.slice(4)}` : t("tax.noPeriod"),
+        rows,
+        fobThbTotal: fobThbTotal.toFixed(2),
+      };
+    });
+  }, [filteredInvoices, t]);
 
   // 复核台对账表的客户端筛选：一个搜索框跨 编号/CI/CDN/客户 过滤。
   const reviewRows = useMemo(() => {
@@ -1272,23 +1282,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     [dualIdentify],
   );
 
-  const dualSummary = useMemo(() => {
-    if (!dualResults) return null;
-    return {
-      ok: dualResults.filter((item) => item.ok).length,
-      failed: dualResults.filter((item) => !item.ok).length,
-      invoices: dualResults.reduce((sum, item) => sum + item.invoiceCount, 0),
-      items: dualResults.reduce((sum, item) => sum + item.itemCount, 0),
-      needsReview: dualResults.reduce((sum, item) => sum + item.needsReviewCount, 0),
-    };
-  }, [dualResults]);
-
   /**
-   * 逐组导入。后端 /import/dual 一次只收一对文件，所以批量在前端串行展开。
-   *
-   * 串行而不是并发：每组是各自独立的事务，串行能保证结果清单的顺序和队列
-   * 顺序一致，也不会让二十来个 multipart 请求同时压上去。中途某组失败只记
-   * 一条错误继续往下跑——一份坏 PDF 不该把另外十八组一起废掉。
+   * 整批导入：把两份清单的全部文件一趟发给后端 /import/dual/batch，后端自己
+   * 识别 + 按 C/I No. 配对 + 匹配汇率，整批落进同一个复核批次（不自动出编号，
+   * 进复核台等人批准）。取代旧的「前端逐组串行调 /import/dual」：一个事务全进
+   * 或全不进，撞上重复业务键整批 409，走冲突弹窗照错改。
    */
   const runDualImport = async () => {
     if (!importablePairs.length) {
@@ -1296,117 +1294,79 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       return;
     }
     setBusy(true);
-    setDualResults(null);
-    setDualProgress({ done: 0, total: importablePairs.length });
-    const outcomes: DualImportOutcome[] = [];
-    for (const pair of importablePairs) {
-      const invoiceFile = findQueuedFile(
-        dualQueue.invoices,
-        pair.invoice?.fileName,
-      );
-      const customsFile = findQueuedFile(
-        dualQueue.customs,
-        pair.customs?.fileName,
-      );
-      const base = {
-        key: pair.key,
-        label: pair.key,
-        invoiceFileName: pair.invoice?.fileName ?? "",
-        customsFileName: pair.customs?.fileName ?? null,
-      };
-      if (!invoiceFile) {
-        // 识别之后队列被改过，文件对不上了。宁可报错也不要拿错文件去开票。
-        outcomes.push({
-          ...base,
-          ok: false,
-          invoiceCount: 0,
-          itemCount: 0,
-          needsReviewCount: 0,
-          invoiceIds: [],
-          error: t("tax.queueChangedReidentify"),
-          details: [],
-        });
-        setDualProgress({ done: outcomes.length, total: importablePairs.length });
-        continue;
-      }
-      try {
-        const result = await importDualFiles(invoiceFile, customsFile);
-        outcomes.push({
-          ...base,
-          ok: true,
-          invoiceCount: result.invoiceCount,
-          itemCount: result.itemCount,
-          needsReviewCount: result.needsReviewCount,
-          invoiceIds: result.invoiceIds,
-          error: null,
-          details: [],
-        });
-      } catch (error) {
-        outcomes.push({
-          ...base,
-          ok: false,
-          invoiceCount: 0,
-          itemCount: 0,
-          needsReviewCount: 0,
-          invoiceIds: [],
-          error: error instanceof Error ? error.message : t("tax.recognitionFailed"),
-          details: error instanceof TaxInvoiceApiError ? error.details : [],
-        });
-      }
-      setDualProgress({ done: outcomes.length, total: importablePairs.length });
-    }
+    setDualBatchResult(null);
+    // 整批发：孤立关单/冲突的文件也要一起给后端，它才配得出来（配不上的进 skipped）。
+    const files = [
+      ...dualQueue.invoices.map((item) => item.file),
+      ...dualQueue.customs.map((item) => item.file),
+    ];
+    try {
+      const result = await importDualBatch(files, currency);
+      setDualBatchResult(result);
 
-    const succeeded = new Set(
-      outcomes.filter((item) => item.ok).map((item) => item.key),
-    );
-    // 成功的组从队列和配对结果里一起摘掉，失败的留着——改完文件按原位重跑，
-    // 不用重新选一遍。两处都要摘：只摘配对结果的话，文件还在清单里，
-    // 再点一次识别又会把已导入的那几组配出来。
-    const consumed = new Set<string>();
-    for (const pair of importablePairs) {
-      if (!succeeded.has(pair.key)) continue;
-      if (pair.invoice) consumed.add(pair.invoice.fileName);
-      if (pair.customs) consumed.add(pair.customs.fileName);
-    }
-    setDualQueue((current) => ({
-      invoices: current.invoices.filter(
-        (item) => !consumed.has(item.file.name),
-      ),
-      customs: current.customs.filter((item) => !consumed.has(item.file.name)),
-    }));
-    setDualIdentify((current) =>
-      current
-        ? {
-            ...current,
-            pairs: current.pairs.filter((pair) => !succeeded.has(pair.key)),
-            readyCount: current.pairs.filter(
-              (pair) => !succeeded.has(pair.key) && pair.status === "ready",
-            ).length,
-          }
-        : current,
-    );
-    setDualResults(outcomes);
-    // 默认只展开失败项：成功的看汇总就够了，出错的必须一眼看到原因。
-    setDualExpanded(outcomes.filter((item) => !item.ok).map((item) => item.key));
-    setDualProgress(null);
-    setBusy(false);
+      // 真进库的那几对，把源文件从两份清单里摘掉——改完重跑不用重选。冲突/
+      // 待补关单/读不了的留着，方便修好再来。识别预览里也同步摘掉已导入的组。
+      const consumed = new Set<string>();
+      for (const pair of result.results) {
+        consumed.add(pair.invoiceFileName);
+        if (pair.customsFileName) consumed.add(pair.customsFileName);
+      }
+      setDualQueue((current) => ({
+        invoices: current.invoices.filter((item) => !consumed.has(item.file.name)),
+        customs: current.customs.filter((item) => !consumed.has(item.file.name)),
+      }));
+      const importedKeys = new Set(result.results.map((pair) => pair.key));
+      setDualIdentify((current) =>
+        current
+          ? {
+              ...current,
+              pairs: current.pairs.filter((pair) => !importedKeys.has(pair.key)),
+              readyCount: current.pairs.filter(
+                (pair) => !importedKeys.has(pair.key) && pair.status === "ready",
+              ).length,
+            }
+          : current,
+      );
 
-    const failed = outcomes.length - succeeded.size;
-    if (failed) {
-      message.warning(
-        t("tax.batchDualPartial", { ok: succeeded.size, failed }),
-      );
-    } else {
-      message.success(
-        t("tax.batchDualDone", {
-          groups: succeeded.size,
-          invoices: outcomes.reduce((sum, item) => sum + item.invoiceCount, 0),
-          items: outcomes.reduce((sum, item) => sum + item.itemCount, 0),
-        }),
-      );
+      if (result.batchId) {
+        message.success(
+          t("tax.batchDualDone", {
+            invoices: result.invoiceCount,
+            items: result.itemCount,
+          }),
+        );
+      } else {
+        // 没有一对可导入：只有孤立关单/冲突/读不了的文件。
+        message.warning(t("tax.batchDualNothing"));
+      }
+      // 台账在后台刷新；结果卡片留在本页，用「去复核台」进这批逐条核对。
+      await refreshInvoices();
+    } catch (error) {
+      // 整批 409（重复业务键）：一条都不进，队列原样留着。逐行冲突用弹窗展示，
+      // 塞进 message 会被截断也没法滚动。
+      if (error instanceof TaxInvoiceApiError && error.issues.length) {
+        setConflicts(error.issues);
+      } else {
+        message.error(
+          error instanceof Error ? error.message : t("tax.recognitionFailed"),
+        );
+      }
+    } finally {
+      setBusy(false);
     }
-    // 台账在后台刷新：结果清单留在本页，让人先把这一批核对完。
-    await refreshInvoices();
+  };
+
+  /** 从结果卡片直接进复核台，并打开刚导入的这一批。 */
+  const goToReviewBatch = async (batchId: string) => {
+    setView("review");
+    try {
+      const list = await listImportBatches();
+      setBatches(list);
+      const target = list.find((batch) => batch.id === batchId);
+      if (target) await openBatch(target);
+    } catch {
+      // 拉批次失败也没关系：切到复核台后那个 effect 会自己再拉一次。
+    }
   };
 
   /** 从结果清单跳去台账看某一份税票。 */
@@ -1715,6 +1675,15 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
+              <Tooltip title={t("tax.groupByMonthTip")}>
+                <Button
+                  icon={<CalendarOutlined />}
+                  type={groupByMonth ? "primary" : "default"}
+                  onClick={() => setGroupByMonth((on) => !on)}
+                >
+                  {t("tax.groupByMonth")}
+                </Button>
+              </Tooltip>
               <Button
                 icon={<ReloadOutlined />}
                 loading={loading}
@@ -1751,21 +1720,59 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 <span>{t("tax.countIssued")}</span>
               </div>
             </div>
-            <Table
-              columns={columns}
-              dataSource={filteredInvoices}
-              loading={loading}
-              pagination={{ pageSize: 15, showSizeChanger: false }}
-              rowClassName={(record) =>
-                record.id === selected?.id ? "selected-table-row" : ""
-              }
-              rowKey="id"
-              scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
-              size="middle"
-              onRow={(record) => ({
-                onClick: () => void openInvoice(record.id),
-              })}
-            />
+            {groupByMonth ? (
+              // 每月一段：段头写 期间 + 张数 + FOB THB 小计，段内一张不分页的表。
+              // 整个分组区自己纵向滚动（平铺表是表体内滚，两者的滚动容器不一样）。
+              <div className="tax-ledger-groups">
+                {ledgerGroups.map((group) => (
+                  <section className="tax-ledger-group" key={group.key}>
+                    <header className="tax-ledger-group-head">
+                      <h3>{group.label}</h3>
+                      <span className="tax-ledger-group-count">
+                        {t("tax.groupCount", { count: group.rows.length })}
+                      </span>
+                      <span className="tax-ledger-group-total">
+                        FOB THB {money(group.fobThbTotal, locale)}
+                      </span>
+                    </header>
+                    <Table
+                      columns={columns}
+                      dataSource={group.rows}
+                      loading={loading}
+                      pagination={false}
+                      rowClassName={(record) =>
+                        record.id === selected?.id ? "selected-table-row" : ""
+                      }
+                      rowKey="id"
+                      scroll={{ x: 1450 }}
+                      size="middle"
+                      onRow={(record) => ({
+                        onClick: () => void openInvoice(record.id),
+                      })}
+                    />
+                  </section>
+                ))}
+                {!ledgerGroups.length && (
+                  <Empty description={t("tax.ledgerEmpty")} />
+                )}
+              </div>
+            ) : (
+              <Table
+                columns={columns}
+                dataSource={filteredInvoices}
+                loading={loading}
+                pagination={{ pageSize: 15, showSizeChanger: false }}
+                rowClassName={(record) =>
+                  record.id === selected?.id ? "selected-table-row" : ""
+                }
+                rowKey="id"
+                scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
+                size="middle"
+                onRow={(record) => ({
+                  onClick: () => void openInvoice(record.id),
+                })}
+              />
+            )}
           </main>
           {selected && (
             <InvoiceInspector
@@ -2169,21 +2176,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   </ol>
                 </div>
               )}
-              {dualProgress && (
-                <div className="dual-progress">
-                  <Progress
-                    percent={Math.round((dualProgress.done / dualProgress.total) * 100)}
-                    size="small"
-                    status="active"
-                  />
-                  <span>
-                    {t("tax.pairProgress", {
-                      done: dualProgress.done,
-                      total: dualProgress.total,
-                    })}
-                  </span>
-                </div>
-              )}
               <Button
                 block
                 disabled={!importablePairs.length}
@@ -2203,7 +2195,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
 
           </div>
 
-          {dualResults && dualSummary && (
+          {dualBatchResult && (
             <section className="tax-tool-card dual-result-card">
               <div className="tool-card-heading">
                 <div className="tool-card-icon ink">
@@ -2211,138 +2203,164 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </div>
                 <div>
                   <span>{t("tax.resultEyebrow")}</span>
-                  <h2>{t("tax.resultTitle", { count: dualResults.length })}</h2>
-                  <p>{t("tax.resultHint")}</p>
+                  <h2>{t("tax.batchResultTitle")}</h2>
+                  <p>{t("tax.batchResultHint")}</p>
                 </div>
                 <div className="dual-result-actions">
+                  {dualBatchResult.batchId && (
+                    <Button
+                      icon={<FileDoneOutlined />}
+                      size="small"
+                      type="primary"
+                      onClick={() =>
+                        void goToReviewBatch(dualBatchResult.batchId as string)
+                      }
+                    >
+                      {t("tax.batchGotoReview")}
+                    </Button>
+                  )}
                   <Button
                     size="small"
-                    onClick={() => setDualExpanded(dualResults.map((item) => item.key))}
+                    type="text"
+                    onClick={() => setDualBatchResult(null)}
                   >
-                    {t("tax.expandAll")}
-                  </Button>
-                  <Button size="small" onClick={() => setDualExpanded([])}>
-                    {t("tax.collapseAll")}
-                  </Button>
-                  <Button size="small" type="text" onClick={() => setDualResults(null)}>
                     {t("common.close")}
                   </Button>
                 </div>
               </div>
               <div className="dual-result-summary">
                 <div>
-                  <strong>{dualSummary.ok}</strong>
-                  <span>{t("tax.resultOk")}</span>
-                </div>
-                <div className={dualSummary.failed ? "is-alert" : ""}>
-                  <strong>{dualSummary.failed}</strong>
-                  <span>{t("tax.resultFailed")}</span>
-                </div>
-                <div>
-                  <strong>{dualSummary.invoices}</strong>
+                  <strong>{dualBatchResult.invoiceCount}</strong>
                   <span>{t("tax.countInvoices")}</span>
                 </div>
                 <div>
-                  <strong>{dualSummary.items}</strong>
+                  <strong>{dualBatchResult.itemCount}</strong>
                   <span>{t("tax.resultItems")}</span>
                 </div>
                 <div>
-                  <strong>{dualSummary.needsReview}</strong>
+                  <strong>{dualBatchResult.needsReviewCount}</strong>
                   <span>{t("tax.countNeedsReview")}</span>
                 </div>
+                <div className={dualBatchResult.skipped.length ? "is-alert" : ""}>
+                  <strong>{dualBatchResult.skipped.length}</strong>
+                  <span>{t("tax.resultSkipped")}</span>
+                </div>
+                <div className={dualBatchResult.rejected.length ? "is-alert" : ""}>
+                  <strong>{dualBatchResult.rejected.length}</strong>
+                  <span>{t("tax.resultRejected")}</span>
+                </div>
               </div>
-              {/* 逐组一行、按导入顺序编号，点标题行展开看这一组的两份源文件
-                  和生成结果；失败的默认就是展开的。 */}
-              <Table<DualImportOutcome>
-                className="dual-result-table"
-                columns={[
-                  {
-                    title: "#",
-                    dataIndex: "key",
-                    width: 52,
-                    render: (_value, _record, index) => index + 1,
-                  },
-                  {
-                    title: t("tax.resultGroup"),
-                    dataIndex: "label",
-                    ellipsis: true,
-                    render: (value: string) => (
-                      <span className="dual-result-name">{value}</span>
-                    ),
-                  },
-                  {
-                    title: t("tax.colStatus"),
-                    dataIndex: "ok",
-                    width: 108,
-                    render: (ok: boolean) => (
-                      <Tag className={`status-tag ${ok ? "status-issued" : "status-voided"}`}>
-                        {ok ? t("tax.resultOk") : t("tax.resultFailed")}
-                      </Tag>
-                    ),
-                  },
-                  {
-                    title: t("tax.countInvoices"),
-                    dataIndex: "invoiceCount",
-                    width: 88,
-                    align: "right",
-                  },
-                  {
-                    title: t("tax.resultItems"),
-                    dataIndex: "itemCount",
-                    width: 88,
-                    align: "right",
-                  },
-                ]}
-                dataSource={dualResults}
-                expandable={{
-                  expandedRowKeys: dualExpanded,
-                  onExpandedRowsChange: (keys) =>
-                    setDualExpanded(keys.map((key) => String(key))),
-                  expandedRowRender: (record) => (
-                    <div className="dual-result-detail">
-                      <dl>
-                        <dt>{t("tax.invoiceExcel")}</dt>
-                        <dd>{record.invoiceFileName}</dd>
-                        <dt>{t("tax.customsPdf")}</dt>
-                        <dd>
-                          {record.customsFileName ?? t("tax.pairPendingCustoms")}
-                        </dd>
-                      </dl>
-                      {record.ok ? (
-                        <div className="dual-result-links">
-                          {record.invoiceIds.map((invoiceId, index) => (
-                            <Button
-                              key={invoiceId}
-                              size="small"
-                              onClick={() => void openInvoiceFromResult(invoiceId)}
-                            >
-                              {t("tax.resultOpen", { index: index + 1 })}
-                            </Button>
-                          ))}
-                        </div>
-                      ) : (
-                        <Alert
-                          title={record.error}
-                          description={
-                            record.details.length ? (
-                              <ul>
-                                {record.details.map((detail) => (
-                                  <li key={detail}>{detail}</li>
-                                ))}
-                              </ul>
-                            ) : undefined
-                          }
-                          showIcon
-                          type="error"
-                        />
-                      )}
-                    </div>
-                  ),
-                }}
-                pagination={false}
-                rowKey="key"
-                size="small"
-              />
+              {/* 真进库的每一对一行：源文件 + 明细数 + 是否待复核 + 直接点开那张票。 */}
+              {dualBatchResult.results.length > 0 && (
+                <Table<DualBatchPairResult>
+                  className="dual-result-table"
+                  columns={[
+                    {
+                      title: "#",
+                      dataIndex: "key",
+                      width: 52,
+                      render: (_value, _record, index) => index + 1,
+                    },
+                    {
+                      title: t("tax.invoiceExcel"),
+                      dataIndex: "invoiceFileName",
+                      ellipsis: true,
+                      render: (value: string) => (
+                        <span className="dual-result-name">{value}</span>
+                      ),
+                    },
+                    {
+                      title: t("tax.customsPdf"),
+                      dataIndex: "customsFileName",
+                      ellipsis: true,
+                      render: (value: string | null) =>
+                        value ?? (
+                          <span className="tax-pending-customs">
+                            {t("tax.pairPendingCustoms")}
+                          </span>
+                        ),
+                    },
+                    {
+                      title: t("tax.resultItems"),
+                      dataIndex: "itemCount",
+                      width: 76,
+                      align: "right",
+                    },
+                    {
+                      title: t("tax.colStatus"),
+                      dataIndex: "needsReview",
+                      width: 116,
+                      render: (needsReview: boolean) => (
+                        <Tag
+                          className={`status-tag ${
+                            needsReview ? "status-pending" : "status-ready"
+                          }`}
+                        >
+                          {needsReview
+                            ? t("taxStatus.needs_review")
+                            : t("taxStatus.ready")}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: "",
+                      dataIndex: "invoiceId",
+                      width: 72,
+                      render: (invoiceId: string) => (
+                        <Button
+                          size="small"
+                          type="link"
+                          onClick={() => void openInvoiceFromResult(invoiceId)}
+                        >
+                          {t("tax.resultOpenInvoice")}
+                        </Button>
+                      ),
+                    },
+                  ]}
+                  dataSource={dualBatchResult.results}
+                  pagination={false}
+                  rowKey="key"
+                  size="small"
+                />
+              )}
+              {/* 没导进去的：孤立关单（缺发票）/ 冲突（同一 C/I No. 配到多份不同关单）。 */}
+              {dualBatchResult.skipped.length > 0 && (
+                <div className="dual-result-block">
+                  <h4>{t("tax.resultSkippedTitle")}</h4>
+                  <ul>
+                    {dualBatchResult.skipped.map((item) => (
+                      <li key={item.key}>
+                        <Tag
+                          className={`status-tag ${
+                            item.status === "conflict"
+                              ? "status-voided"
+                              : "status-pending"
+                          }`}
+                        >
+                          {item.status === "conflict"
+                            ? t("tax.skipConflict")
+                            : t("tax.skipCustomsOnly")}
+                        </Tag>
+                        <span>{item.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {/* 读不了 / 不是报关单的文件：写明原因，绝不静默丢。 */}
+              {dualBatchResult.rejected.length > 0 && (
+                <div className="dual-result-block">
+                  <h4>{t("tax.resultRejectedTitle")}</h4>
+                  <ul>
+                    {dualBatchResult.rejected.map((item) => (
+                      <li key={item.fileName}>
+                        <strong>{item.fileName}</strong>
+                        <span>{item.reason}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
           )}
 
