@@ -29,7 +29,9 @@ export function App() {
   }
 
   if (user === null) {
-    return <LoginScreen />;
+    // 登录页也要能切语言：useI18n 的状态在这一层，直接把 t 和 toggle 传下去，
+    // 不必为了一个页面再包一层 context。
+    return <LoginScreen onToggleLocale={toggleLocale} t={t} />;
   }
 
   return (
