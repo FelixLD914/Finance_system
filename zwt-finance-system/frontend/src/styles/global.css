@@ -1488,6 +1488,58 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+/* 行内单元格编辑：值旁的铅笔平时藏起来，鼠标划过整行才浮出，免得台账花。 */
+.tax-cell-editable {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.tax-cell-value {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tax-cell-edit-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.tax-ledger-main .ant-table-tbody > tr:hover .tax-cell-edit-btn {
+  opacity: 0.55;
+}
+
+.tax-cell-edit-btn:hover {
+  color: var(--camel);
+  background: rgba(184, 138, 92, 0.14);
+  opacity: 1 !important;
+}
+
+/* 编辑态：输入框铺满这一格，别把整行撑高。 */
+.tax-cell-edit {
+  display: block;
+}
+
+.tax-cell-edit .ant-input,
+.tax-cell-edit .ant-input-affix-wrapper {
+  width: 100%;
+}
+
 .status-ready {
   color: #365c65;
   background: #eaf3f4;

@@ -98,6 +98,21 @@ import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
 type WorkspaceView = "ledger" | "review" | "recognition" | "batch" | "rates";
 
+// 台账里可行内编辑的字段（都在后端 TaxInvoiceUpdate 里、且是 date/文本类）。
+// 编号/CI/CDN 不在更新 schema 里，FOB THB 由明细算出，状态另有流程——都不给编辑。
+type EditableCellField =
+  | "invoiceDate"
+  | "exchangeRateDate"
+  | "customerName"
+  | "incoterms";
+
+// 只有未批准（草稿/待复核/待批准）能改，与后端 update_invoice 的门禁一致。
+const EDITABLE_STATUSES = new Set<TaxInvoiceStatus>([
+  "draft",
+  "needs_review",
+  "ready",
+]);
+
 /**
  * Sample 表格的表头要求，与后端 parse_sample_workbook 一一对应
  * （backend/app/modules/tax_invoice/recognition.py）。少一个必填列后端直接
@@ -692,6 +707,13 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     customerName: string[];
     incoterms: string[];
   }>({ customerName: [], incoterms: [] });
+  // 行内单元格编辑：一次只编一格（哪一行的哪个字段），编辑中的值单独存，保存时置忙。
+  const [editingCell, setEditingCell] = useState<{
+    id: string;
+    field: EditableCellField;
+  } | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [savingCell, setSavingCell] = useState(false);
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   // 复核台：导入批次列表 → 钻进某一批的对账表。
   const [batches, setBatches] = useState<ImportBatch[]>([]);
@@ -916,6 +938,91 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     [invoices],
   );
 
+  // 保存一格的改动：只发 {version, 该字段} 的最小 patch，后端 exclude_unset
+  // 保证其余字段和明细一字不动；改 invoiceDate 会被后端重算期间/状态，行会自动
+  // 归到新月份。乐观锁冲突或校验失败弹错并刷新一次，拿到最新 version 免反复 409。
+  const commitCellEdit = async (row: TaxInvoice, field: EditableCellField) => {
+    const trimmed = editingValue.trim();
+    // 客户名后端要求非空：清空当撤销处理，不真发上去把名字抹掉。
+    const next = trimmed === "" ? (field === "customerName" ? undefined : null) : trimmed;
+    if (next === undefined) {
+      setEditingCell(null);
+      return;
+    }
+    if (next === ((row[field] as string | null) ?? null)) {
+      setEditingCell(null);
+      return;
+    }
+    setSavingCell(true);
+    try {
+      const updated = await updateTaxInvoice(row.id, {
+        version: row.version,
+        [field]: next,
+      });
+      setInvoices((current) =>
+        current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
+      );
+      if (selected?.id === updated.id) setSelected(updated);
+      setEditingCell(null);
+      message.success(t("tax.editSaved"));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t("tax.saveFailed"));
+      void refreshInvoices();
+    } finally {
+      setSavingCell(false);
+    }
+  };
+
+  // 一格的渲染：不可编辑（已批准/已开具等）就只显示；可编辑时值旁挂个铅笔，
+  // 点开变成行内输入框。铅笔与输入框都 stopPropagation，免得连带触发整行点击（打开详情）。
+  const renderEditableCell = (
+    record: TaxInvoice,
+    field: EditableCellField,
+    display: ReactNode,
+    inputType: "date" | "text",
+  ): ReactNode => {
+    if (!EDITABLE_STATUSES.has(record.status)) return display;
+    const isEditing =
+      editingCell?.id === record.id && editingCell.field === field;
+    if (isEditing) {
+      return (
+        <span
+          className="tax-cell-edit"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Input
+            autoFocus
+            className={field === "customerName" ? "thai-input" : undefined}
+            disabled={savingCell}
+            size="small"
+            type={inputType === "date" ? "date" : undefined}
+            value={editingValue}
+            onBlur={() => void commitCellEdit(record, field)}
+            onChange={(event) => setEditingValue(event.target.value)}
+            onPressEnter={() => void commitCellEdit(record, field)}
+          />
+        </span>
+      );
+    }
+    return (
+      <span className="tax-cell-editable">
+        <span className="tax-cell-value">{display}</span>
+        <button
+          className="tax-cell-edit-btn"
+          title={t("tax.editCell")}
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            setEditingCell({ id: record.id, field });
+            setEditingValue((record[field] as string | null) ?? "");
+          }}
+        >
+          <EditOutlined />
+        </button>
+      </span>
+    );
+  };
+
   const columns: ColumnsType<TaxInvoice> = [
     {
       title: t("tax.colDocumentNo"),
@@ -929,7 +1036,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       title: t("tax.colInvoiceDate"),
       dataIndex: "invoiceDate",
       width: 180,
-      render: dateLabel,
+      render: (value: string | null, record) =>
+        renderEditableCell(record, "invoiceDate", dateLabel(value), "date"),
     },
     { title: "C/I No.", dataIndex: "ciNo", width: 145, ellipsis: true },
     { title: t("tax.colCdn"), dataIndex: "cdn", width: 165, ellipsis: true },
@@ -941,20 +1049,24 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       filters: customerOptions.map((value) => ({ text: value, value })),
       filteredValue: colFilters.customerName.length ? colFilters.customerName : null,
       filterSearch: true,
-      render: (value: string) => <ThaiText>{value}</ThaiText>,
+      render: (value: string, record) =>
+        renderEditableCell(record, "customerName", <ThaiText>{value}</ThaiText>, "text"),
     },
     {
       title: t("tax.colIncoterms"),
       dataIndex: "incoterms",
-      width: 95,
+      width: 118,
       filters: incotermsOptions.map((value) => ({ text: value, value })),
       filteredValue: colFilters.incoterms.length ? colFilters.incoterms : null,
+      render: (value: string | null, record) =>
+        renderEditableCell(record, "incoterms", value ?? "—", "text"),
     },
     {
       title: t("tax.colRateDate"),
       dataIndex: "exchangeRateDate",
-      width: 130,
-      render: dateLabel,
+      width: 152,
+      render: (value: string | null, record) =>
+        renderEditableCell(record, "exchangeRateDate", dateLabel(value), "date"),
     },
     {
       title: "FOB THB",
