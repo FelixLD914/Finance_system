@@ -682,6 +682,19 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     }
   };
 
+  /**
+   * 模板下载必须把失败说出来。原先是 `onClick={() => void downloadBatchTemplate()}`，
+   * `void` 把 rejection 丢掉了 —— 端点 403 或网络断掉时点按钮完全没反应，
+   * 用户无从判断是没权限还是自己没点中。旁边的 downloadDocument 一直是 try/catch。
+   */
+  const downloadTemplate = async () => {
+    try {
+      await downloadBatchTemplate();
+    } catch (downloadError) {
+      if (downloadError instanceof Error) message.error(downloadError.message);
+    }
+  };
+
   const closeImport = () => {
     setImportKind(null);
     setImportFile(null);
@@ -706,15 +719,38 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     } catch (importError) {
       // 批量导入是全表退回：把每一行的问题都列出来，用户改一轮就能过。
       if (importError instanceof ApiError && importError.details.length > 0) {
+        // 退回原因常常是「手上的模板是旧的、缺 TaxRateReason 列」。此时让人
+        // 关掉弹窗、重新走一遍导入菜单才能拿到新模板太绕，直接在这里给入口。
+        const staleTemplate = importError.details.some((detail) =>
+          detail.includes("TaxRateReason"),
+        );
         modal.error({
           title: t("wht.batchImportRejected"),
           width: 620,
           content: (
-            <ul className="import-error-list">
-              {importError.details.map((detail) => (
-                <li key={detail}>{detail}</li>
-              ))}
-            </ul>
+            <>
+              <ul className="import-error-list">
+                {importError.details.map((detail) => (
+                  <li key={detail}>{detail}</li>
+                ))}
+              </ul>
+              {staleTemplate && (
+                <Alert
+                  className="import-intro"
+                  showIcon
+                  type="info"
+                  title={t("wht.batchTemplateStale")}
+                />
+              )}
+              <div className="import-actions">
+                <Button
+                  icon={<FileExcelOutlined />}
+                  onClick={() => void downloadTemplate()}
+                >
+                  {t("wht.batchTemplate")}
+                </Button>
+              </div>
+            </>
           ),
         });
         return;
@@ -780,8 +816,25 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                     </div>
                   ),
                 },
+                // 模板不该只藏在批量开具弹窗里：模板加了列之后，手上拿旧模板的人
+                // 需要能直接拿到新的，不必先假装要导入一次。
+                { key: "template-divider", type: "divider" },
+                {
+                  key: "template",
+                  icon: <FileExcelOutlined />,
+                  label: (
+                    <div className="import-menu-item">
+                      <strong>{t("wht.batchTemplate")}</strong>
+                      <small>{t("wht.batchTemplateDesc")}</small>
+                    </div>
+                  ),
+                },
               ],
               onClick: ({ key }) => {
+                if (key === "template") {
+                  void downloadTemplate();
+                  return;
+                }
                 setImportFile(null);
                 setImportKind(key as ImportKind);
               },
@@ -1074,10 +1127,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         </ol>
         <div className="import-actions">
           {importKind === "batch" && (
-            <Button
-              icon={<FileExcelOutlined />}
-              onClick={() => void downloadBatchTemplate()}
-            >
+            <Button icon={<FileExcelOutlined />} onClick={() => void downloadTemplate()}>
               {t("wht.batchTemplate")}
             </Button>
           )}

@@ -203,6 +203,9 @@ const resources = {
       "上传后逐行校验：只要有一行不合格就整张表退回并列出全部问题，不会出现「一半成功」。",
     "wht.batchImportStep5": "导入成功后在台账里勾选这些草稿，批量提交复核 → 批准取号。",
     "wht.batchTemplate": "下载模板",
+    "wht.batchTemplateDesc": "取最新的批量开具 Excel 模板，含各列填写说明。",
+    "wht.batchTemplateStale":
+      "手上的模板可能是旧版：TaxRateReason 列是后加的，旧模板里没有这一列。请下载最新模板重新填写。",
     "wht.batchImportPick": "选择批量开具 Excel",
     "wht.batchImportCompleted": "批量开具完成：新建 {created} 条草稿",
     "wht.batchImportRejected": "整张表已退回，未导入任何数据",
@@ -830,6 +833,10 @@ const resources = {
     "wht.batchImportStep5":
       "After importing, tick the new drafts in the ledger and submit them for review, then approve to assign numbers.",
     "wht.batchTemplate": "Download template",
+    "wht.batchTemplateDesc":
+      "Get the current batch-issuance Excel template, with per-column notes.",
+    "wht.batchTemplateStale":
+      "Your template may be out of date: the TaxRateReason column was added later and is absent from older templates. Download the current template and fill it in again.",
     "wht.batchImportPick": "Select batch issuance file",
     "wht.batchImportCompleted": "Batch issuance finished: {created} drafts created",
     "wht.batchImportRejected": "The whole sheet was rejected; nothing was imported",
