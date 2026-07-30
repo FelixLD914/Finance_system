@@ -250,6 +250,41 @@ class DualBatchImportResponse(ApiSchema):
     skipped: list[DualSkippedPair]
 
 
+# ── 复核台：批次总览 + 单条 / 整批批准 ────────────────────────────────────────
+
+
+class ImportBatchResponse(ApiSchema):
+    id: uuid.UUID
+    import_mode: str
+    status: str
+    currency: str
+    source_file_names: str
+    created_by_name: str
+    created_at: datetime
+    # 当前各状态实时计数（随逐条批准变动），不是导入时定死的 invoice_count。
+    total: int
+    pending: int
+    needs_review: int
+    approved: int
+
+
+class BatchApproveRequest(ApiSchema):
+    # 为空＝批准这批里所有未批准的；给子集就只批那几张（总览里单条/多选批准）。
+    invoice_ids: list[uuid.UUID] | None = None
+    accept_warnings: bool = False
+
+
+class BatchApproveSkipped(ApiSchema):
+    invoice_id: uuid.UUID
+    reason: str
+
+
+class BatchApproveResponse(ApiSchema):
+    approved_count: int
+    approved_ids: list[uuid.UUID]
+    skipped: list[BatchApproveSkipped]
+
+
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
 
 

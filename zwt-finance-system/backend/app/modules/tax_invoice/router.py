@@ -40,6 +40,9 @@ from app.modules.tax_invoice.recognition import (
 )
 from app.modules.tax_invoice.schemas import (
     MONTH_PATTERN,
+    BatchApproveRequest,
+    BatchApproveResponse,
+    BatchApproveSkipped,
     BotApiStatus,
     DualBatchImportResponse,
     DualBatchPairResult,
@@ -49,6 +52,7 @@ from app.modules.tax_invoice.schemas import (
     DualPairPreview,
     DualRejectedFile,
     DualSkippedPair,
+    ImportBatchResponse,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
     ExchangeRateMonth,
@@ -230,6 +234,7 @@ async def list_invoices(
     | None = Query(default=None, alias="status"),
     period: str | None = None,
     query: str | None = None,
+    batch_id: Annotated[uuid.UUID | None, Query(alias="batchId")] = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100, alias="pageSize"),
 ) -> TaxInvoiceListResponse:
@@ -239,6 +244,7 @@ async def list_invoices(
         query=query,
         page=page,
         page_size=page_size,
+        batch_id=batch_id,
     )
     return TaxInvoiceListResponse(
         items=[TaxInvoiceResponse.model_validate(invoice) for invoice in invoices],
@@ -264,12 +270,14 @@ async def export_ledger(
     | None = Query(default=None, alias="status"),
     period: str | None = None,
     query: str | None = None,
+    batch_id: Annotated[uuid.UUID | None, Query(alias="batchId")] = None,
 ) -> Response:
-    """按台账当前筛选条件导出 Sample 格式 Excel，改完可以原样再导回。"""
+    """按台账/复核台当前筛选条件导出 Sample 格式 Excel，改完可以原样再导回。"""
     entries = await service.export_entries(
         status=invoice_status,
         period=period,
         query=query,
+        batch_id=batch_id,
     )
     content = build_ledger_workbook(entries)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
@@ -626,6 +634,60 @@ async def import_existing_sample(
     except TaxInvoiceRecognitionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await service.import_sample(rows=rows, file_name=file_name, content=content)
+
+
+@router.get("/batches", response_model=list[ImportBatchResponse])
+async def list_import_batches(
+    service: ServiceDependency,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[ImportBatchResponse]:
+    """最近的导入批次 + 当前各状态计数，供复核台的批次列表。"""
+    overviews = await service.list_batches(limit=limit)
+    return [
+        ImportBatchResponse(
+            id=overview.batch.id,
+            import_mode=overview.batch.import_mode,
+            status=overview.batch.status,
+            currency=overview.batch.currency,
+            source_file_names=overview.batch.source_file_names,
+            created_by_name=overview.batch.created_by_name,
+            created_at=overview.batch.created_at,
+            total=overview.total,
+            pending=overview.pending,
+            needs_review=overview.needs_review,
+            approved=overview.approved,
+        )
+        for overview in overviews
+    ]
+
+
+@router.post(
+    "/batches/{batch_id}/approve",
+    response_model=BatchApproveResponse,
+    dependencies=[Depends(require_permission("invoice:approve"))],
+)
+async def approve_import_batch(
+    batch_id: uuid.UUID,
+    payload: BatchApproveRequest,
+    service: ServiceDependency,
+) -> BatchApproveResponse:
+    """复核台的「单条 / 整批批准」。invoice_ids 为空＝批准这批所有未批准的。
+
+    逐张各自发编号；够不上批准的（缺字段/汇率/超 18 行）不挡整批，进 skipped 回报。
+    """
+    outcome = await service.approve_batch(
+        batch_id,
+        invoice_ids=payload.invoice_ids,
+        accept_warnings=payload.accept_warnings,
+    )
+    return BatchApproveResponse(
+        approved_count=len(outcome.approved_ids),
+        approved_ids=outcome.approved_ids,
+        skipped=[
+            BatchApproveSkipped(invoice_id=invoice_id, reason=reason)
+            for invoice_id, reason in outcome.skipped
+        ],
+    )
 
 
 @router.get("/exchange-rates", response_model=list[ExchangeRateResponse])
