@@ -184,6 +184,27 @@ class DualBatchResult:
     pairs: list[DualBatchPairOutcome]
 
 
+@dataclass(frozen=True)
+class ImportBatchOverview:
+    """一个导入批次 + 它现在各状态各有几张票，供复核台列表用。
+
+    计数按**当前**票状态实时聚合，而不是读批次行上导入时定死的 invoice_count：
+    复核台要显示的是「这批还剩几张要处理」，会随逐条批准变动。
+    """
+
+    batch: TaxInvoiceImportBatch
+    total: int
+    pending: int  # draft / needs_review / ready
+    needs_review: int
+    approved: int  # approved / issued
+
+
+@dataclass(frozen=True)
+class BatchApproveOutcome:
+    approved_ids: list[uuid.UUID]
+    skipped: list[tuple[uuid.UUID, str]]
+
+
 @dataclass
 class InvoiceAggregate:
     invoice: TaxInvoice
@@ -210,8 +231,11 @@ class TaxInvoiceService:
         query: str | None,
         page: int,
         page_size: int,
+        batch_id: uuid.UUID | None = None,
     ) -> tuple[list[TaxInvoice], int]:
         filters = []
+        if batch_id is not None:
+            filters.append(TaxInvoice.batch_id == batch_id)
         if status:
             filters.append(TaxInvoice.status == status)
         if period:
@@ -242,12 +266,58 @@ class TaxInvoiceService:
         )
         return invoices, int(total or 0)
 
+    async def list_batches(self, *, limit: int = 50) -> list[ImportBatchOverview]:
+        """最近的导入批次，附**当前**各状态计数（复核台的批次列表）。"""
+        batches = list(
+            (
+                await self.session.scalars(
+                    select(TaxInvoiceImportBatch)
+                    .order_by(TaxInvoiceImportBatch.created_at.desc())
+                    .limit(limit)
+                )
+            ).all()
+        )
+        if not batches:
+            return []
+        rows = (
+            await self.session.execute(
+                select(
+                    TaxInvoice.batch_id,
+                    TaxInvoice.status,
+                    func.count(),
+                )
+                .where(TaxInvoice.batch_id.in_([batch.id for batch in batches]))
+                .group_by(TaxInvoice.batch_id, TaxInvoice.status)
+            )
+        ).all()
+        counts: dict[uuid.UUID, dict[str, int]] = {}
+        for batch_id, invoice_status, count in rows:
+            counts.setdefault(batch_id, {})[invoice_status] = count
+        overviews: list[ImportBatchOverview] = []
+        for batch in batches:
+            bucket = counts.get(batch.id, {})
+            overviews.append(
+                ImportBatchOverview(
+                    batch=batch,
+                    total=sum(bucket.values()),
+                    pending=(
+                        bucket.get("draft", 0)
+                        + bucket.get("needs_review", 0)
+                        + bucket.get("ready", 0)
+                    ),
+                    needs_review=bucket.get("needs_review", 0),
+                    approved=bucket.get("approved", 0) + bucket.get("issued", 0),
+                )
+            )
+        return overviews
+
     async def export_entries(
         self,
         *,
         status: str | None,
         period: str | None,
         query: str | None,
+        batch_id: uuid.UUID | None = None,
     ) -> list[tuple[TaxInvoice, list[TaxInvoiceItem]]]:
         """按台账同一套筛选条件取出税票 + 明细，供导出用。
 
@@ -261,6 +331,7 @@ class TaxInvoiceService:
             query=query,
             page=1,
             page_size=MAX_EXPORT_INVOICES,
+            batch_id=batch_id,
         )
         if total > MAX_EXPORT_INVOICES:
             raise TaxInvoiceStateError(
@@ -860,6 +931,56 @@ class TaxInvoiceService:
                 await self.aggregate(invoice)
             ).events,
         )
+
+    async def approve_batch(
+        self,
+        batch_id: uuid.UUID,
+        *,
+        invoice_ids: list[uuid.UUID] | None,
+        accept_warnings: bool,
+    ) -> BatchApproveOutcome:
+        """总览里「单条 / 全部批准」——按批次批量批准未批准的税票。
+
+        invoice_ids 为 None＝批准这批里所有还未批准的；给了子集就只批那几张。
+        逐张走 approve()（每张一个事务、各自发编号）：够格的批准、不够格的
+        （缺字段 / 缺汇率 / 超 18 行）记进 skipped 回报，不因为一张不齐就把整批挡住——
+        这正是「导入不自动出号、复核后再逐条 / 整批批准」这套语义要的效果。
+        """
+        batch = await self.session.get(TaxInvoiceImportBatch, batch_id)
+        if batch is None:
+            raise TaxInvoiceNotFoundError("import batch was not found")
+        statement = select(TaxInvoice).where(
+            TaxInvoice.batch_id == batch_id,
+            TaxInvoice.status.in_(("draft", "needs_review", "ready")),
+        )
+        if invoice_ids is not None:
+            statement = statement.where(TaxInvoice.id.in_(invoice_ids))
+        targets = list(
+            (
+                await self.session.scalars(statement.order_by(TaxInvoice.created_at))
+            ).all()
+        )
+        # 先把 (id, version) 抓下来：approve() 每张都会 commit，逐条批准后
+        # 会话里其余对象会被 expire，循环里再读属性就要触发重查。
+        target_refs = [(target.id, target.version) for target in targets]
+        approved_ids: list[uuid.UUID] = []
+        skipped: list[tuple[uuid.UUID, str]] = []
+        for target_id, version in target_refs:
+            try:
+                result = await self.approve(
+                    target_id,
+                    version=version,
+                    accept_warnings=accept_warnings,
+                    note="batch approve",
+                )
+                approved_ids.append(result.invoice.id)
+            except TaxInvoiceServiceError as exc:
+                # approve() 自身不回滚——够不上批准的那张可能已经在事务里改了一半
+                # （极端情况下 commit 失败）。必须回滚，否则它的半成品会被下一张的
+                # commit 一起提交。回滚只影响这一张。
+                await self.session.rollback()
+                skipped.append((target_id, str(exc)))
+        return BatchApproveOutcome(approved_ids=approved_ids, skipped=skipped)
 
     async def void(
         self,
