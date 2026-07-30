@@ -49,6 +49,7 @@ BOM、空行、幂等替换）。**语法检查和肉眼审查不算验证**，�
 | 角色与职责分离四条决定（approver 可自录自批、作废与批准同级、WHT/TAX INV 共用批准人、`signature:manage` 仅 admin） | [README.md](README.md) + `backend/tests/test_authz.py` 的策略锁定测试 |
 | TAX INV 编号只在批准事务里生成，任何导入路径都拒收文件里的编号；补开以前月份靠行内 `Invoice Date`，不设专用通道 | `backend/tests/test_authz.py` 的 `test_numbers_are_never_supplied_by_import` + `backend/app/modules/tax_invoice/service.py` 的 `_assert_importable` |
 | WHT 编号不变量（`ZWTYYYYMMNNN` / 补开 `ZWTYYYYMMBKRSS`，正式号只在批准事务中分配） | [docs/architecture.md](docs/architecture.md) |
+| WHT 税率偏离收入类型目录的法定值：**提示但不拦，必须填理由留痕**。不硬拦是因为目录只覆盖常见类型，真实业务存在按合同/税务函件走非标准税率的情况，拦死会把人逼回手工开票。判定在服务端（不信客户端），理由连同实际税率与法定税率一起写进建单事件 `note`。单条录入与批量导入（`TaxRateReason` 列）共用同一判定 | `backend/app/modules/wht/service.py` 的 `_rate_deviation` + `backend/tests/test_wht_rate_override.py` |
 | TAX INV 规则（开票日期取报关提交日期、`ZWT-IVYYYYMMDD-NN`、18 行上限禁止批准不得截断、作废号不回收、汇率最多回溯 9 天） | [docs/architecture.md](docs/architecture.md) |
 | 模块只能通过服务层读共享数据，WHT 与 TAX INV 不直接写对方业务表 | [docs/architecture.md](docs/architecture.md)，对应 `core` / `wht` / `tax_invoice` / `audit` 四个 PG schema |
 | 视觉与文案基准（高密度财务台账、业务页无衬线、全宽表格、覆盖式详情抽屉、默认简体中文、UI 文案不得作为业务数据持久化） | 仓库根 `PRODUCT.md` 与 `DESIGN.md`；`../zwt-finance-ui-prototype/` 仅作历史原型参考 |
@@ -67,6 +68,10 @@ BOM、空行、幂等替换）。**语法检查和肉眼审查不算验证**，�
   拼贴、装饰渐变、玻璃拟态或营销式文案。
 - WHT 的批量开具与历史迁移必须作为两个有说明的操作入口；批量勾选后在原表格工具条
   位置显示批量动作，不另起 dashboard 卡片。
+- **WHT 单条开票是模块内的平行视图「开票操作」，不是弹窗**。理由是正式凭证上要打印
+  的每一项（泰文名、英文名、税号、泰文地址、收入类型）都必须在提交前摊开可核对 ——
+  这些字段由服务端在建单时快照进任务并原样印到凭证上，挤进一个下拉标签就等于没法核对。
+  收款方档案区是只读的，改档案要回「收款方主数据」。别退回弹窗。
 - 签名图库统一在系统管理维护并显示 WHT / TAX INV 适用范围；生成文件只在适用范围
   内选取签名，绝不跨范围选用（范围内无签名则出不带签名的文件，不挡出票）。
   BOT 多币种、接口自检和报价明细统一放在 TAX INV 的「BOT 汇率中心」视图。

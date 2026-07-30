@@ -30,9 +30,12 @@ from app.modules.wht.workbook import (
     tax_id as normalize_tax_id,
 )
 
-# 模板列名。前 4 列必填，后 4 列可留空由系统推导。
+# 模板列名。前 4 列必填，其余可留空由系统推导。
+# TaxRateReason 是条件必填：只有 TaxRate 偏离收入类型的法定值时才要求填，
+# 而「是否偏离」要拿收款方的 PND 类型才能判定，所以校验在 service 层做，
+# 不在本模块的 _parse_row 里（这里拿不到收款方）。
 REQUIRED_COLUMNS = ("PayeeTaxID", "IncomeType", "PaymentDate", "Amount")
-OPTIONAL_COLUMNS = ("Period", "IssuanceType", "SupplementRun", "TaxRate")
+OPTIONAL_COLUMNS = ("Period", "IssuanceType", "SupplementRun", "TaxRate", "TaxRateReason")
 TEMPLATE_COLUMNS = (*REQUIRED_COLUMNS, *OPTIONAL_COLUMNS)
 
 MAX_ROWS = 500
@@ -174,6 +177,7 @@ def _parse_row(cell: Any, row: tuple[Any, ...], row_number: int) -> dict[str, An
         "issuance_type": issuance_type,
         "supplement_run": supplement_run,
         "wht_rate": _rate(cell(row, "TaxRate"), row_number),
+        "rate_reason": text(cell(row, "TaxRateReason")) or None,
     }
 
 
@@ -193,9 +197,18 @@ TEMPLATE_NOTES = (
     ("IssuanceType", "可留空。normal（默认）或 supplement。"),
     ("SupplementRun", "补开时必填 1-9；normal 请留空或填 0。"),
     ("TaxRate", '可留空。留空按收入类型带出法定税率。填写请用小数 0.03 或 "3%"。'),
+    (
+        # 这段文字落在 Excel 单元格里，不渲染 markdown —— 别写 ** 强调，会显示成星号。
+        "TaxRateReason",
+        "条件必填。填的 TaxRate 与该收入类型的法定税率不一致时，必须写明理由"
+        "（例如：合同约定 5%，见 2026-06 补充协议），否则整张表退回。"
+        "理由会连同实际税率与法定税率一起写进建单记录，供事后审计追溯。"
+        "税率就是法定值、或收入类型不在目录里时可留空。",
+    ),
     ("—", "本表只建草稿，不能填 RefNo：正式编号仍在批准时由服务器生成。"),
 )
 
+# 顺序必须与 TEMPLATE_COLUMNS 对齐，长度由 test_batch_template_example_row_matches_columns 钉住。
 EXAMPLE_ROW = (
     "0105540057561",
     "ค่าบริการ",
@@ -203,6 +216,7 @@ EXAMPLE_ROW = (
     3000,
     "2026-06",
     "normal",
+    None,
     None,
     None,
 )

@@ -5,7 +5,9 @@ import pytest
 from openpyxl import Workbook, load_workbook
 
 from app.modules.wht.batch_import import (
+    EXAMPLE_ROW,
     TEMPLATE_COLUMNS,
+    TEMPLATE_NOTES,
     BatchWorkbookError,
     build_template_workbook,
     parse_batch_sheet,
@@ -155,6 +157,46 @@ def test_template_carries_the_documented_columns_and_notes() -> None:
     assert "说明 Notes" in workbook.sheetnames
     # 模板自身必须能被解析器接受，否则用户下载下来填完必然被退回。
     assert parse_batch_sheet(build_template_workbook())
+
+
+def test_template_example_row_stays_aligned_with_the_columns() -> None:
+    # 加列时最容易漏掉 EXAMPLE_ROW，错位后示例值会落到隔壁列上。
+    assert len(EXAMPLE_ROW) == len(TEMPLATE_COLUMNS)
+
+
+def test_every_column_is_documented_in_the_notes_sheet() -> None:
+    documented = {name for name, _ in TEMPLATE_NOTES}
+
+    assert set(TEMPLATE_COLUMNS) <= documented
+
+
+def test_reads_the_rate_reason_column() -> None:
+    # VALID_ROW 末位就是 TaxRate，替掉它再补理由列，别直接往后接。
+    row = [*VALID_ROW[:-1], "0.05", "合同约定 5%"]
+
+    (parsed,) = parse_batch_sheet(workbook_bytes(row))
+
+    assert parsed["wht_rate"] == Decimal("0.05")
+    assert parsed["rate_reason"] == "合同约定 5%"
+
+
+def test_blank_rate_reason_reads_as_none_not_empty_string() -> None:
+    # service 层用 `or None` 判空，这里先保证解析出来就是 None，
+    # 免得空白单元格变成 "" 之后被当成「填了理由」。
+    (parsed,) = parse_batch_sheet(workbook_bytes([*VALID_ROW[:-1], "0.05", "   "]))
+
+    assert parsed["rate_reason"] is None
+
+
+def test_rate_reason_is_optional_at_parse_time() -> None:
+    """偏离与否要拿收款方的 PND 类型才知道，解析阶段拿不到，所以这里不拦。
+
+    真正的「偏离必须留理由」在 WhtService.batch_create_tasks 里逐行校验，
+    口径与单条录入共用 `_rate_deviation`。
+    """
+    (parsed,) = parse_batch_sheet(workbook_bytes([*VALID_ROW[:-1], "0.05", None]))
+
+    assert parsed["rate_reason"] is None
 
 
 class TestIncomeTypes:

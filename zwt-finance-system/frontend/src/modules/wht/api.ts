@@ -1,3 +1,4 @@
+import { fileNameFromResponse, saveBlobAsFile } from "../../shared/download";
 import { ApiError, UnauthorizedError, apiFetch, apiRequest } from "../../shared/http";
 import { demoIncomeTypes, samplePayees, sampleWhtTasks } from "./sampleData";
 import type {
@@ -339,12 +340,10 @@ export async function batchCreateTasks(file: File): Promise<BatchCreateResult> {
 export async function downloadBatchTemplate(): Promise<void> {
   if (useDemoApi) return;
   const response = await apiFetch("/v1/wht/tasks/batch-template");
-  const url = URL.createObjectURL(await response.blob());
-  const anchor = window.document.createElement("a");
-  anchor.href = url;
-  anchor.download = "ZWT-WHT-BatchIssue-Template.xlsx";
-  anchor.click();
-  URL.revokeObjectURL(url);
+  saveBlobAsFile(
+    await response.blob(),
+    fileNameFromResponse(response, "ZWT-WHT-BatchIssue-Template.xlsx"),
+  );
 }
 
 export async function batchTransitionTasks(
@@ -546,10 +545,5 @@ export async function downloadWhtDocument(document: WhtDocument): Promise<void> 
   if (useDemoApi) return;
   // 走 apiFetch：下载同样要带会话 Cookie，否则受保护的端点会 401。
   const response = await apiFetch(`/v1/wht/documents/${document.id}/download`);
-  const url = URL.createObjectURL(await response.blob());
-  const anchor = window.document.createElement("a");
-  anchor.href = url;
-  anchor.download = document.fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  saveBlobAsFile(await response.blob(), fileNameFromResponse(response, document.fileName));
 }

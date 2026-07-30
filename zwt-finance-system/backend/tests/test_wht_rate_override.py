@@ -53,3 +53,33 @@ def test_free_text_income_type_still_keeps_a_supplied_note() -> None:
 def test_statutory_rate_keeps_a_supplied_note_verbatim() -> None:
     # 没偏离就没有「法定 vs 实际」的对照要记，理由原样留存。
     assert note_for(STATUTORY, "按目录") == "按目录"
+
+
+class TestSharedDeviationRule:
+    """`_rate_deviation` / `_stamp_rate_note` 是单条录入与批量导入共用的判定，
+    「什么算偏离」只在这里定义一次。批量那条路把它的返回值变成逐行错误而不是抛异常。"""
+
+    def test_deviation_reports_both_rates_for_the_error_message(self) -> None:
+        assert WhtService._rate_deviation(TRANSPORT, "PND53", Decimal("0.05")) == (
+            "5.00%",
+            "1.00%",
+        )
+
+    def test_no_deviation_at_the_statutory_rate(self) -> None:
+        assert WhtService._rate_deviation(TRANSPORT, "PND53", STATUTORY) is None
+
+    def test_same_income_type_can_deviate_on_one_return_and_not_the_other(self) -> None:
+        # ดอกเบี้ย（利息）在 PND3 下是 15%、PND53 下是 1%：同一税率两张表结论相反。
+        assert WhtService._rate_deviation("ดอกเบี้ย", "PND3", Decimal("0.15")) is None
+        assert WhtService._rate_deviation("ดอกเบี้ย", "PND53", Decimal("0.15")) is not None
+
+    def test_unknown_income_type_or_return_type_cannot_be_compared(self) -> None:
+        assert WhtService._rate_deviation("ค่าอื่น ๆ", "PND53", Decimal("0.07")) is None
+        assert WhtService._rate_deviation(TRANSPORT, None, Decimal("0.07")) is None
+
+    def test_stamp_prefixes_both_rates_onto_the_reason(self) -> None:
+        stamped = WhtService._stamp_rate_note(("5.00%", "1.00%"), "合同约定")
+        assert stamped == "税率 5.00%（法定 1.00%）：合同约定"
+
+    def test_stamp_leaves_the_reason_alone_when_nothing_deviates(self) -> None:
+        assert WhtService._stamp_rate_note(None, "备注") == "备注"

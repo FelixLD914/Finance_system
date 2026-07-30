@@ -198,11 +198,14 @@ const resources = {
     "wht.batchImportStep2":
       "必填 PayeeTaxID、IncomeType、PaymentDate、Amount；税号必须已存在于收款方主数据。",
     "wht.batchImportStep3":
-      "TaxRate 留空会按收入类型自动带出法定税率；要覆盖请写小数 0.03 或带百分号的 3%。",
+      "TaxRate 留空会按收入类型自动带出法定税率；要覆盖请写小数 0.03 或带百分号的 3%。覆盖成非法定税率时，必须在 TaxRateReason 列写明理由，否则整张表退回。",
     "wht.batchImportStep4":
       "上传后逐行校验：只要有一行不合格就整张表退回并列出全部问题，不会出现「一半成功」。",
     "wht.batchImportStep5": "导入成功后在台账里勾选这些草稿，批量提交复核 → 批准取号。",
     "wht.batchTemplate": "下载模板",
+    "wht.batchTemplateDesc": "取最新的批量开具 Excel 模板，含各列填写说明。",
+    "wht.batchTemplateStale":
+      "手上的模板可能是旧版：TaxRateReason 列是后加的，旧模板里没有这一列。请下载最新模板重新填写。",
     "wht.batchImportPick": "选择批量开具 Excel",
     "wht.batchImportCompleted": "批量开具完成：新建 {created} 条草稿",
     "wht.batchImportRejected": "整张表已退回，未导入任何数据",
@@ -844,12 +847,16 @@ const resources = {
     "wht.batchImportStep2":
       "PayeeTaxID, IncomeType, PaymentDate and Amount are required; the tax ID must already exist in the payee master data.",
     "wht.batchImportStep3":
-      "Leave TaxRate blank to take the statutory rate for that income type, or override it with a decimal such as 0.03 or a percentage such as 3%.",
+      "Leave TaxRate blank to take the statutory rate for that income type, or override it with a decimal such as 0.03 or a percentage such as 3%. An override away from the statutory rate must carry a reason in the TaxRateReason column, or the whole sheet is rejected.",
     "wht.batchImportStep4":
       "Every row is validated on upload: if any row fails, the whole sheet is rejected with the full list of problems — there is no half-imported state.",
     "wht.batchImportStep5":
       "After importing, tick the new drafts in the ledger and submit them for review, then approve to assign numbers.",
     "wht.batchTemplate": "Download template",
+    "wht.batchTemplateDesc":
+      "Get the current batch-issuance Excel template, with per-column notes.",
+    "wht.batchTemplateStale":
+      "Your template may be out of date: the TaxRateReason column was added later and is absent from older templates. Download the current template and fill it in again.",
     "wht.batchImportPick": "Select batch issuance file",
     "wht.batchImportCompleted": "Batch issuance finished: {created} drafts created",
     "wht.batchImportRejected": "The whole sheet was rejected; nothing was imported",
