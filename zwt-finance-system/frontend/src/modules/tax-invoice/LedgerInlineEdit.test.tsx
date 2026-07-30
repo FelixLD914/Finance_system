@@ -165,12 +165,12 @@ describe("台账行内单元格编辑", () => {
   it("点铅笔进编辑不打开详情，回车只发 {version, 该字段} 最小 patch", async () => {
     render(<Harness />);
 
-    // 按月分组默认全折叠：第一层只有月份行，得先点开「2026-01」这一段，
+    // 按月分组第一层是月份列表：点「2026-01」这一行钻进那一月的详情，
     // 里面的票（连同可编辑的 incoterms 格）才渲染出来。
-    const monthHead = await screen.findByRole("button", { name: /2026-01/ });
-    fireEvent.click(monthHead);
+    const monthRow = await screen.findByText("2026-01");
+    fireEvent.click(monthRow);
 
-    // 展开后这张票的 incoterms 格显示 FCA。
+    // 钻进后这张票的 incoterms 格显示 FCA。
     const cell = await waitFor(() => {
       const value = screen.getByText("FCA");
       const editable = value.closest(".tax-cell-editable");
@@ -201,7 +201,5 @@ describe("台账行内单元格编辑", () => {
       version: 3,
       incoterms: "FOB",
     });
-    // 这条要渲染整个工作台 + 展开手风琴 + 改格 + 保存，jsdom 里 antd 组件本就慢，
-    // 并行跑整套时 CPU 抢占会超过默认 5s。给足 20s，别在负载下假红。
-  }, 20000);
+  });
 });

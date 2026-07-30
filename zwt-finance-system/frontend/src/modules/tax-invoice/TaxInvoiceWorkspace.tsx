@@ -8,7 +8,6 @@ import {
   CloudDownloadOutlined,
   DatabaseOutlined,
   DeleteOutlined,
-  DownOutlined,
   DownloadOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -17,6 +16,7 @@ import {
   FileSearchOutlined,
   ImportOutlined,
   ReloadOutlined,
+  RightOutlined,
   TableOutlined,
   SafetyCertificateOutlined,
   UploadOutlined,
@@ -703,8 +703,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [period, setPeriod] = useState("all");
   // 台账按收入期间（月）分组：每月一段、带小计。默认开，可切回平铺分页表。
   const [groupByMonth, setGroupByMonth] = useState(true);
-  // 分组时哪些月份是展开的：默认全折叠，第一层只列月份，点月份行才展开这一月的票。
-  const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
+  // 分组时钻进了哪个月：null＝第一层月份列表；有值＝进了那一月的全区域详情。
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   // 列头筛选（客户 / incoterms）：受控且在 filteredInvoices 里集中过滤，
   // 这样分组视图下一处勾选对全部月份生效（antd 各表自带筛选只作用于本表）。
   const [colFilters, setColFilters] = useState<{
@@ -916,10 +916,17 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         key: key || "none",
         label: key ? `${key.slice(0, 4)}-${key.slice(4)}` : t("tax.noPeriod"),
         rows,
+        needsReview: rows.filter((row) => row.status === "needs_review").length,
         fobThbTotal: fobThbTotal.toFixed(2),
       };
     });
   }, [filteredInvoices, t]);
+
+  type MonthGroup = (typeof ledgerGroups)[number];
+  // 钻进的那一月（找不到＝筛选把它筛没了，退回月份列表）。
+  const monthDetail: MonthGroup | null = selectedMonth
+    ? (ledgerGroups.find((group) => group.key === selectedMonth) ?? null)
+    : null;
 
   // 复核台对账表的客户端筛选：一个搜索框跨 编号/CI/CDN/客户 过滤。
   const reviewRows = useMemo(() => {
@@ -1099,6 +1106,44 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       incoterms: (filters.incoterms as string[] | null) ?? [],
     });
   };
+
+  // 按月分组第一层：每月一行，点行钻进那一月的全区域详情。
+  const monthColumns: ColumnsType<MonthGroup> = [
+    {
+      title: t("tax.periodColumn"),
+      dataIndex: "label",
+      render: (value: string) => <strong className="tax-month-label">{value}</strong>,
+    },
+    {
+      title: t("tax.countInvoices"),
+      dataIndex: "rows",
+      width: 120,
+      align: "right",
+      render: (rows: TaxInvoice[]) => rows.length,
+    },
+    {
+      title: t("tax.countNeedsReview"),
+      dataIndex: "needsReview",
+      width: 120,
+      align: "right",
+      render: (value: number) =>
+        value ? <span className="tax-month-review">{value}</span> : value,
+    },
+    {
+      title: "FOB THB",
+      dataIndex: "fobThbTotal",
+      width: 190,
+      align: "right",
+      render: (value: string) => money(value, locale),
+    },
+    {
+      title: "",
+      dataIndex: "key",
+      width: 56,
+      align: "right",
+      render: () => <RightOutlined className="tax-month-arrow" />,
+    },
+  ];
 
   // 复核台对账表的列。除台账那几列外，末尾并排「海关汇率 / 报关单 THB」，
   // 让本系统按 BOT 汇率算出来的 FOB THB 与报关单自印的泰铢直接对照。
@@ -1813,6 +1858,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 setPhase(nextPhase);
                 setStatus("all");
                 setSelected(null);
+                setSelectedMonth(null);
               }}
             />
             <div className="tax-filter-bar">
@@ -1848,7 +1894,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 <Button
                   icon={<CalendarOutlined />}
                   type={groupByMonth ? "primary" : "default"}
-                  onClick={() => setGroupByMonth((on) => !on)}
+                  onClick={() => {
+                    setGroupByMonth((on) => !on);
+                    setSelectedMonth(null);
+                  }}
                 >
                   {t("tax.groupByMonth")}
                 </Button>
@@ -1871,98 +1920,114 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 </Button>
               </Tooltip>
             </div>
-            <div className="tax-ledger-summary">
-              <div>
-                <strong>{filteredInvoices.length}</strong>
-                <span>{t("tax.countInvoices")}</span>
-              </div>
-              <div>
-                <strong>
-                  {filteredInvoices.filter((item) => item.status === "needs_review").length}
-                </strong>
-                <span>{t("tax.countNeedsReview")}</span>
-              </div>
-              <div>
-                <strong>
-                  {filteredInvoices.filter((item) => item.status === "issued").length}
-                </strong>
-                <span>{t("tax.countIssued")}</span>
-              </div>
-            </div>
-            {groupByMonth ? (
-              // 第一层只列月份行（默认全折叠），点某月才展开这一月的票。段头写
-              // 期间 + 张数 + FOB THB 小计，chevron 指示展开态；展开的那月才渲染表。
-              <div className="tax-ledger-groups">
-                {ledgerGroups.map((group) => {
-                  const open = expandedMonths.includes(group.key);
-                  return (
-                    <section
-                      className={`tax-ledger-group${open ? " is-open" : ""}`}
-                      key={group.key}
+            {monthDetail ? (
+              // 钻进某一月：返回 + 月份汇总 + 该月全部票的全区域表（跟复核台钻进
+              // 一批同一套版式）。表体自己纵向滚，不再挤在一小块手风琴里。
+              <>
+                <div className="tax-review-head">
+                  <div>
+                    <Button
+                      className="tax-review-back"
+                      size="small"
+                      type="link"
+                      onClick={() => {
+                        setSelectedMonth(null);
+                        setSelected(null);
+                      }}
                     >
-                      <button
-                        aria-expanded={open}
-                        className="tax-ledger-group-head"
-                        type="button"
-                        onClick={() =>
-                          setExpandedMonths((current) =>
-                            open
-                              ? current.filter((key) => key !== group.key)
-                              : [...current, group.key],
-                          )
-                        }
-                      >
-                        <DownOutlined className="tax-ledger-group-chevron" />
-                        <h3>{group.label}</h3>
-                        <span className="tax-ledger-group-count">
-                          {t("tax.groupCount", { count: group.rows.length })}
-                        </span>
-                        <span className="tax-ledger-group-total">
-                          FOB THB {money(group.fobThbTotal, locale)}
-                        </span>
-                      </button>
-                      {open && (
-                        <Table
-                          columns={columns}
-                          dataSource={group.rows}
-                          loading={loading}
-                          pagination={false}
-                          rowClassName={(record) =>
-                            record.id === selected?.id ? "selected-table-row" : ""
-                          }
-                          rowKey="id"
-                          scroll={{ x: 1450 }}
-                          size="middle"
-                          onChange={onLedgerFilterChange}
-                          onRow={(record) => ({
-                            onClick: () => void openInvoice(record.id),
-                          })}
-                        />
-                      )}
-                    </section>
-                  );
-                })}
-                {!ledgerGroups.length && (
-                  <Empty description={t("tax.ledgerEmpty")} />
-                )}
-              </div>
+                      ← {t("tax.monthBackToList")}
+                    </Button>
+                    <h2>{monthDetail.label}</h2>
+                    <p>
+                      {t("tax.monthSummary", {
+                        total: monthDetail.rows.length,
+                        review: monthDetail.needsReview,
+                      })}
+                      {` · FOB THB ${money(monthDetail.fobThbTotal, locale)}`}
+                    </p>
+                  </div>
+                  <Tooltip title={t("tax.exportLedgerTip")}>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      loading={busy}
+                      onClick={() => void runLedgerExport()}
+                    >
+                      {t("tax.exportLedger")}
+                    </Button>
+                  </Tooltip>
+                </div>
+                <Table
+                  columns={columns}
+                  dataSource={monthDetail.rows}
+                  loading={loading}
+                  pagination={false}
+                  rowClassName={(record) =>
+                    record.id === selected?.id ? "selected-table-row" : ""
+                  }
+                  rowKey="id"
+                  scroll={{ x: 1450, y: "calc(100vh - 350px)" }}
+                  size="middle"
+                  onChange={onLedgerFilterChange}
+                  onRow={(record) => ({
+                    onClick: () => void openInvoice(record.id),
+                  })}
+                />
+              </>
             ) : (
-              <Table
-                columns={columns}
-                dataSource={filteredInvoices}
-                loading={loading}
-                pagination={{ pageSize: 15, showSizeChanger: false }}
-                rowClassName={(record) =>
-                  record.id === selected?.id ? "selected-table-row" : ""
-                }
-                rowKey="id"
-                scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
-                size="middle"
-                onChange={onLedgerFilterChange}
-                onRow={(record) => ({
-                  onClick: () => void openInvoice(record.id),
-                })}
-              />
+              <>
+                <div className="tax-ledger-summary">
+                  <div>
+                    <strong>{filteredInvoices.length}</strong>
+                    <span>{t("tax.countInvoices")}</span>
+                  </div>
+                  <div>
+                    <strong>
+                      {filteredInvoices.filter((item) => item.status === "needs_review").length}
+                    </strong>
+                    <span>{t("tax.countNeedsReview")}</span>
+                  </div>
+                  <div>
+                    <strong>
+                      {filteredInvoices.filter((item) => item.status === "issued").length}
+                    </strong>
+                    <span>{t("tax.countIssued")}</span>
+                  </div>
+                </div>
+                {groupByMonth ? (
+                  // 第一层：每月一行（期间 / 张数 / 待复核 / FOB THB 小计），点行钻进详情。
+                  <Table<MonthGroup>
+                    className="tax-month-list"
+                    columns={monthColumns}
+                    dataSource={ledgerGroups}
+                    loading={loading}
+                    pagination={false}
+                    rowKey="key"
+                    scroll={{ y: "calc(100vh - 360px)" }}
+                    size="middle"
+                    locale={{ emptyText: <Empty description={t("tax.ledgerEmpty")} /> }}
+                    onRow={(group) => ({
+                      onClick: () => setSelectedMonth(group.key),
+                    })}
+                  />
+                ) : (
+                  <Table
+                    columns={columns}
+                    dataSource={filteredInvoices}
+                    loading={loading}
+                    pagination={{ pageSize: 15, showSizeChanger: false }}
+                    rowClassName={(record) =>
+                      record.id === selected?.id ? "selected-table-row" : ""
+                    }
+                    rowKey="id"
+                    scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
+                    size="middle"
+                    onChange={onLedgerFilterChange}
+                    onRow={(record) => ({
+                      onClick: () => void openInvoice(record.id),
+                    })}
+                  />
+                )}
+              </>
             )}
           </main>
         </div>

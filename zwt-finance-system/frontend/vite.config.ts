@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -52,6 +53,11 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: "dist",
       sourcemap: false,
+    },
+    test: {
+      // antd 组件在 jsdom 里渲染本就慢，整套并行跑时 CPU 抢占会让个别重的用例
+      // 超过默认 5s 假红（单跑都过）。放宽到 20s，别让负载抖动变成红叉。
+      testTimeout: 20000,
     },
   };
 });
