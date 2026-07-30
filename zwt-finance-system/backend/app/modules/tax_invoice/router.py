@@ -41,11 +41,14 @@ from app.modules.tax_invoice.recognition import (
 from app.modules.tax_invoice.schemas import (
     MONTH_PATTERN,
     BotApiStatus,
+    DualBatchImportResponse,
+    DualBatchPairResult,
     DualIdentifiedCustoms,
     DualIdentifiedInvoice,
     DualIdentifyResponse,
     DualPairPreview,
     DualRejectedFile,
+    DualSkippedPair,
     ExchangeRateFetchRequest,
     ExchangeRateImportResponse,
     ExchangeRateMonth,
@@ -65,7 +68,11 @@ from app.modules.tax_invoice.schemas import (
     TaxInvoiceUpdate,
     TaxInvoiceVoidRequest,
 )
-from app.modules.tax_invoice.service import InvoiceAggregate, TaxInvoiceService
+from app.modules.tax_invoice.service import (
+    DualBatchPairInput,
+    InvoiceAggregate,
+    TaxInvoiceService,
+)
 
 # 整个 TAX INV 路由组要求已登录。逐个端点再用 require_permission 收紧。
 router = APIRouter(
@@ -140,6 +147,73 @@ async def _read_upload(
             detail=f"each file must not exceed {get_settings().max_file_mib} MiB",
         )
     return content, file_name
+
+
+async def _identify_uploads(
+    files: list[UploadFile],
+) -> tuple[list[IdentifiedFile], list[DualRejectedFile], dict[str, bytes]]:
+    """把一批上传解析成 IdentifiedFile，并留下每份成功读入文件的字节。
+
+    /import/dual/identify（只预览）与 /import/dual/batch（要落库存档）共用这一步，
+    解析口径才只有一处。contents 收所有成功读入的文件（含解析失败的），
+    供 batch 存档源文件时按文件名取回内容。
+    """
+    identified: list[IdentifiedFile] = []
+    rejected: list[DualRejectedFile] = []
+    contents: dict[str, bytes] = {}
+    for upload in files:
+        file_name = upload.filename or "upload"
+        kind = classify_file(file_name)
+        if kind is None:
+            rejected.append(
+                DualRejectedFile(
+                    file_name=file_name,
+                    kind="unsupported",
+                    reason="只认 .xlsx / .xls 的 Export Invoice 与 .pdf 的报关单",
+                )
+            )
+            continue
+        content, _ = await _read_upload(
+            upload,
+            INVOICE_SUFFIXES if kind == "invoice" else CUSTOMS_SUFFIXES,
+        )
+        contents[file_name] = content
+        try:
+            data = (
+                parse_invoice_workbook(content, file_name)
+                if kind == "invoice"
+                else parse_customs_pdf(content)
+            )
+        except TaxInvoiceRecognitionError as exc:
+            # 单份读不了不该让整批 4xx：其它文件还得配对。记下来一起回报。
+            identified.append(
+                IdentifiedFile(file_name=file_name, kind=kind, error=str(exc))
+            )
+            continue
+        identified.append(
+            IdentifiedFile(
+                file_name=file_name,
+                kind=kind,
+                key=pairing_key(data.get("ci_no")),
+                data=data,
+            )
+        )
+    return identified, rejected, contents
+
+
+def _report_unpairable(
+    unpairable: list[IdentifiedFile],
+    rejected: list[DualRejectedFile],
+) -> None:
+    """把配不上的文件（读不了 / 没有 C/I No. / 同名重复发票）追加进 rejected。"""
+    for item in unpairable:
+        rejected.append(
+            DualRejectedFile(
+                file_name=item.file_name,
+                kind=item.kind,
+                reason=item.error or "文件里没读到 C/I No.，无法配对",
+            )
+        )
 
 
 @router.get("/invoices", response_model=TaxInvoiceListResponse)
@@ -320,59 +394,12 @@ async def identify_dual_files(
     界面要在导入前把"哪个 Excel 对哪份报关单"摆给用户看，就必须先有这一趟。
     按文件名配对是原来的做法，实测 100% 配错（见 dual_pairing 模块 docstring）。
 
-    这里只读不写：没有事务、不落盘、不产生编号。确认之后仍然逐组走 /import/dual，
-    每组各自一个事务——一份坏 PDF 不该把另外十八组一起废掉。
+    这里只读不写：没有事务、不落盘、不产生编号。确认之后走 /import/dual/batch
+    把整批可导入配对一次性落成一个复核批次（不自动出编号）。
     """
-    identified: list[IdentifiedFile] = []
-    rejected: list[DualRejectedFile] = []
-
-    for upload in files:
-        file_name = upload.filename or "upload"
-        kind = classify_file(file_name)
-        if kind is None:
-            rejected.append(
-                DualRejectedFile(
-                    file_name=file_name,
-                    kind="unsupported",
-                    reason="只认 .xlsx / .xls 的 Export Invoice 与 .pdf 的报关单",
-                )
-            )
-            continue
-        content, _ = await _read_upload(
-            upload,
-            INVOICE_SUFFIXES if kind == "invoice" else CUSTOMS_SUFFIXES,
-        )
-        try:
-            data = (
-                parse_invoice_workbook(content, file_name)
-                if kind == "invoice"
-                else parse_customs_pdf(content)
-            )
-        except TaxInvoiceRecognitionError as exc:
-            # 单份读不了不该让整批 4xx：其它文件还得配对。记下来一起回报。
-            identified.append(
-                IdentifiedFile(file_name=file_name, kind=kind, error=str(exc))
-            )
-            continue
-        identified.append(
-            IdentifiedFile(
-                file_name=file_name,
-                kind=kind,
-                key=pairing_key(data.get("ci_no")),
-                data=data,
-            )
-        )
-
+    identified, rejected, _ = await _identify_uploads(files)
     pairs, unpairable = pair_identified_files(identified)
-    for item in unpairable:
-        rejected.append(
-            DualRejectedFile(
-                file_name=item.file_name,
-                kind=item.kind,
-                reason=item.error or "文件里没读到 C/I No.，无法配对",
-            )
-        )
-
+    _report_unpairable(unpairable, rejected)
     previews = [_pair_preview(pair) for pair in pairs]
     return DualIdentifyResponse(
         pairs=previews,
@@ -483,6 +510,104 @@ async def import_invoice_and_customs(
         invoice_content=invoice_content,
         customs_file_name=customs_file_name,
         customs_content=customs_content,
+    )
+
+
+@router.post(
+    "/import/dual/batch",
+    response_model=DualBatchImportResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def import_dual_batch(
+    service: ServiceDependency,
+    currency: Annotated[str, Form(min_length=3, max_length=3)] = "USD",
+    files: Annotated[
+        list[UploadFile],
+        File(description="Export invoices (.xlsx/.xls) and customs PDFs, mixed"),
+    ] = ...,
+) -> DualBatchImportResponse:
+    """一次上传里的所有可导入配对 → 一个复核批次（不自动出编号）。
+
+    取代前端逐组串行调 /import/dual 的老做法：服务端一趟识别 + 配对 + 匹配汇率 +
+    整批落进同一个 import_batches 行（进 review 态）。编号仍只在 approve 事务里发。
+
+    - 能导的（有发票，非 conflict）进 inputs，整批一个事务；有发票缺关单也导，
+      记为「待补关单」。
+    - 孤立关单（只有 PDF）和 conflict（同一 C/I 配到多份不同关单）不导，进 skipped，
+      让人先处理。读不了 / 没 C/I No. 的文件进 rejected。
+    - 撞上重复业务键会整批退回（TaxInvoiceConflictError → 409，前端弹冲突清单）。
+    """
+    identified, rejected, contents = await _identify_uploads(files)
+    pairs, unpairable = pair_identified_files(identified)
+    _report_unpairable(unpairable, rejected)
+
+    inputs: list[DualBatchPairInput] = []
+    skipped: list[DualSkippedPair] = []
+    for pair in pairs:
+        if pair.invoice is None:
+            skipped.append(
+                DualSkippedPair(
+                    key=pair.key,
+                    status="customs_only",
+                    reason="只有报关单、没有对应的 Export Invoice，凭它开不出税票",
+                )
+            )
+            continue
+        if pair.status == "conflict":
+            skipped.append(
+                DualSkippedPair(
+                    key=pair.key,
+                    status="conflict",
+                    reason="；".join(pair.conflicts)
+                    or "同一 C/I No. 配到多份不同报关单，请人工确认后再导",
+                )
+            )
+            continue
+        invoice_name = pair.invoice.file_name
+        customs_name = pair.customs.file_name if pair.customs else None
+        inputs.append(
+            DualBatchPairInput(
+                key=pair.key,
+                invoice_data=pair.invoice.data,
+                customs_data=pair.customs.data if pair.customs else {},
+                invoice_file_name=invoice_name,
+                invoice_content=contents[invoice_name],
+                customs_file_name=customs_name,
+                customs_content=contents.get(customs_name) if customs_name else None,
+            )
+        )
+
+    if not inputs:
+        # 全批只有孤立关单 / 冲突 / 读不了的文件：没有事务、没有批次。
+        return DualBatchImportResponse(
+            batch_id=None,
+            invoice_count=0,
+            item_count=0,
+            needs_review_count=0,
+            results=[],
+            rejected=rejected,
+            skipped=skipped,
+        )
+
+    result = await service.import_dual_batch(inputs=inputs, currency=currency.upper())
+    return DualBatchImportResponse(
+        batch_id=result.batch_id,
+        invoice_count=result.invoice_count,
+        item_count=result.item_count,
+        needs_review_count=result.needs_review_count,
+        results=[
+            DualBatchPairResult(
+                key=outcome.key,
+                invoice_file_name=outcome.invoice_file_name,
+                customs_file_name=outcome.customs_file_name,
+                invoice_id=outcome.invoice_id,
+                item_count=outcome.item_count,
+                needs_review=outcome.needs_review,
+            )
+            for outcome in result.pairs
+        ],
+        rejected=rejected,
+        skipped=skipped,
     )
 
 
