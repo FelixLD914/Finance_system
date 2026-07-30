@@ -4,7 +4,8 @@ export type TaxInvoiceStatus =
   | "ready"
   | "approved"
   | "issued"
-  | "voided";
+  | "voided"
+  | "rejected";
 
 export interface TaxInvoiceItem {
   id: number;
@@ -69,6 +70,7 @@ export interface TaxInvoice {
   approvedAt: string | null;
   issuedAt: string | null;
   voidedAt: string | null;
+  rejectedAt: string | null;
   items: TaxInvoiceItem[];
   events: TaxInvoiceEvent[];
 }

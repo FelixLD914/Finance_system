@@ -550,6 +550,7 @@ const resources = {
     "taxStatus.approved": "已批准",
     "taxStatus.issued": "已出具",
     "taxStatus.voided": "已作废",
+    "taxStatus.rejected": "已拒批",
 
     "placeholder.title": "模块已接入统一外壳",
     "placeholder.body":
@@ -1256,6 +1257,7 @@ const resources = {
     "taxStatus.approved": "Approved",
     "taxStatus.issued": "Issued",
     "taxStatus.voided": "Voided",
+    "taxStatus.rejected": "Rejected",
 
     "placeholder.title": "Module connected to the platform shell",
     "placeholder.body":

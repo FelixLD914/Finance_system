@@ -57,7 +57,8 @@ class TaxInvoice(Base):
     __table_args__ = (
         UniqueConstraint("document_no", name="uq_tax_invoice_invoices_document_no"),
         CheckConstraint(
-            "status IN ('draft', 'needs_review', 'ready', 'approved', 'issued', 'voided')",
+            "status IN ('draft', 'needs_review', 'ready', 'approved', 'issued', "
+            "'voided', 'rejected')",
             name="status_allowed",
         ),
         CheckConstraint("version >= 1", name="version_positive"),
@@ -174,6 +175,8 @@ class TaxInvoice(Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 拒批＝像软删除一样进历史、可恢复：置 rejected 并记录时间，恢复时清空。
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TaxInvoiceItem(Base):

@@ -15,6 +15,7 @@ TaxInvoiceStatus = Literal[
     "approved",
     "issued",
     "voided",
+    "rejected",
 ]
 
 
@@ -93,6 +94,7 @@ class TaxInvoiceResponse(ApiSchema):
     approved_at: datetime | None
     issued_at: datetime | None
     voided_at: datetime | None
+    rejected_at: datetime | None = None
     items: list[TaxInvoiceItemResponse] = Field(default_factory=list)
     events: list[TaxInvoiceEventResponse] = Field(default_factory=list)
 
@@ -126,6 +128,16 @@ class TaxInvoiceApproveRequest(ApiSchema):
 
 
 class TaxInvoiceMatchRateRequest(ApiSchema):
+    version: int = Field(ge=1)
+
+
+class TaxInvoiceRejectRequest(ApiSchema):
+    version: int = Field(ge=1)
+    # 拒批像删草稿，理由可选（想留痕就填，进事件时间线）。
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class TaxInvoiceRestoreRequest(ApiSchema):
     version: int = Field(ge=1)
 
 
@@ -283,6 +295,17 @@ class BatchApproveResponse(ApiSchema):
     approved_count: int
     approved_ids: list[uuid.UUID]
     skipped: list[BatchApproveSkipped]
+
+
+class BatchRejectRequest(ApiSchema):
+    # 为空＝拒批这批所有未批准的；给子集就只拒那几张。理由可选。
+    invoice_ids: list[uuid.UUID] | None = None
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class BatchRejectResponse(ApiSchema):
+    rejected_count: int
+    rejected_ids: list[uuid.UUID]
 
 
 MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
