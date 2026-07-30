@@ -40,7 +40,7 @@ import {
   Tooltip,
   Upload,
 } from "antd";
-import type { UploadFile } from "antd";
+import type { TableProps, UploadFile } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 import type { Locale, Translate } from "../../i18n";
@@ -686,6 +686,12 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [period, setPeriod] = useState("all");
   // 台账按收入期间（月）分组：每月一段、带小计。默认开，可切回平铺分页表。
   const [groupByMonth, setGroupByMonth] = useState(true);
+  // 列头筛选（客户 / incoterms）：受控且在 filteredInvoices 里集中过滤，
+  // 这样分组视图下一处勾选对全部月份生效（antd 各表自带筛选只作用于本表）。
+  const [colFilters, setColFilters] = useState<{
+    customerName: string[];
+    incoterms: string[];
+  }>({ customerName: [], incoterms: [] });
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
   // 复核台：导入批次列表 → 钻进某一批的对账表。
   const [batches, setBatches] = useState<ImportBatch[]>([]);
@@ -818,12 +824,38 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     [invoices],
   );
 
+  // 列头筛选可选值：从当前台账里去重取，客户名单较长时配 filterSearch 搜索。
+  const customerOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(invoices.map((invoice) => invoice.customerName).filter(Boolean)),
+      ).sort() as string[],
+    [invoices],
+  );
+  const incotermsOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(invoices.map((invoice) => invoice.incoterms).filter(Boolean)),
+      ).sort() as string[],
+    [invoices],
+  );
+
   const filteredInvoices = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return invoices.filter((invoice) => {
       if (!isInvoiceInPhase(invoice, phase)) return false;
       if (status !== "all" && invoice.status !== status) return false;
       if (period !== "all" && invoice.revenuePeriod !== period) return false;
+      if (
+        colFilters.customerName.length &&
+        !colFilters.customerName.includes(invoice.customerName ?? "")
+      )
+        return false;
+      if (
+        colFilters.incoterms.length &&
+        !colFilters.incoterms.includes(invoice.incoterms ?? "")
+      )
+        return false;
       if (!normalized) return true;
       return [
         invoice.documentNo,
@@ -832,7 +864,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         invoice.customerName,
       ].some((value) => value?.toLocaleLowerCase().includes(normalized));
     });
-  }, [invoices, period, phase, query, status]);
+  }, [colFilters, invoices, period, phase, query, status]);
 
   // 台账按月分组：有收入期间的按月倒序，没期间的（空）永远垫底；每段带 FOB THB 小计。
   const ledgerGroups = useMemo(() => {
@@ -906,9 +938,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       dataIndex: "customerName",
       width: 260,
       ellipsis: true,
+      filters: customerOptions.map((value) => ({ text: value, value })),
+      filteredValue: colFilters.customerName.length ? colFilters.customerName : null,
+      filterSearch: true,
       render: (value: string) => <ThaiText>{value}</ThaiText>,
     },
-    { title: t("tax.colIncoterms"), dataIndex: "incoterms", width: 95 },
+    {
+      title: t("tax.colIncoterms"),
+      dataIndex: "incoterms",
+      width: 95,
+      filters: incotermsOptions.map((value) => ({ text: value, value })),
+      filteredValue: colFilters.incoterms.length ? colFilters.incoterms : null,
+    },
     {
       title: t("tax.colRateDate"),
       dataIndex: "exchangeRateDate",
@@ -930,6 +971,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       render: (value: TaxInvoiceStatus) => <StatusTag status={value} t={t} />,
     },
   ];
+
+  // 列头筛选是受控的：把 antd 回传的选中值收进 colFilters，真正过滤在
+  // filteredInvoices 里做。分组视图每段一张表都挂这个 handler，任意一张改都对全部生效。
+  const onLedgerFilterChange: TableProps<TaxInvoice>["onChange"] = (
+    _pagination,
+    filters,
+  ) => {
+    setColFilters({
+      customerName: (filters.customerName as string[] | null) ?? [],
+      incoterms: (filters.incoterms as string[] | null) ?? [],
+    });
+  };
 
   // 复核台对账表的列。除台账那几列外，末尾并排「海关汇率 / 报关单 THB」，
   // 让本系统按 BOT 汇率算出来的 FOB THB 与报关单自印的泰铢直接对照。
@@ -1746,6 +1799,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                       rowKey="id"
                       scroll={{ x: 1450 }}
                       size="middle"
+                      onChange={onLedgerFilterChange}
                       onRow={(record) => ({
                         onClick: () => void openInvoice(record.id),
                       })}
@@ -1768,6 +1822,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 rowKey="id"
                 scroll={{ x: 1450, y: "calc(100vh - 395px)" }}
                 size="middle"
+                onChange={onLedgerFilterChange}
                 onRow={(record) => ({
                   onClick: () => void openInvoice(record.id),
                 })}
