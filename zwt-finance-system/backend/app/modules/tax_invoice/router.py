@@ -43,6 +43,8 @@ from app.modules.tax_invoice.schemas import (
     BatchApproveRequest,
     BatchApproveResponse,
     BatchApproveSkipped,
+    BatchRejectRequest,
+    BatchRejectResponse,
     BotApiStatus,
     DualBatchImportResponse,
     DualBatchPairResult,
@@ -68,7 +70,9 @@ from app.modules.tax_invoice.schemas import (
     TaxInvoiceItemResponse,
     TaxInvoiceListResponse,
     TaxInvoiceMatchRateRequest,
+    TaxInvoiceRejectRequest,
     TaxInvoiceResponse,
+    TaxInvoiceRestoreRequest,
     TaxInvoiceUpdate,
     TaxInvoiceVoidRequest,
 )
@@ -230,6 +234,7 @@ async def list_invoices(
         "approved",
         "issued",
         "voided",
+        "rejected",
     ]
     | None = Query(default=None, alias="status"),
     period: str | None = None,
@@ -266,6 +271,7 @@ async def export_ledger(
         "approved",
         "issued",
         "voided",
+        "rejected",
     ]
     | None = Query(default=None, alias="status"),
     period: str | None = None,
@@ -346,6 +352,40 @@ async def match_invoice_rate(
     """按报关提交日重新匹配 BOT 汇率并重算 THB。用于「先导票、后同步汇率」。"""
     return _response(
         await service.match_exchange_rate(invoice_id, version=payload.version)
+    )
+
+
+@router.post(
+    "/invoices/{invoice_id}/reject",
+    response_model=TaxInvoiceResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def reject_invoice(
+    invoice_id: uuid.UUID,
+    payload: TaxInvoiceRejectRequest,
+    service: ServiceDependency,
+) -> TaxInvoiceResponse:
+    """拒批一张未批准的税票：像软删除一样置 rejected 进历史，可再恢复。"""
+    return _response(
+        await service.reject_invoice(
+            invoice_id, version=payload.version, reason=payload.reason
+        )
+    )
+
+
+@router.post(
+    "/invoices/{invoice_id}/restore",
+    response_model=TaxInvoiceResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def restore_invoice(
+    invoice_id: uuid.UUID,
+    payload: TaxInvoiceRestoreRequest,
+    service: ServiceDependency,
+) -> TaxInvoiceResponse:
+    """把拒批的税票恢复回复核队列（按完整性重判 needs_review / ready）。"""
+    return _response(
+        await service.restore_invoice(invoice_id, version=payload.version)
     )
 
 
@@ -687,6 +727,31 @@ async def approve_import_batch(
             BatchApproveSkipped(invoice_id=invoice_id, reason=reason)
             for invoice_id, reason in outcome.skipped
         ],
+    )
+
+
+@router.post(
+    "/batches/{batch_id}/reject",
+    response_model=BatchRejectResponse,
+    dependencies=[Depends(require_permission("invoice:write"))],
+)
+async def reject_import_batch(
+    batch_id: uuid.UUID,
+    payload: BatchRejectRequest,
+    service: ServiceDependency,
+) -> BatchRejectResponse:
+    """复核台的「单条 / 整批拒批」。invoice_ids 为空＝拒批这批所有未批准的。
+
+    拒批＝软删除：置 rejected 进历史，可再 restore 恢复回复核队列。
+    """
+    outcome = await service.reject_batch(
+        batch_id,
+        invoice_ids=payload.invoice_ids,
+        reason=payload.reason,
+    )
+    return BatchRejectResponse(
+        rejected_count=len(outcome.rejected_ids),
+        rejected_ids=outcome.rejected_ids,
     )
 
 

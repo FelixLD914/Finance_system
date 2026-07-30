@@ -205,6 +205,11 @@ class BatchApproveOutcome:
     skipped: list[tuple[uuid.UUID, str]]
 
 
+@dataclass(frozen=True)
+class BatchRejectOutcome:
+    rejected_ids: list[uuid.UUID]
+
+
 @dataclass
 class InvoiceAggregate:
     invoice: TaxInvoice
@@ -981,6 +986,120 @@ class TaxInvoiceService:
                 await self.session.rollback()
                 skipped.append((target_id, str(exc)))
         return BatchApproveOutcome(approved_ids=approved_ids, skipped=skipped)
+
+    async def reject_invoice(
+        self,
+        invoice_id: uuid.UUID,
+        *,
+        version: int,
+        reason: str | None = None,
+    ) -> InvoiceAggregate:
+        """拒批一张未批准的税票：像软删除一样置 rejected 进历史，可再恢复。
+
+        只对 draft/needs_review/ready 生效——已批准/已开具的有正式编号，要作废得走
+        void→correction，不能从这条无痕地拿掉。
+        """
+        invoice = await self._load_invoice(invoice_id, for_update=True)
+        self._check_version(invoice, version)
+        if invoice.status not in {"draft", "needs_review", "ready"}:
+            raise TaxInvoiceStateError("only an unapproved invoice can be rejected")
+        previous = invoice.status
+        invoice.status = "rejected"
+        invoice.rejected_at = datetime.now(UTC)
+        invoice.version += 1
+        invoice.updated_by_name = self.actor_name
+        self.session.add(
+            self._event(
+                invoice,
+                "rejected",
+                previous,
+                "rejected",
+                (reason or "").strip() or None,
+            )
+        )
+        await self.session.commit()
+        await self.session.refresh(invoice)
+        return await self.aggregate(invoice)
+
+    async def restore_invoice(
+        self,
+        invoice_id: uuid.UUID,
+        *,
+        version: int,
+    ) -> InvoiceAggregate:
+        """把拒批的税票恢复回复核队列，按完整性重判 needs_review / ready。"""
+        invoice = await self._load_invoice(invoice_id, for_update=True)
+        self._check_version(invoice, version)
+        if invoice.status != "rejected":
+            raise TaxInvoiceStateError("only a rejected invoice can be restored")
+        item_count = await self.session.scalar(
+            select(func.count())
+            .select_from(TaxInvoiceItem)
+            .where(TaxInvoiceItem.invoice_id == invoice.id)
+        )
+        invoice.status = self._review_status(
+            {
+                "invoice_date": invoice.invoice_date,
+                "exchange_target_date": invoice.exchange_target_date,
+                "exchange_rate": invoice.exchange_rate,
+                "customer_name": invoice.customer_name,
+                "customer_address": invoice.customer_address,
+                "fob_verification_failed": invoice.fob_verification_failed,
+                "submission_date_low_confidence": invoice.submission_date_low_confidence,
+            },
+            int(item_count or 0),
+        )
+        invoice.rejected_at = None
+        invoice.version += 1
+        invoice.updated_by_name = self.actor_name
+        self.session.add(
+            self._event(invoice, "restored", "rejected", invoice.status)
+        )
+        await self.session.commit()
+        await self.session.refresh(invoice)
+        return await self.aggregate(invoice)
+
+    async def reject_batch(
+        self,
+        batch_id: uuid.UUID,
+        *,
+        invoice_ids: list[uuid.UUID] | None,
+        reason: str | None = None,
+    ) -> BatchRejectOutcome:
+        """复核台的「单条 / 整批拒批」。invoice_ids 为空＝拒批这批所有未批准的。
+
+        与 approve_batch 不同，拒批只是状态翻转、不发编号，所以整批一个事务就够，
+        不必逐张各自提交。已批准/已开具的天然不在选取范围内。
+        """
+        batch = await self.session.get(TaxInvoiceImportBatch, batch_id)
+        if batch is None:
+            raise TaxInvoiceNotFoundError("import batch was not found")
+        statement = select(TaxInvoice).where(
+            TaxInvoice.batch_id == batch_id,
+            TaxInvoice.status.in_(("draft", "needs_review", "ready")),
+        )
+        if invoice_ids is not None:
+            statement = statement.where(TaxInvoice.id.in_(invoice_ids))
+        targets = list(
+            (
+                await self.session.scalars(statement.order_by(TaxInvoice.created_at))
+            ).all()
+        )
+        note = (reason or "").strip() or None
+        now = datetime.now(UTC)
+        rejected_ids: list[uuid.UUID] = []
+        for target in targets:
+            previous = target.status
+            target.status = "rejected"
+            target.rejected_at = now
+            target.version += 1
+            target.updated_by_name = self.actor_name
+            self.session.add(
+                self._event(target, "rejected", previous, "rejected", note)
+            )
+            rejected_ids.append(target.id)
+        await self.session.commit()
+        return BatchRejectOutcome(rejected_ids=rejected_ids)
 
     async def void(
         self,

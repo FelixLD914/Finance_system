@@ -130,6 +130,8 @@ const statusClasses: Record<TaxInvoiceStatus, string> = {
   approved: "status-approved",
   issued: "status-issued",
   voided: "status-voided",
+  // 拒批和作废都是历史里的终态，共用同一套「已失效」外观。
+  rejected: "status-voided",
 };
 
 /** BOT DAILY_AVG_EXG_RATE 覆盖的主要币种。台账没数据的会标注「无数据」。 */
@@ -157,7 +159,8 @@ const taxInvoicePhaseStatuses: Record<
 > = {
   pending: ["draft", "needs_review", "ready"],
   issuing: ["approved"],
-  history: ["issued", "voided"],
+  // 拒批的税票像软删除一样进历史，可在这里查看并恢复。
+  history: ["issued", "voided", "rejected"],
 };
 
 function isInvoiceInPhase(
@@ -174,6 +177,7 @@ const STATUS_ORDER: TaxInvoiceStatus[] = [
   "approved",
   "issued",
   "voided",
+  "rejected",
 ];
 
 function statusLabel(status: TaxInvoiceStatus, t: Translate): string {
