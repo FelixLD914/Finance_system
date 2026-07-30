@@ -514,13 +514,33 @@
   background: var(--finance-canvas);
 }
 
-.tax-ledger-layout,
-.tax-ledger-layout.has-inspector {
+/* finance-ui.css 在 main.tsx 里排最后、会覆盖 global.css 的同名选择器，
+   所以两种形态都要在这里显式写清，别只写一半，否则 .has-inspector 会退回
+   单列——税票详情就会被塞到台账表格下面、且被固定高度截掉半张（这正是
+   「只显示一半」那个 BUG 的根因）。无详情时单列铺满，有详情时右侧固定
+   430px 抽栏，和 global.css 的意图保持一致。 */
+.tax-ledger-layout {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.tax-ledger-layout.has-inspector {
+  grid-template-columns: minmax(700px, 1fr) 430px;
 }
 
 .tax-ledger-main {
   padding: 14px 20px 20px;
+}
+
+/* 详情里「待匹配 + 匹配汇率」按钮同排，link 型按钮去掉内边距贴着文字。 */
+.tax-rate-unmatched {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tax-rate-unmatched .ant-btn-link {
+  height: auto;
+  padding-inline: 0;
 }
 
 /* 末尾两列是「刷新」和「导出台账」。这条规则覆盖 global.css 里的同名选择器

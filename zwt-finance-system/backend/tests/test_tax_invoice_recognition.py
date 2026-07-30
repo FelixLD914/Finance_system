@@ -10,7 +10,24 @@ from app.modules.tax_invoice.recognition import (
     parse_bot_fx_workbook,
     parse_invoice_workbook,
     parse_sample_workbook,
+    recompute_line_thb,
 )
+
+
+def test_recompute_line_thb_none_propagation_and_half_up() -> None:
+    """THB 折算的唯一口径：None 传播 + ROUND_HALF_UP 到分。
+
+    识别建单与事后汇率重匹配都走 recompute_line_thb，把这条钉死，防止哪天
+    有人在重匹配那侧改回银行家舍入——那会让台账和 PDF 差一分且静默无声。
+    """
+    # 缺 USD 金额或缺汇率时不臆造 THB。
+    assert recompute_line_thb(None, Decimal("32.1230")) is None
+    assert recompute_line_thb(Decimal("100"), None) is None
+    # 常规折算，保留两位小数。
+    assert recompute_line_thb(Decimal("100.00"), Decimal("32.1230")) == Decimal("3212.30")
+    # 半分一律进位（ROUND_HALF_UP），而不是 Python 默认的银行家舍入——
+    # 后者会把 0.125 收成 0.12。
+    assert recompute_line_thb(Decimal("0.125"), Decimal("1")) == Decimal("0.13")
 
 
 def _invoice_workbook(unit_price: object = 30, amount_usd: object = 300) -> bytes:

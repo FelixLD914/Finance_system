@@ -72,6 +72,22 @@ export function approveTaxInvoice(
   });
 }
 
+/**
+ * 按报关提交日重新匹配 BOT 汇率并重算 THB。
+ *
+ * 用于「先导票、后同步汇率」：识别建单时汇率表还没当期数据，这张票的汇率就一直
+ * 空着。同步/导入 BOT 汇率之后点一次，后端按同一套 9 天回溯规则回填，不用手抄。
+ */
+export function matchTaxInvoiceRate(
+  invoiceId: string,
+  version: number,
+): Promise<TaxInvoice> {
+  return request<TaxInvoice>(`/v1/tax-invoice/invoices/${invoiceId}/match-rate`, {
+    method: "POST",
+    body: JSON.stringify({ version }),
+  });
+}
+
 export function updateTaxInvoice(
   invoiceId: string,
   input: Record<string, unknown>,
