@@ -120,7 +120,10 @@ function settlementText() {
   return document.querySelector(".issuance-settlement")?.textContent ?? "";
 }
 
-describe("WHT 开票操作页", { timeout: 15_000 }, () => {
+// 这里不要再写 { timeout: n }：describe 上的 timeout 会盖掉 vite.config.ts 里的
+// testTimeout，连命令行 --testTimeout 也压不过它。本套是最重的一组用例，超时口径
+// 统一由 vite.config.ts 的 testTimeout 管，改一处就够。
+describe("WHT 开票操作页", () => {
   it("选中收款方后，凭证上要打印的每一项都分行列出", async () => {
     render(<Harness />);
 
