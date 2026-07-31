@@ -248,9 +248,12 @@ function dropFiles(files: File[]) {
 
 async function openRecognitionView() {
   render(<Harness />);
-  // 台账首屏会去拉列表，等它落定再切页，避免 act 警告。
-  await waitFor(() => expect(screen.getByText("识别与导入")).toBeTruthy());
-  fireEvent.click(screen.getByText("识别与导入"));
+  // 识别与导入现在是「开票」向导里的一步。台账首屏会去拉列表，等「开票」入口
+  // 就绪再进向导，避免 act 警告。向导第一步是选汇率，点「下一步：导入文件」进
+  // 导入步（默认双流，出现文件投放区）。
+  await waitFor(() => expect(screen.getByText("开票")).toBeTruthy());
+  fireEvent.click(screen.getByText("开票"));
+  fireEvent.click(await screen.findByRole("button", { name: /下一步：导入文件/ }));
   await waitFor(() => expect(document.querySelector(".dual-drop-zone")).toBeTruthy());
 }
 
@@ -340,7 +343,7 @@ describe("识别与导入：配对结果", () => {
     // 后端回了 3 组：1 conflict + 1 ready + 1 待补关单。按钮上的数字就是"会真的
     // 导几组"，必须是 2——conflict 组被排掉。直接断言按钮文案而不是真跑一遍导入：
     // 导入是串行 await + antd 提示动画，在 jsdom 里跑完要好几秒，断言的又不是它。
-    expect(await screen.findByRole("button", { name: /开始识别 2 组/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /确认并导入 2 组/ })).toBeTruthy();
     // conflict 组的冲突说明必须显示出来，否则用户不知道为什么少导了一组。
     const conflictRow = document.querySelector(".dual-pair-row.is-conflict");
     expect(conflictRow?.textContent).toContain("多份");

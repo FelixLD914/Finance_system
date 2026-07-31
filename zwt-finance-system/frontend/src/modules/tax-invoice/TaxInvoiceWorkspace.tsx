@@ -19,6 +19,7 @@ import {
   FilePdfOutlined,
   FileSearchOutlined,
   ImportOutlined,
+  InfoCircleOutlined,
   ReloadOutlined,
   RightOutlined,
   ShrinkOutlined,
@@ -41,9 +42,11 @@ import {
   Input,
   InputNumber,
   Modal,
+  Segmented,
   Select,
   Space,
   Spin,
+  Steps,
   Table,
   Tag,
   Tooltip,
@@ -73,6 +76,7 @@ import {
   importDualBatch,
   importExchangeRates,
   importSample,
+  listExchangeRateMonths,
   listRateCurrencies,
   matchTaxInvoiceRate,
   listImportBatches,
@@ -104,6 +108,7 @@ import type {
   DualBatchPairResult,
   DualIdentifyResult,
   DualPairPreview,
+  ExchangeRateMonth,
   ImportBatch,
   TaxInvoice,
   TaxInvoiceDocument,
@@ -112,7 +117,29 @@ import type {
 } from "./types";
 import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
-type WorkspaceView = "ledger" | "review" | "recognition" | "batch" | "rates";
+// 三个平级入口：台账（看）、开票（做）、汇率中心（查/维护）。原来的五个平铺
+// 页签里，「识别与导入 / 表格批量导入 / 批次复核」其实是开票这一件事的三个阶段，
+// 现在串进「开票」这条向导流水线，不再各占一个顶部页签抢首屏。
+type WorkspaceView = "ledger" | "issue" | "rates";
+
+// 开票向导的五步：选汇率 → 导入文件 → 核对匹配 → 汇总复核 → 提交开具。
+// 顶部横向步骤标就照这个顺序渲染，第 3、4 步全屏铺开、让位给核对内容。
+type WizardStep = "rate" | "import" | "reconcile" | "review" | "submit";
+const WIZARD_ORDER: WizardStep[] = [
+  "rate",
+  "import",
+  "reconcile",
+  "review",
+  "submit",
+];
+
+// 导入方式：Sample 表格批量开具，或发票+报关单双流识别配对。
+type IssueMethod = "dual" | "sample";
+
+/** 把 <input type="month"> 的 YYYY-MM 和后端月份键（可能带/不带连字符）都归一成纯数字比。 */
+function sameMonth(a: string, b: string): boolean {
+  return a.replace(/\D/g, "") === b.replace(/\D/g, "");
+}
 
 // 台账里可行内编辑的字段（都在后端 TaxInvoiceUpdate 里、且是 date/文本类）。
 // 编号/CI/CDN 不在更新 schema 里，FOB THB 由明细算出，状态另有流程——都不给编辑。
@@ -425,7 +452,7 @@ function conflictText(issue: ApiIssue, t: Translate): string {
 // 复核台的核对口径（warningCount / usdMismatch / needsAttention / reviewWarnings…）
 // 都抽到了 ./reviewReconcile，单独单测、单独调口径。
 
-function InvoiceInspector({
+export function InvoiceInspector({
   invoice,
   documents,
   busy,
@@ -494,6 +521,32 @@ function InvoiceInspector({
         />
       )}
 
+      {/* 客户及报关资料排在最前：一张税票先认「开给谁、对哪张报关单」，
+          日期与编号是这份主体确定后才需要核的口径，所以放到下一段。 */}
+      <section className="inspector-section">
+        <h3>{t("tax.customerSection")}</h3>
+        <Descriptions className="task-descriptions" column={1} colon={false}>
+          <Descriptions.Item label="C/I No.">{invoice.ciNo}</Descriptions.Item>
+          <Descriptions.Item label={t("tax.colCdn")}>
+            {invoice.cdn ?? "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("tax.customerName")}>
+            <ThaiText>{invoice.customerName}</ThaiText>
+          </Descriptions.Item>
+          <Descriptions.Item label={t("tax.customerAddress")}>
+            <ThaiText>{invoice.customerAddress}</ThaiText>
+          </Descriptions.Item>
+          <Descriptions.Item label={t("tax.taxId")}>
+            {invoice.taxId ?? "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="PO No.">{invoice.poNo ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label={t("tax.incoterms")}>
+            {invoice.incoterms ?? "—"}
+            {invoice.isDap && <Tag color="orange">{t("tax.dapNeedsReview")}</Tag>}
+          </Descriptions.Item>
+        </Descriptions>
+      </section>
+
       <section className="inspector-section">
         <h3>{t("tax.dateSection")}</h3>
         <Descriptions className="task-descriptions" column={1} colon={false}>
@@ -535,30 +588,6 @@ function InvoiceInspector({
       </section>
 
       <section className="inspector-section">
-        <h3>{t("tax.customerSection")}</h3>
-        <Descriptions className="task-descriptions" column={1} colon={false}>
-          <Descriptions.Item label="C/I No.">{invoice.ciNo}</Descriptions.Item>
-          <Descriptions.Item label={t("tax.colCdn")}>
-            {invoice.cdn ?? "—"}
-          </Descriptions.Item>
-          <Descriptions.Item label={t("tax.customerName")}>
-            <ThaiText>{invoice.customerName}</ThaiText>
-          </Descriptions.Item>
-          <Descriptions.Item label={t("tax.customerAddress")}>
-            <ThaiText>{invoice.customerAddress}</ThaiText>
-          </Descriptions.Item>
-          <Descriptions.Item label={t("tax.taxId")}>
-            {invoice.taxId ?? "—"}
-          </Descriptions.Item>
-          <Descriptions.Item label="PO No.">{invoice.poNo ?? "—"}</Descriptions.Item>
-          <Descriptions.Item label={t("tax.incoterms")}>
-            {invoice.incoterms ?? "—"}
-            {invoice.isDap && <Tag color="orange">{t("tax.dapNeedsReview")}</Tag>}
-          </Descriptions.Item>
-        </Descriptions>
-      </section>
-
-      <section className="inspector-section">
         <div className="section-title-row">
           <h3>{t("tax.itemsSection")}</h3>
           <span>{t("tax.itemsCount", { count: invoice.items.length })}</span>
@@ -574,13 +603,21 @@ function InvoiceInspector({
             {
               title: t("tax.colQuantity"),
               dataIndex: "quantity",
-              width: 76,
+              width: 92,
               align: "right",
+              // 数量按业务口径无小数（源数据是 "9504.0000" 这种），千分位显示、
+              // 且不让 "9504.0000" 换行断成两截（详情抽屉里那个诡异的下挂 0）。
+              render: (value: string | null) =>
+                value != null && value !== ""
+                  ? Number(value).toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })
+                  : "—",
             },
             {
               title: "FOB USD",
               dataIndex: "fobRevenueUsd",
-              width: 105,
+              width: 108,
               align: "right",
               render: (value: string | null) => money(value, locale),
             },
@@ -924,6 +961,17 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const { can } = useAuth();
   const canWriteRates = can("invoice:write");
   const [view, setView] = useState<WorkspaceView>("ledger");
+  // 开票向导所在步；issueMethod 记这一批走 Sample 还是双流；issueMonth 是选中的
+  // 开票月份（YYYY-MM，用于「当月汇率是否就绪」的自检）；rateMonths 是有汇率数据
+  // 的月份清单，进汇率步时拉一次。
+  const [wizardStep, setWizardStep] = useState<WizardStep>("rate");
+  const [issueMethod, setIssueMethod] = useState<IssueMethod>("dual");
+  const [issueMonth, setIssueMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [rateMonths, setRateMonths] = useState<ExchangeRateMonth[]>([]);
+  const [rateMonthsLoading, setRateMonthsLoading] = useState(false);
   const [invoices, setInvoices] = useState<TaxInvoice[]>([]);
   // 汇率中心可以看任何币种；出口税票取哪个汇率是另一回事，业务规则仍是
   // USD 的 buying transfer，不受这里的浏览选择影响。
@@ -1057,10 +1105,21 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       .catch(() => setCurrencies(["USD"]));
   }, [refreshInvoices]);
 
-  // 进复核台时拉批次列表（首次进入、或从别的视图切回都刷新一遍）。
+  // 进「汇总复核」步时拉批次列表（首次进入、或从别的步切回都刷新一遍）。
   useEffect(() => {
-    if (view === "review") void refreshBatches();
-  }, [view, refreshBatches]);
+    if (view === "issue" && wizardStep === "review") void refreshBatches();
+  }, [view, wizardStep, refreshBatches]);
+
+  // 进「选择汇率」步时拉当前币种有数据的月份，用来判断选中月是否已就绪。
+  useEffect(() => {
+    if (view === "issue" && wizardStep === "rate") {
+      setRateMonthsLoading(true);
+      listExchangeRateMonths(currency)
+        .then(setRateMonths)
+        .catch(() => setRateMonths([]))
+        .finally(() => setRateMonthsLoading(false));
+    }
+  }, [view, wizardStep, currency]);
 
   // 台账里某张票被单条操作（批准/拒批/恢复/改…）后，把变化镜像进复核台的
   // 对账表——省得每个单条 handler 都各自去动 batchInvoices。只更新两边都在的行。
@@ -1696,6 +1755,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         ...dualQueue.customs.map((item) => item.file),
       ]);
       setDualIdentify(result);
+      // 上一轮导入残留的跳过/退回清单在这里清掉，免得配对预览里混着旧结果。
+      setDualBatchResult(null);
+      // 识别完直接进「核对匹配」步看配对结果——识别的产物就是这一步的输入。
+      setWizardStep("reconcile");
       if (result.rejected.length) {
         message.warning(
           t("tax.identifyRejected", { count: result.rejected.length }),
@@ -1771,6 +1834,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           : current,
       );
 
+      // 台账在后台刷新；跳过/退回的文件由复核步顶部的提示条继续显示，不静默丢。
+      await refreshInvoices();
       if (result.batchId) {
         message.success(
           t("tax.batchDualDone", {
@@ -1778,12 +1843,12 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             items: result.itemCount,
           }),
         );
+        // 有可导入的组：直接进「汇总复核」步核对这一批。
+        await enterBatchReview(result.batchId);
       } else {
-        // 没有一对可导入：只有孤立关单/冲突/读不了的文件。
+        // 没有一对可导入：只有孤立关单/冲突/读不了的文件。留在核对步看提示条。
         message.warning(t("tax.batchDualNothing"));
       }
-      // 台账在后台刷新；结果卡片留在本页，用「去复核台」进这批逐条核对。
-      await refreshInvoices();
     } catch (error) {
       // 整批 409（重复业务键）：一条都不进，队列原样留着。逐行冲突用弹窗展示，
       // 塞进 message 会被截断也没法滚动。
@@ -1799,24 +1864,22 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
-  /** 从结果卡片直接进复核台，并打开刚导入的这一批。 */
-  const goToReviewBatch = async (batchId: string) => {
-    setView("review");
-    try {
-      const list = await listImportBatches();
-      setBatches(list);
-      const target = list.find((batch) => batch.id === batchId);
-      if (target) await openBatch(target);
-    } catch {
-      // 拉批次失败也没关系：切到复核台后那个 effect 会自己再拉一次。
-    }
-  };
-
-  /** 从结果清单跳去台账看某一份税票。 */
-  const openInvoiceFromResult = async (invoiceId: string) => {
-    setView("ledger");
-    await openInvoice(invoiceId);
-  };
+  /** 导入成功后直接进向导「汇总复核」步，并打开刚建成的这一批。 */
+  const enterBatchReview = useCallback(
+    async (batchId: string) => {
+      setView("issue");
+      setWizardStep("review");
+      try {
+        const list = await listImportBatches();
+        setBatches(list);
+        const target = list.find((batch) => batch.id === batchId);
+        if (target) await openBatch(target);
+      } catch {
+        // 拉批次失败也没关系：进复核步后那个 effect 会自己再拉一次。
+      }
+    },
+    [openBatch],
+  );
 
   const runSampleImport = async () => {
     if (!sampleFile) {
@@ -1833,8 +1896,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         }),
       );
       setSampleFile(null);
+      // Sample 没有配对/跳过清单，清掉上一次双流留下的结果，直接进复核步。
+      setDualBatchResult(null);
       await refreshInvoices();
-      setView("ledger");
+      await enterBatchReview(result.batchId);
     } catch (error) {
       // 后端一次退回所有冲突行。塞进 message 会被截断也不能滚动，
       // 逐行清单必须用弹窗展示，用户才能照着改表。
@@ -1872,9 +1937,17 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   };
 
   // 批量批准/拒批后：批次计数、对账表、台账全变了，一起刷新并清空勾选。
+  // 这里直接取回批次清单（而不是只调 refreshBatches），好把选中批次的实时
+  // 计数（待批准/已批准）也刷新——提交步的统计与「全部已完成」判定都靠它。
   const reloadAfterBatchAction = useCallback(async () => {
-    await Promise.all([refreshBatches(), refreshInvoices()]);
+    const [freshBatches] = await Promise.all([
+      listImportBatches(),
+      refreshInvoices(),
+    ]);
+    setBatches(freshBatches);
     if (selectedBatch) {
+      const updated = freshBatches.find((batch) => batch.id === selectedBatch.id);
+      if (updated) setSelectedBatch(updated);
       try {
         const response = await listTaxInvoicesByBatch(selectedBatch.id);
         setBatchInvoices(response.items);
@@ -1883,7 +1956,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       }
     }
     setReviewSelectedKeys([]);
-  }, [refreshBatches, refreshInvoices, selectedBatch]);
+  }, [refreshInvoices, selectedBatch]);
 
   const runBatchApprove = async (scope: "all" | "selected") => {
     if (!selectedBatch) return;
@@ -2020,6 +2093,27 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   // overflow:hidden 截掉一半，怎么滚都只看得见一小片。
   const monthPage = view === "ledger" ? monthDetail : null;
 
+  // 开票向导当前步索引；顶部步骤标与「上一步/下一步」都从这里取。
+  const wizardIndex = WIZARD_ORDER.indexOf(wizardStep);
+  const goStep = (step: WizardStep) => setWizardStep(step);
+  // 从台账进开票：永远从第一步（选汇率）开新的一批，清掉上一轮的批次/详情选中。
+  const startWizard = () => {
+    setSelectedBatch(null);
+    setSelected(null);
+    setWizardStep("rate");
+    setView("issue");
+  };
+  // 退出向导回台账：批次留在库里（台账可见、可再进复核），只清界面选中态。
+  const exitWizard = () => {
+    setSelectedBatch(null);
+    setSelected(null);
+    setView("ledger");
+  };
+  // 选中开票月是否已有 BOT 汇率数据（按当前币种）。
+  const issueMonthRate = rateMonths.find((entry) =>
+    sameMonth(entry.month, issueMonth),
+  );
+
   return (
     <section
       className={monthPage ? "tax-workspace is-drilldown" : "tax-workspace"}
@@ -2083,6 +2177,36 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             </Button>
           </Tooltip>
         </header>
+      ) : view === "issue" ? (
+        // 开票向导：顶部只留一条「返回台账 + 横向步骤标」的窄条，
+        // 模块大标题与子导航全部让位——核对/复核内容才是这条流水线的主体。
+        <header className="tax-wizard-bar">
+          <Button
+            className="tax-drill-back"
+            icon={<ArrowLeftOutlined />}
+            type="text"
+            onClick={exitWizard}
+          >
+            {t("tax.wizardBackToLedger")}
+          </Button>
+          <Steps
+            className="tax-wizard-steps"
+            size="small"
+            current={wizardIndex}
+            items={[
+              { title: t("tax.stepRate"), icon: <CalendarOutlined /> },
+              { title: t("tax.stepImport"), icon: <ImportOutlined /> },
+              { title: t("tax.stepReconcile"), icon: <FileSearchOutlined /> },
+              { title: t("tax.stepReview"), icon: <AuditOutlined /> },
+              { title: t("tax.stepSubmit"), icon: <SafetyCertificateOutlined /> },
+            ]}
+            // 步骤标只用于回看已过的步；往前只能靠每步自己的「下一步」，
+            // 免得跳过汇率/导入直接落到没有数据的复核步。
+            onChange={(next) => {
+              if (next <= wizardIndex) goStep(WIZARD_ORDER[next]);
+            }}
+          />
+        </header>
       ) : (
         <>
           <header className="workspace-header">
@@ -2103,6 +2227,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             </Tooltip>
           </header>
 
+          {/* 三个平级入口：看（台账）/ 做（开票）/ 查（汇率中心）。 */}
           <nav className="workspace-subnav" aria-label={t("tax.navLabel")}>
             <button
               className={view === "ledger" ? "is-active" : ""}
@@ -2112,29 +2237,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               <DatabaseOutlined />
               {t("tax.ledger")}
             </button>
-            <button
-              className={view === "review" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("review")}
-            >
-              <AuditOutlined />
-              {t("tax.review")}
-            </button>
-            <button
-              className={view === "recognition" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("recognition")}
-            >
-              <FileSearchOutlined />
-              {t("tax.recognition")}
-            </button>
-            <button
-              className={view === "batch" ? "is-active" : ""}
-              type="button"
-              onClick={() => setView("batch")}
-            >
-              <ImportOutlined />
-              {t("tax.batchNav")}
+            {/* 子导航只在台账/汇率两个视图出现；进「开票」后整条导航换成向导步骤标，
+                所以这里的开票入口不需要 is-active 态。 */}
+            <button className="" type="button" onClick={startWizard}>
+              <FileDoneOutlined />
+              {t("tax.issueNav")}
             </button>
             <button
               className={view === "rates" ? "is-active" : ""}
@@ -2270,9 +2377,12 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                     size="small"
                     type="link"
                     onClick={() => {
+                      // 去开票向导的「汇总复核」步：不带具体批次，落到批次列表自己挑。
                       setSelectedMonth(null);
                       setSelected(null);
-                      setView("review");
+                      setSelectedBatch(null);
+                      setWizardStep("review");
+                      setView("issue");
                     }}
                   >
                     {t("tax.ledgerGotoReview")}
@@ -2324,7 +2434,517 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         </div>
       )}
 
-      {view === "review" && (
+      {view === "issue" && wizardStep === "rate" && (
+        <div className="tax-wizard-body">
+          <main className="tax-wizard-panel">
+            <p className="tax-rule-note">
+              <SafetyCertificateOutlined />
+              <span>{t("tax.stepRateNote")}</span>
+            </p>
+            <section className="tax-tool-card">
+              <div className="tool-card-heading">
+                <div className="tool-card-icon copper">
+                  <CalendarOutlined />
+                </div>
+                <div>
+                  <span>{t("tax.stepRate")}</span>
+                  <h2>{t("tax.rateStepTitle")}</h2>
+                  <p>{t("tax.rateStepHint")}</p>
+                </div>
+              </div>
+              <div className="tax-rate-picker">
+                <label className="date-field">
+                  <span>{t("tax.issueMonth")}</span>
+                  <Input
+                    type="month"
+                    value={issueMonth}
+                    onChange={(event) => setIssueMonth(event.target.value)}
+                  />
+                </label>
+                <label className="date-field">
+                  <span>{t("tax.currency")}</span>
+                  <Select
+                    options={(currencies.length ? currencies : ["USD"]).map(
+                      (code) => ({ value: code, label: code }),
+                    )}
+                    showSearch
+                    value={currency}
+                    onChange={setCurrency}
+                  />
+                </label>
+              </div>
+              {/* 当月汇率是否就绪：就绪→绿条报天数；缺→黄条给两条入库入口。 */}
+              {rateMonthsLoading ? (
+                <p className="tax-inline-note">
+                  <Spin size="small" />
+                  <span>{t("tax.rateChecking")}</span>
+                </p>
+              ) : issueMonthRate ? (
+                <Alert
+                  showIcon
+                  type="success"
+                  title={t("tax.rateReady", {
+                    month: issueMonth,
+                    days: issueMonthRate.dayCount,
+                  })}
+                  description={t("tax.rateReadyBody")}
+                />
+              ) : (
+                <Alert
+                  showIcon
+                  type="warning"
+                  title={t("tax.rateMissing", { month: issueMonth })}
+                  description={t("tax.rateMissingBody")}
+                />
+              )}
+              <div className="tax-rate-actions">
+                <Button
+                  disabled={!canWriteRates}
+                  icon={<ApiOutlined />}
+                  onClick={() => setFetchOpen(true)}
+                >
+                  {t("tax.syncFromBot")}
+                </Button>
+                <Upload
+                  accept=".xlsx,.xls"
+                  disabled={!canWriteRates}
+                  beforeUpload={(file) => {
+                    setRateFile(file);
+                    return false;
+                  }}
+                  fileList={uploadList(rateFile)}
+                  maxCount={1}
+                  onRemove={() => setRateFile(null)}
+                >
+                  <Button icon={<FileExcelOutlined />}>{t("tax.pickBotExcel")}</Button>
+                </Upload>
+                {rateFile && (
+                  <Button
+                    disabled={!canWriteRates}
+                    loading={busy}
+                    type="primary"
+                    onClick={() => void runRateImport()}
+                  >
+                    {t("tax.importPicked")}
+                  </Button>
+                )}
+              </div>
+            </section>
+            <div className="tax-wizard-foot">
+              <span className="tax-wizard-foot-spacer" />
+              <Button
+                icon={<RightOutlined />}
+                iconPosition="end"
+                type="primary"
+                onClick={() => goStep("import")}
+              >
+                {t("tax.wizardNextImport")}
+              </Button>
+            </div>
+          </main>
+        </div>
+      )}
+
+      {view === "issue" && wizardStep === "import" && (
+        <div className="tax-wizard-body">
+          <main className="tax-wizard-panel">
+            <p className="tax-rule-note">
+              <SafetyCertificateOutlined />
+              <span>{t("tax.dateGovernance")}</span>
+            </p>
+            {/* 两种开票方式二选一：发票+报关单双流识别，或 Sample 表格批量。 */}
+            <Segmented
+              className="tax-issue-methods"
+              block
+              value={issueMethod}
+              onChange={(value) => setIssueMethod(value as IssueMethod)}
+              options={[
+                {
+                  value: "dual",
+                  label: (
+                    <span className="tax-method-opt">
+                      <FileSearchOutlined />
+                      {t("tax.methodDual")}
+                    </span>
+                  ),
+                },
+                {
+                  value: "sample",
+                  label: (
+                    <span className="tax-method-opt">
+                      <TableOutlined />
+                      {t("tax.methodSample")}
+                    </span>
+                  ),
+                },
+              ]}
+            />
+
+            {issueMethod === "dual" ? (
+              <section className="tax-tool-card tax-dual-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon copper">
+                    <FileSearchOutlined />
+                  </div>
+                  <div>
+                    <span>{t("tax.newInvoice")}</span>
+                    <h2>{t("tax.dualRecognition")}</h2>
+                    <p>{t("tax.dualRecognitionHint")}</p>
+                  </div>
+                </div>
+                <Upload.Dragger
+                  accept=".xlsx,.xls,.pdf"
+                  className="dual-drop-zone"
+                  beforeUpload={(file, batch) => {
+                    if (file === batch[0]) acceptDualFiles(batch);
+                    return false;
+                  }}
+                  fileList={[]}
+                  multiple
+                  showUploadList={false}
+                  onDrop={(event) => {
+                    const rejected = Array.from(event.dataTransfer.files)
+                      .filter((file) => !classifyDualFile(file))
+                      .map((file) => file.name);
+                    if (rejected.length) {
+                      message.warning(
+                        t("tax.unsupportedFiles", { files: rejected.join("、") }),
+                      );
+                    }
+                  }}
+                >
+                  <p className="ant-upload-drag-icon dual-drop-icons">
+                    <FileExcelOutlined />
+                    <PlusOutlined />
+                    <FilePdfOutlined />
+                  </p>
+                  <p className="ant-upload-text">{t("tax.dualDropTitle")}</p>
+                  <p className="ant-upload-hint">{t("tax.dualDropHint")}</p>
+                  <Button icon={<UploadOutlined />} size="small">
+                    {t("tax.dualPickFiles")}
+                  </Button>
+                </Upload.Dragger>
+                {queuedCount > 0 && (
+                  <div className="dual-queue">
+                    <div className="dual-queue-head">
+                      <h3>
+                        {t("tax.fileQueue")}
+                        <span>
+                          {t("tax.fileQueueCount", {
+                            excel: dualQueue.invoices.length,
+                            pdf: dualQueue.customs.length,
+                          })}
+                        </span>
+                      </h3>
+                      <Button
+                        size="small"
+                        type="text"
+                        onClick={() => {
+                          setDualQueue({ invoices: [], customs: [] });
+                          setDualIdentify(null);
+                        }}
+                      >
+                        {t("tax.pairClearAll")}
+                      </Button>
+                    </div>
+                    <div className="dual-file-columns">
+                      <QueueColumn
+                        files={dualQueue.invoices}
+                        icon={<FileExcelOutlined />}
+                        title={t("tax.queueExcel")}
+                        onRemove={(id) => {
+                          setDualQueue((current) => ({
+                            ...current,
+                            invoices: current.invoices.filter(
+                              (item) => item.id !== id,
+                            ),
+                          }));
+                          setDualIdentify(null);
+                        }}
+                      />
+                      <QueueColumn
+                        files={dualQueue.customs}
+                        icon={<FilePdfOutlined />}
+                        title={t("tax.queuePdf")}
+                        onRemove={(id) => {
+                          setDualQueue((current) => ({
+                            ...current,
+                            customs: current.customs.filter(
+                              (item) => item.id !== id,
+                            ),
+                          }));
+                          setDualIdentify(null);
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </section>
+            ) : (
+              <section className="tax-tool-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon ink">
+                    <ImportOutlined />
+                  </div>
+                  <div>
+                    <span>{t("tax.migration")}</span>
+                    <h2>{t("tax.batchIssueTitle")}</h2>
+                    <p>{t("tax.batchIssueHint")}</p>
+                  </div>
+                </div>
+                <Upload.Dragger
+                  accept=".xlsx,.xls"
+                  className="sample-drop-zone"
+                  beforeUpload={(file) => {
+                    setSampleFile(file);
+                    return false;
+                  }}
+                  fileList={uploadList(sampleFile)}
+                  maxCount={1}
+                  onRemove={() => setSampleFile(null)}
+                >
+                  <p className="ant-upload-drag-icon">
+                    <FileExcelOutlined />
+                  </p>
+                  <p className="ant-upload-text">{t("tax.pickSample")}</p>
+                  <p className="ant-upload-hint">{t("tax.samplePickHint")}</p>
+                </Upload.Dragger>
+                <p className="tax-inline-note">
+                  <WarningOutlined />
+                  <span>
+                    <strong>{t("tax.sampleWarning")}</strong>
+                    {t("tax.sampleWarningBody")}
+                  </span>
+                </p>
+              </section>
+            )}
+
+            <div className="tax-wizard-foot">
+              <Button icon={<ArrowLeftOutlined />} onClick={() => goStep("rate")}>
+                {t("tax.wizardPrev")}
+              </Button>
+              <span className="tax-wizard-foot-spacer" />
+              {issueMethod === "dual" ? (
+                <Button
+                  disabled={!queuedCount}
+                  icon={<FileSearchOutlined />}
+                  loading={identifying}
+                  type="primary"
+                  onClick={() => void runIdentify()}
+                >
+                  {t("tax.identifyAndPair", { count: queuedCount })}
+                </Button>
+              ) : (
+                <Button
+                  disabled={!sampleFile}
+                  icon={<RightOutlined />}
+                  iconPosition="end"
+                  type="primary"
+                  onClick={() => goStep("reconcile")}
+                >
+                  {t("tax.wizardNextReconcile")}
+                </Button>
+              )}
+            </div>
+          </main>
+        </div>
+      )}
+
+      {view === "issue" && wizardStep === "reconcile" && (
+        <div className="tax-wizard-body">
+          <main className="tax-wizard-panel is-wide">
+            {issueMethod === "dual" ? (
+              !dualIdentify ? (
+                <Empty description={t("tax.reconcileNoIdentify")}>
+                  <Button type="primary" onClick={() => goStep("import")}>
+                    {t("tax.wizardPrev")}
+                  </Button>
+                </Empty>
+              ) : (
+                <>
+                  <div className="tax-review-head">
+                    <div>
+                      <h2>{t("tax.reconcileTitle")}</h2>
+                      <p>
+                        {t("tax.pairSummary", {
+                          ready: dualIdentify.readyCount,
+                          invoiceOnly: dualIdentify.invoiceOnlyCount,
+                          customsOnly: dualIdentify.customsOnlyCount,
+                          conflict: dualIdentify.conflictCount,
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="tax-reconcile-scroll">
+                    {/* 三种「要注意」压成一条状态条：原来是三块整幅 Alert 叠在一起，
+                        单是标题+说明就吃掉两百多像素首屏，而它们讲的其实只是三个数。
+                        每类的详细说明挂在 title 上（悬停可看），每一组具体因为什么
+                        不能导，配对行自己那行红字已经写了，不必在顶部重复一遍。 */}
+                    {(dualIdentify.conflictCount > 0 ||
+                      dualIdentify.invoiceOnlyCount > 0 ||
+                      dualIdentify.rejected.length > 0) && (
+                      <div className="tax-triage-bar">
+                        {dualIdentify.conflictCount > 0 && (
+                          <span
+                            className="tax-triage-chip is-danger"
+                            title={t("tax.pairConflictBody")}
+                          >
+                            <CloseCircleOutlined />
+                            {t("tax.pairConflict", {
+                              count: dualIdentify.conflictCount,
+                            })}
+                          </span>
+                        )}
+                        {dualIdentify.invoiceOnlyCount > 0 && (
+                          <span
+                            className="tax-triage-chip is-info"
+                            title={t("tax.pairInvoiceOnlyBody")}
+                          >
+                            <InfoCircleOutlined />
+                            {t("tax.pairInvoiceOnly", {
+                              count: dualIdentify.invoiceOnlyCount,
+                            })}
+                          </span>
+                        )}
+                        {dualIdentify.rejected.length > 0 && (
+                          <span className="tax-triage-chip is-warning">
+                            <WarningOutlined />
+                            {t("tax.identifyRejected", {
+                              count: dualIdentify.rejected.length,
+                            })}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {/* 读不进来的文件：文件名 + 原因必须看得见（不能只挂 tooltip，
+                        那等于把原因藏起来）。压成每份一行的小字，一份约 18px，
+                        比原来那块整幅 Alert 省掉七成高度，但话说全了。 */}
+                    {dualIdentify.rejected.length > 0 && (
+                      <ul className="dual-reject-list is-compact">
+                        {dualIdentify.rejected.map((item) => (
+                          <li key={`${item.kind}-${item.fileName}`}>
+                            <b>{item.fileName}</b>：{item.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <ol className="dual-pair-list">
+                      {dualIdentify.pairs.map((pair, index) => (
+                        <DualPairRow
+                          index={index + 1}
+                          key={pair.key}
+                          pair={pair}
+                          t={t}
+                        />
+                      ))}
+                    </ol>
+                  </div>
+                  <div className="tax-wizard-foot">
+                    <Button
+                      icon={<ArrowLeftOutlined />}
+                      onClick={() => goStep("import")}
+                    >
+                      {t("tax.wizardPrev")}
+                    </Button>
+                    <span className="tax-wizard-foot-spacer" />
+                    <Button
+                      disabled={!importablePairs.length}
+                      icon={<ImportOutlined />}
+                      loading={busy}
+                      type="primary"
+                      onClick={() => void runDualImport()}
+                    >
+                      {importablePairs.length > 1
+                        ? t("tax.confirmImportBatch", {
+                            count: importablePairs.length,
+                          })
+                        : t("tax.confirmImport")}
+                    </Button>
+                  </div>
+                </>
+              )
+            ) : !sampleFile ? (
+              <Empty description={t("tax.reconcileNoSample")}>
+                <Button type="primary" onClick={() => goStep("import")}>
+                  {t("tax.wizardPrev")}
+                </Button>
+              </Empty>
+            ) : (
+              <>
+                <div className="tax-review-head">
+                  <div>
+                    <h2>{t("tax.reconcileSampleTitle")}</h2>
+                    <p>{t("tax.reconcileSampleHint")}</p>
+                  </div>
+                </div>
+                <div className="tax-reconcile-scroll">
+                  <section className="tax-tool-card tax-column-card">
+                    <div className="tool-card-heading">
+                      <div className="tool-card-icon copper">
+                        <FileExcelOutlined />
+                      </div>
+                      <div>
+                        <span>{t("tax.batchColumns")}</span>
+                        <h2>{sampleFile.name}</h2>
+                        <p>{t("tax.batchColumnsHint")}</p>
+                      </div>
+                    </div>
+                    <Alert
+                      title={t("tax.batchNumberForbidden")}
+                      description={t("tax.batchNumberForbiddenBody")}
+                      showIcon
+                      type="info"
+                    />
+                    <div className="column-group">
+                      <h3>
+                        {t("tax.batchRequired")}
+                        <span>{SAMPLE_REQUIRED_COLUMNS.length}</span>
+                      </h3>
+                      <div className="column-tags">
+                        {SAMPLE_REQUIRED_COLUMNS.map((name) => (
+                          <code className="is-required" key={name}>
+                            {name}
+                          </code>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="column-group">
+                      <h3>
+                        {t("tax.batchOptional")}
+                        <span>{SAMPLE_OPTIONAL_COLUMNS.length}</span>
+                      </h3>
+                      <div className="column-tags">
+                        {SAMPLE_OPTIONAL_COLUMNS.map((name) => (
+                          <code key={name}>{name}</code>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+                <div className="tax-wizard-foot">
+                  <Button
+                    icon={<ArrowLeftOutlined />}
+                    onClick={() => goStep("import")}
+                  >
+                    {t("tax.wizardPrev")}
+                  </Button>
+                  <span className="tax-wizard-foot-spacer" />
+                  <Button
+                    icon={<ImportOutlined />}
+                    loading={busy}
+                    type="primary"
+                    onClick={() => void runSampleImport()}
+                  >
+                    {t("tax.runSampleImport")}
+                  </Button>
+                </div>
+              </>
+            )}
+          </main>
+        </div>
+      )}
+
+      {view === "issue" && wizardStep === "review" && (
         <div className="tax-ledger-layout">
           <main className="tax-ledger-main">
             {!selectedBatch ? (
@@ -2432,6 +3052,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                     {t("tax.reviewGotoLedger")}
                   </Button>
                 </div>
+                {/* 复核步只管「看清、剔错」：搜索/展开/导出 + 拒批坏的那几张。
+                    批准并出号是下一步（提交开具）的事，不在这一层动。 */}
                 <div className="tax-review-actions">
                   <Input.Search
                     allowClear
@@ -2459,7 +3081,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   </Button>
                   <Button
                     danger
-                    disabled={busy}
+                    disabled={busy || !reviewRows.length}
                     onClick={() =>
                       runBatchReject(reviewSelectedKeys.length ? "selected" : "all")
                     }
@@ -2469,17 +3091,41 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                       : t("tax.reviewRejectAll")}
                   </Button>
                   <Button
-                    loading={busy}
+                    disabled={selectedBatch.pending === 0}
+                    icon={<RightOutlined />}
+                    iconPosition="end"
                     type="primary"
-                    onClick={() =>
-                      void runBatchApprove(reviewSelectedKeys.length ? "selected" : "all")
-                    }
+                    onClick={() => goStep("submit")}
                   >
-                    {reviewSelectedKeys.length
-                      ? t("tax.reviewApproveSelected", { count: reviewSelectedKeys.length })
-                      : t("tax.reviewApproveAll")}
+                    {t("tax.wizardNextSubmit")}
                   </Button>
                 </div>
+                {/* 导入时没进库的文件（孤立关单/冲突/读不了）——绝不静默丢，
+                    在复核步顶部照原因列出，方便修好再回上一步重导。 */}
+                {dualBatchResult &&
+                  (dualBatchResult.skipped.length > 0 ||
+                    dualBatchResult.rejected.length > 0) && (
+                    <div className="tax-triage-bar is-inset is-stacked">
+                      <span className="tax-triage-chip is-warning">
+                        <WarningOutlined />
+                        {t("tax.reviewImportPartial", {
+                          skipped: dualBatchResult.skipped.length,
+                          rejected: dualBatchResult.rejected.length,
+                        })}
+                      </span>
+                      {/* 原因逐条写出来（小字一行一条），别让用户去猜少了什么。 */}
+                      <ul className="dual-reject-list is-compact">
+                        {dualBatchResult.skipped.map((item) => (
+                          <li key={item.key}>{item.reason}</li>
+                        ))}
+                        {dualBatchResult.rejected.map((item) => (
+                          <li key={item.fileName}>
+                            <b>{item.fileName}</b>：{item.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 {/* 整批摊成一列对账卡：每张票直接展开审，逐条批准/拒批就在卡上，
                     不用点行开抽屉再关。卡片流融进 .tax-ledger-main 的 flex 链，
                     自身滚动（外层 overflow:hidden 兜底）。 */}
@@ -2528,516 +3174,107 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         </div>
       )}
 
-      {view === "recognition" && (
-        <main className="tax-tool-page">
-          {/* 原来是一整块深色横幅，占掉首屏近三分之一。规则本身没变，
-              但它是一次性知识，压成一行提示条即可。 */}
-          <p className="tax-rule-note">
-            <SafetyCertificateOutlined />
-            <span>{t("tax.dateGovernance")}</span>
-          </p>
-
-          <div className="tax-import-grid">
-            <section className="tax-tool-card tax-dual-card">
-              <div className="tool-card-heading">
-                <div className="tool-card-icon copper">
-                  <FileSearchOutlined />
-                </div>
-                <div>
-                  <span>{t("tax.newInvoice")}</span>
-                  <h2>{t("tax.dualRecognition")}</h2>
-                  <p>{t("tax.dualRecognitionHint")}</p>
-                </div>
-              </div>
-              {/* 一个投放区收两种文件：财务同事手上 Excel 和 PDF 是一起拿到的，
-                  分成两个框逼他们分两次选，多一次来回没有任何收益。 */}
-              <Upload.Dragger
-                accept=".xlsx,.xls,.pdf"
-                className="dual-drop-zone"
-                beforeUpload={(file, batch) => {
-                  // beforeUpload 每个文件调一次；只在整批的第一个上处理，
-                  // 否则「忽略了哪些文件」的提示会按文件数重复弹。
-                  if (file === batch[0]) acceptDualFiles(batch);
-                  return false;
-                }}
-                fileList={[]}
-                multiple
-                showUploadList={false}
-                onDrop={(event) => {
-                  // 点击选文件的分支里认不出的文件会走到 acceptDualFiles 提示；
-                  // 拖拽这条 rc-upload 会先按 accept 滤掉，根本到不了 beforeUpload。
-                  // 拖拽是这个区域的主路径，静默吞掉文件说不过去，单独补一条提示。
-                  const rejected = Array.from(event.dataTransfer.files)
-                    .filter((file) => !classifyDualFile(file))
-                    .map((file) => file.name);
-                  if (rejected.length) {
-                    message.warning(
-                      t("tax.unsupportedFiles", { files: rejected.join("、") }),
-                    );
-                  }
-                }}
-              >
-                <p className="ant-upload-drag-icon dual-drop-icons">
-                  <FileExcelOutlined />
-                  <PlusOutlined />
-                  <FilePdfOutlined />
-                </p>
-                <p className="ant-upload-text">{t("tax.dualDropTitle")}</p>
-                <p className="ant-upload-hint">{t("tax.dualDropHint")}</p>
-                <Button icon={<UploadOutlined />} size="small">
-                  {t("tax.dualPickFiles")}
+      {view === "issue" && wizardStep === "submit" && (
+        <div className="tax-wizard-body">
+          <main className="tax-wizard-panel">
+            {!selectedBatch ? (
+              <Empty description={t("tax.submitNoBatch")}>
+                <Button type="primary" onClick={() => goStep("review")}>
+                  {t("tax.wizardPrev")}
                 </Button>
-              </Upload.Dragger>
-              {queuedCount > 0 && (
-                <div className="dual-queue">
-                  <div className="dual-queue-head">
-                    <h3>
-                      {t("tax.fileQueue")}
-                      <span>
-                        {t("tax.fileQueueCount", {
-                          excel: dualQueue.invoices.length,
-                          pdf: dualQueue.customs.length,
-                        })}
-                      </span>
-                    </h3>
-                    <Button
-                      size="small"
-                      type="text"
-                      onClick={() => {
-                        setDualQueue({ invoices: [], customs: [] });
-                        setDualIdentify(null);
-                      }}
-                    >
-                      {t("tax.pairClearAll")}
-                    </Button>
+              </Empty>
+            ) : selectedBatch.pending > 0 ? (
+              <section className="tax-tool-card tax-submit-card">
+                <div className="tool-card-heading">
+                  <div className="tool-card-icon copper">
+                    <SafetyCertificateOutlined />
                   </div>
-                  {/* 两份清单单独列出。配对键在文件内容里，界面这一层不猜。 */}
-                  <div className="dual-file-columns">
-                    <QueueColumn
-                      files={dualQueue.invoices}
-                      icon={<FileExcelOutlined />}
-                      title={t("tax.queueExcel")}
-                      onRemove={(id) => {
-                        setDualQueue((current) => ({
-                          ...current,
-                          invoices: current.invoices.filter(
-                            (item) => item.id !== id,
-                          ),
-                        }));
-                        setDualIdentify(null);
-                      }}
-                    />
-                    <QueueColumn
-                      files={dualQueue.customs}
-                      icon={<FilePdfOutlined />}
-                      title={t("tax.queuePdf")}
-                      onRemove={(id) => {
-                        setDualQueue((current) => ({
-                          ...current,
-                          customs: current.customs.filter(
-                            (item) => item.id !== id,
-                          ),
-                        }));
-                        setDualIdentify(null);
-                      }}
-                    />
+                  <div>
+                    <span>{t("tax.stepSubmit")}</span>
+                    <h2>{t("tax.submitTitle")}</h2>
+                    <p>{t("tax.submitHint")}</p>
                   </div>
-                  <Button
-                    block
-                    icon={<FileSearchOutlined />}
-                    loading={identifying}
-                    onClick={() => void runIdentify()}
-                  >
-                    {t("tax.identifyAndPair", { count: queuedCount })}
-                  </Button>
                 </div>
-              )}
-              {dualIdentify && (
-                <div className="dual-queue">
-                  <div className="dual-queue-head">
-                    <h3>
-                      {t("tax.pairQueue")}
-                      <span>
-                        {t("tax.pairSummary", {
-                          ready: dualIdentify.readyCount,
-                          invoiceOnly: dualIdentify.invoiceOnlyCount,
-                          customsOnly: dualIdentify.customsOnlyCount,
-                          conflict: dualIdentify.conflictCount,
-                        })}
-                      </span>
-                    </h3>
+                <div className="tax-submit-stats">
+                  <div>
+                    <strong>{selectedBatch.total}</strong>
+                    <span>{t("tax.reviewBatchTotal")}</span>
                   </div>
-                  {dualIdentify.conflictCount > 0 && (
-                    <Alert
-                      title={t("tax.pairConflict", {
-                        count: dualIdentify.conflictCount,
-                      })}
-                      description={t("tax.pairConflictBody")}
-                      showIcon
-                      type="error"
-                    />
-                  )}
-                  {dualIdentify.invoiceOnlyCount > 0 && (
-                    <Alert
-                      title={t("tax.pairInvoiceOnly", {
-                        count: dualIdentify.invoiceOnlyCount,
-                      })}
-                      description={t("tax.pairInvoiceOnlyBody")}
-                      showIcon
-                      type="info"
-                    />
-                  )}
-                  {dualIdentify.rejected.length > 0 && (
-                    <Alert
-                      title={t("tax.identifyRejected", {
-                        count: dualIdentify.rejected.length,
-                      })}
-                      description={
-                        <ul className="dual-reject-list">
-                          {dualIdentify.rejected.map((item) => (
-                            <li key={`${item.kind}-${item.fileName}`}>
-                              <b>{item.fileName}</b>：{item.reason}
-                            </li>
-                          ))}
-                        </ul>
-                      }
-                      showIcon
-                      type="warning"
-                    />
-                  )}
-                  {/* 配对结果：一对一行，左 Excel 右 PDF。 */}
-                  <ol className="dual-pair-list">
-                    {dualIdentify.pairs.map((pair, index) => (
-                      <DualPairRow
-                        index={index + 1}
-                        key={pair.key}
-                        pair={pair}
-                        t={t}
-                      />
-                    ))}
-                  </ol>
+                  <div>
+                    <strong>{selectedBatch.pending}</strong>
+                    <span>{t("tax.submitPending")}</span>
+                  </div>
+                  <div>
+                    <strong>{selectedBatch.approved}</strong>
+                    <span>{t("tax.reviewBatchApproved")}</span>
+                  </div>
                 </div>
-              )}
-              <Button
-                block
-                disabled={!importablePairs.length}
-                icon={<FileSearchOutlined />}
-                loading={busy}
-                size="large"
-                type="primary"
-                onClick={() => void runDualImport()}
-              >
-                {importablePairs.length > 1
-                  ? t("tax.startRecognitionBatch", {
-                      count: importablePairs.length,
-                    })
-                  : t("tax.startRecognition")}
-              </Button>
-            </section>
-
-          </div>
-
-          {dualBatchResult && (
-            <section className="tax-tool-card dual-result-card">
-              <div className="tool-card-heading">
-                <div className="tool-card-icon ink">
-                  <FileDoneOutlined />
-                </div>
-                <div>
-                  <span>{t("tax.resultEyebrow")}</span>
-                  <h2>{t("tax.batchResultTitle")}</h2>
-                  <p>{t("tax.batchResultHint")}</p>
-                </div>
-                <div className="dual-result-actions">
-                  {dualBatchResult.batchId && (
-                    <Button
-                      icon={<FileDoneOutlined />}
-                      size="small"
-                      type="primary"
-                      onClick={() =>
-                        void goToReviewBatch(dualBatchResult.batchId as string)
-                      }
-                    >
-                      {t("tax.batchGotoReview")}
-                    </Button>
-                  )}
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => setDualBatchResult(null)}
-                  >
-                    {t("common.close")}
-                  </Button>
-                </div>
-              </div>
-              <div className="dual-result-summary">
-                <div>
-                  <strong>{dualBatchResult.invoiceCount}</strong>
-                  <span>{t("tax.countInvoices")}</span>
-                </div>
-                <div>
-                  <strong>{dualBatchResult.itemCount}</strong>
-                  <span>{t("tax.resultItems")}</span>
-                </div>
-                <div>
-                  <strong>{dualBatchResult.needsReviewCount}</strong>
-                  <span>{t("tax.countNeedsReview")}</span>
-                </div>
-                <div className={dualBatchResult.skipped.length ? "is-alert" : ""}>
-                  <strong>{dualBatchResult.skipped.length}</strong>
-                  <span>{t("tax.resultSkipped")}</span>
-                </div>
-                <div className={dualBatchResult.rejected.length ? "is-alert" : ""}>
-                  <strong>{dualBatchResult.rejected.length}</strong>
-                  <span>{t("tax.resultRejected")}</span>
-                </div>
-              </div>
-              {/* 真进库的每一对一行：源文件 + 明细数 + 是否待复核 + 直接点开那张票。 */}
-              {dualBatchResult.results.length > 0 && (
-                <Table<DualBatchPairResult>
-                  className="dual-result-table"
-                  columns={[
-                    {
-                      title: "#",
-                      dataIndex: "key",
-                      width: 52,
-                      render: (_value, _record, index) => index + 1,
-                    },
-                    {
-                      title: t("tax.invoiceExcel"),
-                      dataIndex: "invoiceFileName",
-                      ellipsis: true,
-                      render: (value: string) => (
-                        <span className="dual-result-name">{value}</span>
-                      ),
-                    },
-                    {
-                      title: t("tax.customsPdf"),
-                      dataIndex: "customsFileName",
-                      ellipsis: true,
-                      render: (value: string | null) =>
-                        value ?? (
-                          <span className="tax-pending-customs">
-                            {t("tax.pairPendingCustoms")}
-                          </span>
-                        ),
-                    },
-                    {
-                      title: t("tax.resultItems"),
-                      dataIndex: "itemCount",
-                      width: 76,
-                      align: "right",
-                    },
-                    {
-                      title: t("tax.colStatus"),
-                      dataIndex: "needsReview",
-                      width: 116,
-                      render: (needsReview: boolean) => (
-                        <Tag
-                          className={`status-tag ${
-                            needsReview ? "status-pending" : "status-ready"
-                          }`}
-                        >
-                          {needsReview
-                            ? t("taxStatus.needs_review")
-                            : t("taxStatus.ready")}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "",
-                      dataIndex: "invoiceId",
-                      width: 72,
-                      render: (invoiceId: string) => (
-                        <Button
-                          size="small"
-                          type="link"
-                          onClick={() => void openInvoiceFromResult(invoiceId)}
-                        >
-                          {t("tax.resultOpenInvoice")}
-                        </Button>
-                      ),
-                    },
-                  ]}
-                  dataSource={dualBatchResult.results}
-                  pagination={false}
-                  rowKey="key"
-                  size="small"
+                {/* 批准即在同一事务里生成正式编号并落 issued。带警告的（DAP /
+                    FOB 不符 / 提交日低可信）不在整批里静默出号，会被跳过并列出，
+                    回上一步逐条改或拒批。 */}
+                <Alert
+                  showIcon
+                  type="info"
+                  title={t("tax.submitFlaggedNote")}
+                  description={t("tax.submitFlaggedBody")}
                 />
-              )}
-              {/* 没导进去的：孤立关单（缺发票）/ 冲突（同一 C/I No. 配到多份不同关单）。 */}
-              {dualBatchResult.skipped.length > 0 && (
-                <div className="dual-result-block">
-                  <h4>{t("tax.resultSkippedTitle")}</h4>
-                  <ul>
-                    {dualBatchResult.skipped.map((item) => (
-                      <li key={item.key}>
-                        <Tag
-                          className={`status-tag ${
-                            item.status === "conflict"
-                              ? "status-voided"
-                              : "status-pending"
-                          }`}
-                        >
-                          {item.status === "conflict"
-                            ? t("tax.skipConflict")
-                            : t("tax.skipCustomsOnly")}
-                        </Tag>
-                        <span>{item.reason}</span>
-                      </li>
-                    ))}
-                  </ul>
+                <div className="tax-wizard-foot">
+                  <Button
+                    icon={<ArrowLeftOutlined />}
+                    onClick={() => goStep("review")}
+                  >
+                    {t("tax.wizardPrev")}
+                  </Button>
+                  <span className="tax-wizard-foot-spacer" />
+                  <Button
+                    danger
+                    disabled={busy}
+                    onClick={() => runBatchReject("all")}
+                  >
+                    {t("tax.reviewRejectAll")}
+                  </Button>
+                  <Button
+                    icon={<SafetyCertificateOutlined />}
+                    loading={busy}
+                    type="primary"
+                    onClick={() => void runBatchApprove("all")}
+                  >
+                    {t("tax.submitApproveAll")}
+                  </Button>
                 </div>
-              )}
-              {/* 读不了 / 不是报关单的文件：写明原因，绝不静默丢。 */}
-              {dualBatchResult.rejected.length > 0 && (
-                <div className="dual-result-block">
-                  <h4>{t("tax.resultRejectedTitle")}</h4>
-                  <ul>
-                    {dualBatchResult.rejected.map((item) => (
-                      <li key={item.fileName}>
-                        <strong>{item.fileName}</strong>
-                        <span>{item.reason}</span>
-                      </li>
-                    ))}
-                  </ul>
+              </section>
+            ) : (
+              // 全部已批准出号：这一批开票完成，给回台账 / 再开一批两条出路。
+              <section className="tax-tool-card tax-submit-done">
+                <div className="tax-submit-done-mark">
+                  <CheckCircleOutlined />
                 </div>
-              )}
-            </section>
-          )}
-
-          <section className="tax-quality-strip">
-            <div>
-              <CheckCircleOutlined />
-              <span>
-                <strong>{t("tax.quality18")}</strong>
-                {t("tax.quality18Body")}
-              </span>
-            </div>
-            <div>
-              <WarningOutlined />
-              <span>
-                <strong>{t("tax.qualityFob")}</strong>
-                {t("tax.qualityFobBody")}
-              </span>
-            </div>
-            <div>
-              <CloudDownloadOutlined />
-              <span>
-                <strong>{t("tax.qualityArchive")}</strong>
-                {t("tax.qualityArchiveBody")}
-              </span>
-            </div>
-          </section>
-        </main>
-      )}
-
-      {view === "batch" && (
-        <main className="tax-tool-page">
-          <p className="tax-rule-note">
-            <SafetyCertificateOutlined />
-            <span>{t("tax.batchRuleNote")}</span>
-          </p>
-
-          <div className="tax-batch-grid">
-            <section className="tax-tool-card">
-              <div className="tool-card-heading">
-                <div className="tool-card-icon ink">
-                  <ImportOutlined />
+                <h2>{t("tax.submitDoneTitle")}</h2>
+                <p>{t("tax.submitDoneBody", { count: selectedBatch.approved })}</p>
+                <div className="tax-wizard-foot is-center">
+                  <Button
+                    icon={<DatabaseOutlined />}
+                    onClick={() => {
+                      setSelectedBatch(null);
+                      setSelected(null);
+                      setSelectedMonth(null);
+                      setView("ledger");
+                    }}
+                  >
+                    {t("tax.reviewGotoLedger")}
+                  </Button>
+                  <Button
+                    icon={<FileDoneOutlined />}
+                    type="primary"
+                    onClick={startWizard}
+                  >
+                    {t("tax.submitNewBatch")}
+                  </Button>
                 </div>
-                <div>
-                  <span>{t("tax.migration")}</span>
-                  <h2>{t("tax.batchIssueTitle")}</h2>
-                  <p>{t("tax.batchIssueHint")}</p>
-                </div>
-              </div>
-              <Upload.Dragger
-                accept=".xlsx,.xls"
-                className="sample-drop-zone"
-                beforeUpload={(file) => {
-                  setSampleFile(file);
-                  return false;
-                }}
-                fileList={uploadList(sampleFile)}
-                maxCount={1}
-                onRemove={() => {
-                  setSampleFile(null);
-                }}
-              >
-                <p className="ant-upload-drag-icon">
-                  <FileExcelOutlined />
-                </p>
-                <p className="ant-upload-text">{t("tax.pickSample")}</p>
-                <p className="ant-upload-hint">{t("tax.samplePickHint")}</p>
-              </Upload.Dragger>
-              {/* 这条原来也是一块 Alert，和右栏那块并排像两个错误提示在抢注意力。
-                  它其实是"导进来之后会怎样"的说明，不是警告，压成一条内联注记。 */}
-              <p className="tax-inline-note">
-                <WarningOutlined />
-                <span>
-                  <strong>{t("tax.sampleWarning")}</strong>
-                  {t("tax.sampleWarningBody")}
-                </span>
-              </p>
-              <Button
-                block
-                disabled={!sampleFile}
-                icon={<ImportOutlined />}
-                loading={busy}
-                size="large"
-                type="primary"
-                onClick={() => void runSampleImport()}
-              >
-                {t("tax.runSampleImport")}
-              </Button>
-            </section>
-
-            <section className="tax-tool-card tax-column-card">
-              <div className="tool-card-heading">
-                <div className="tool-card-icon copper">
-                  <TableOutlined />
-                </div>
-                <div>
-                  <span>{t("tax.batchColumns")}</span>
-                  <h2>Sample.xlsx</h2>
-                  <p>{t("tax.batchColumnsHint")}</p>
-                </div>
-              </div>
-              {/* DocumentNo 一律拒收，没有例外——这是编号只在批准事务里生成
-                  这条规则最容易被文件绕过的地方，必须写在最显眼的位置。 */}
-              <Alert
-                title={t("tax.batchNumberForbidden")}
-                description={t("tax.batchNumberForbiddenBody")}
-                showIcon
-                type="info"
-              />
-              <div className="column-group">
-                <h3>
-                  {t("tax.batchRequired")}
-                  <span>{SAMPLE_REQUIRED_COLUMNS.length}</span>
-                </h3>
-                <div className="column-tags">
-                  {SAMPLE_REQUIRED_COLUMNS.map((name) => (
-                    <code className="is-required" key={name}>
-                      {name}
-                    </code>
-                  ))}
-                </div>
-              </div>
-              <div className="column-group">
-                <h3>
-                  {t("tax.batchOptional")}
-                  <span>{SAMPLE_OPTIONAL_COLUMNS.length}</span>
-                </h3>
-                <div className="column-tags">
-                  {SAMPLE_OPTIONAL_COLUMNS.map((name) => (
-                    <code key={name}>{name}</code>
-                  ))}
-                </div>
-              </div>
-            </section>
-          </div>
-        </main>
+              </section>
+            )}
+          </main>
+        </div>
       )}
 
       {view === "rates" && (
