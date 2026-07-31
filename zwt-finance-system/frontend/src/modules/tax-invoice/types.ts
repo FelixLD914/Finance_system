@@ -20,6 +20,9 @@ export interface TaxInvoiceItem {
   fobUnitPriceUsd: string | null;
   fobRevenueUsd: string | null;
   fobRevenueThb: string | null;
+  // 报关单该行自印的 FOB USD，仅供复核台逐行核对（发票行 ↔ 报关单行）。
+  // 报关单无明细、或发票行多于报关单行时为 null（没得核对）。
+  customsFobUsd: string | null;
 }
 
 export interface TaxInvoiceEvent {

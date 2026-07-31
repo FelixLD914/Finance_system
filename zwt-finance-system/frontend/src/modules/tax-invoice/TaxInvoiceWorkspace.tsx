@@ -2,15 +2,18 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import {
   ApiOutlined,
   ArrowLeftOutlined,
+  ArrowsAltOutlined,
   AuditOutlined,
   CalendarOutlined,
   CheckCircleOutlined,
+  CloseCircleOutlined,
   CloseOutlined,
   CloudDownloadOutlined,
   DatabaseOutlined,
   DeleteOutlined,
   DownloadOutlined,
   EditOutlined,
+  ProfileOutlined,
   FileDoneOutlined,
   FileExcelOutlined,
   FilePdfOutlined,
@@ -18,6 +21,7 @@ import {
   ImportOutlined,
   ReloadOutlined,
   RightOutlined,
+  ShrinkOutlined,
   TableOutlined,
   SafetyCertificateOutlined,
   UploadOutlined,
@@ -28,6 +32,7 @@ import {
   Alert,
   App as AntApp,
   Button,
+  Checkbox,
   Descriptions,
   Divider,
   Drawer,
@@ -38,6 +43,7 @@ import {
   Modal,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   Tooltip,
@@ -85,6 +91,13 @@ import {
   mergeDualFiles,
   type QueuedFile,
 } from "./dualPairing";
+import {
+  hasSummaryMismatch,
+  needsAttention,
+  reviewWarnings,
+  usdMismatch,
+  warningCount,
+} from "./reviewReconcile";
 import type {
   BotApiStatus,
   DualBatchImportResult,
@@ -409,14 +422,8 @@ function conflictText(issue: ApiIssue, t: Translate): string {
   return t(key, { key: issue.key });
 }
 
-function warningCount(invoice: TaxInvoice): number {
-  return [
-    invoice.submissionDateLowConfidence,
-    invoice.fobVerificationFailed,
-    invoice.isDap,
-    invoice.items.length > 18,
-  ].filter(Boolean).length;
-}
+// 复核台的核对口径（warningCount / usdMismatch / needsAttention / reviewWarnings…）
+// 都抽到了 ./reviewReconcile，单独单测、单独调口径。
 
 function InvoiceInspector({
   invoice,
@@ -677,6 +684,238 @@ function InvoiceInspector({
   );
 }
 
+/**
+ * 复核台钻进一批后的一张对账卡：整张票摊开在原位审——发票每行 FOB USD 与报关单
+ * 该行并排、汇总并排、警告直接列出，逐条批准/拒批就在卡上，不用点开抽屉再关。
+ * 抽屉入口（ProfileOutlined）保留，用来看全部字段与生成/作废等完整生命周期。
+ */
+export function BatchReviewCard({
+  invoice,
+  expanded,
+  selectable,
+  selected,
+  busy,
+  locale,
+  t,
+  onToggle,
+  onToggleSelect,
+  onOpenDrawer,
+  onEdit,
+  onApprove,
+  onReject,
+  onMatchRate,
+}: {
+  invoice: TaxInvoice;
+  expanded: boolean;
+  selectable: boolean;
+  selected: boolean;
+  busy: boolean;
+  locale: Locale;
+  t: Translate;
+  onToggle: () => void;
+  onToggleSelect: (checked: boolean) => void;
+  onOpenDrawer: () => void;
+  onEdit: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+  onMatchRate: () => void;
+}) {
+  const canApprove = ["draft", "needs_review", "ready"].includes(invoice.status);
+  const warnings = reviewWarnings(invoice, t);
+  const summaryOff = hasSummaryMismatch(invoice);
+  const flagged = needsAttention(invoice);
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+
+  const lineColumns: ColumnsType<TaxInvoiceItem> = [
+    { title: t("tax.colLine"), dataIndex: "lineNumber", width: 46 },
+    { title: t("tax.colProduct"), dataIndex: "productName", ellipsis: true },
+    {
+      title: t("tax.colQuantity"),
+      dataIndex: "quantity",
+      width: 78,
+      align: "right",
+      render: (value: string | null) =>
+        value ? Number(value).toLocaleString() : "—",
+    },
+    {
+      title: t("tax.colInvoiceFobUsd"),
+      dataIndex: "fobRevenueUsd",
+      width: 118,
+      align: "right",
+      render: (value: string | null) => money(value, locale),
+    },
+    {
+      title: t("tax.colCustomsFobUsd"),
+      dataIndex: "customsFobUsd",
+      width: 122,
+      align: "right",
+      render: (value: string | null) => (value != null ? money(value, locale) : "—"),
+    },
+    {
+      title: t("tax.colLineCheck"),
+      key: "check",
+      width: 56,
+      align: "center",
+      render: (_value: unknown, record: TaxInvoiceItem) => {
+        if (record.customsFobUsd == null) {
+          return <span className="review-check-na">—</span>;
+        }
+        return usdMismatch(record.fobRevenueUsd, record.customsFobUsd) ? (
+          <CloseCircleOutlined className="review-check-off" />
+        ) : (
+          <CheckCircleOutlined className="review-check-ok" />
+        );
+      },
+    },
+  ];
+
+  return (
+    <section
+      className={`tax-review-card${flagged ? " is-flagged" : ""}${
+        expanded ? " is-open" : ""
+      }`}
+    >
+      <div className="review-card-head">
+        <Checkbox
+          checked={selected}
+          disabled={!selectable}
+          onChange={(event) => onToggleSelect(event.target.checked)}
+          onClick={stop}
+        />
+        <button className="review-card-headline" type="button" onClick={onToggle}>
+          <RightOutlined className="review-card-caret" />
+          <StatusTag status={invoice.status} t={t} />
+          <span className="review-card-id">
+            C/I {invoice.ciNo}
+            <span className="review-card-cdn">
+              · {t("tax.colCdn")} {invoice.cdn ?? "—"}
+            </span>
+          </span>
+          <span className="review-card-sub">
+            {invoice.incoterms ?? "—"} · {dateLabel(invoice.invoiceDate)}
+            {!expanded &&
+              (flagged ? (
+                <span className="review-card-flag">
+                  <WarningOutlined /> {t("tax.reviewNeedsAttention")}
+                </span>
+              ) : (
+                <span className="review-card-ok">
+                  <CheckCircleOutlined /> {t("tax.reviewAllMatch")}
+                </span>
+              ))}
+          </span>
+        </button>
+        <Space size={4}>
+          <Tooltip title={t("tax.reviewOpenDrawer")}>
+            <Button
+              aria-label={t("tax.reviewOpenDrawer")}
+              icon={<ProfileOutlined />}
+              size="small"
+              onClick={onOpenDrawer}
+            />
+          </Tooltip>
+          {canApprove && (
+            <Button icon={<EditOutlined />} size="small" onClick={onEdit}>
+              {t("common.edit")}
+            </Button>
+          )}
+          {canApprove && (
+            <Button danger disabled={busy} size="small" onClick={onReject}>
+              {t("tax.reject")}
+            </Button>
+          )}
+          {canApprove && (
+            <Button loading={busy} size="small" type="primary" onClick={onApprove}>
+              {t("tax.approve")}
+            </Button>
+          )}
+        </Space>
+      </div>
+
+      {expanded && (
+        <div className="review-card-body">
+          {warnings.length > 0 && (
+            <Alert
+              className="review-card-alert"
+              type="warning"
+              showIcon
+              message={
+                <ul className="review-warning-list">
+                  {warnings.map((text) => (
+                    <li key={text}>{text}</li>
+                  ))}
+                </ul>
+              }
+            />
+          )}
+          {!invoice.exchangeRate && canApprove && (
+            <div className="review-rate-missing">
+              <span>{t("tax.rateUnmatched")}</span>
+              <Button
+                icon={<ApiOutlined />}
+                loading={busy}
+                size="small"
+                type="link"
+                onClick={onMatchRate}
+              >
+                {t("tax.matchRate")}
+              </Button>
+            </div>
+          )}
+          <div className="review-line-head">
+            <span>{t("tax.reviewLineTitle")}</span>
+            <span className="review-thb-ref">
+              {t("tax.reviewCustomsThbRef")}{" "}
+              {money(invoice.customsFobThbPrintedTotal, locale)}
+              <Tag>{t("tax.reviewRefOnly")}</Tag>
+            </span>
+          </div>
+          <Table<TaxInvoiceItem>
+            className="review-line-table"
+            columns={lineColumns}
+            dataSource={invoice.items}
+            pagination={false}
+            rowClassName={(record) =>
+              usdMismatch(record.fobRevenueUsd, record.customsFobUsd)
+                ? "review-line-off"
+                : ""
+            }
+            rowKey="id"
+            size="small"
+          />
+          <div className={`review-summary${summaryOff ? " is-off" : ""}`}>
+            <div>
+              <span>{t("tax.reviewInvoiceTotal")}</span>
+              <strong>{money(invoice.fobRevenueUsdTotal, locale, "USD")}</strong>
+            </div>
+            <div>
+              <span>{t("tax.reviewCustomsTotal")}</span>
+              <strong>
+                {invoice.customsFobUsdTotal != null
+                  ? money(invoice.customsFobUsdTotal, locale, "USD")
+                  : t("tax.reviewNoCustomsTotal")}
+              </strong>
+            </div>
+            <div className="review-summary-verdict">
+              {invoice.customsFobUsdTotal == null ? (
+                <span className="review-check-na">—</span>
+              ) : summaryOff ? (
+                <span className="review-check-off">
+                  <CloseCircleOutlined /> {t("tax.reviewSummaryOff")}
+                </span>
+              ) : (
+                <span className="review-check-ok">
+                  <CheckCircleOutlined /> {t("tax.reviewSummaryOk")}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Locale }) {
   const { message, modal } = AntApp.useApp();
   // 汇率维护是写操作（invoice:write）。前端这道只是别让人白跑一趟：
@@ -728,6 +967,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [batchInvoicesLoading, setBatchInvoicesLoading] = useState(false);
   const [reviewSelectedKeys, setReviewSelectedKeys] = useState<string[]>([]);
   const [reviewQuery, setReviewQuery] = useState("");
+  // 复核卡展开集合：进批时默认只展开「要人细看」的（needsAttention），其余折成一行。
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   // 识别建单的文件队列。Excel 与 PDF 分开放：配对键在文件内容里（C/I No.），
   // 浏览器解析不了，得整批发给后端识别才知道谁跟谁一组。
   const [dualQueue, setDualQueue] = useState<{
@@ -749,6 +990,9 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   >(null);
   const [workflowReason, setWorkflowReason] = useState("");
   const [editOpen, setEditOpen] = useState(false);
+  // 编辑弹窗独立于 selected：复核卡上点「编辑」不该顺带把右侧抽屉也弹出来
+  // （抽屉 open 挂在 !!selected 上）。用这个 state 单独记「在编哪张」。
+  const [editingInvoice, setEditingInvoice] = useState<TaxInvoice | null>(null);
   const [editForm] = Form.useForm();
   const [fetchDates, setFetchDates] = useState({
     startDate: "",
@@ -787,6 +1031,12 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       try {
         const response = await listTaxInvoicesByBatch(batch.id);
         setBatchInvoices(response.items);
+        // 默认只展开要人细看的那几张，一致又无警告的折成一行。
+        setExpandedKeys(
+          new Set(
+            response.items.filter(needsAttention).map((invoice) => invoice.id),
+          ),
+        );
       } catch (error) {
         message.error(error instanceof Error ? error.message : t("tax.detailLoadFailed"));
       } finally {
@@ -944,6 +1194,24 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       ),
     );
   }, [batchInvoices, reviewQuery]);
+
+  // 复核卡展开/折叠：单张切换 + 顶部「全部展开/折叠」。当前搜索筛出来的都展开了
+  // 才算「全展」，此时按钮切成「全部折叠」。
+  const allReviewExpanded =
+    reviewRows.length > 0 && reviewRows.every((row) => expandedKeys.has(row.id));
+  const toggleCardExpand = (id: string) => {
+    setExpandedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const toggleAllCards = () => {
+    setExpandedKeys(
+      allReviewExpanded ? new Set() : new Set(reviewRows.map((row) => row.id)),
+    );
+  };
 
   const lifecycleCounts = useMemo(
     () => ({
@@ -1151,70 +1419,13 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     },
   ];
 
-  // 复核台对账表的列。除台账那几列外，末尾并排「海关汇率 / 报关单 THB」，
-  // 让本系统按 BOT 汇率算出来的 FOB THB 与报关单自印的泰铢直接对照。
-  const reviewColumns: ColumnsType<TaxInvoice> = [
-    {
-      title: t("tax.colStatus"),
-      dataIndex: "status",
-      width: 96,
-      fixed: "left",
-      filters: STATUS_ORDER.map((value) => ({ text: statusLabel(value, t), value })),
-      onFilter: (value, record) => record.status === value,
-      render: (value: TaxInvoiceStatus) => <StatusTag status={value} t={t} />,
-    },
-    {
-      title: t("tax.colDocumentNo"),
-      dataIndex: "documentNo",
-      width: 175,
-      ellipsis: true,
-      render: (value: string | null) => value ?? t("tax.pendingNumber"),
-    },
-    { title: "C/I No.", dataIndex: "ciNo", width: 140, ellipsis: true },
-    { title: t("tax.colCdn"), dataIndex: "cdn", width: 150, ellipsis: true },
-    { title: t("tax.colInvoiceDate"), dataIndex: "invoiceDate", width: 125, render: dateLabel },
-    {
-      title: t("tax.colCustomer"),
-      dataIndex: "customerName",
-      width: 200,
-      ellipsis: true,
-      render: (value: string) => <ThaiText>{value}</ThaiText>,
-    },
-    { title: t("tax.colIncoterms"), dataIndex: "incoterms", width: 88 },
-    {
-      title: t("tax.botRate"),
-      dataIndex: "exchangeRate",
-      width: 104,
-      align: "right",
-      render: (value: string | null) =>
-        value ? Number(value).toFixed(4) : t("tax.rateUnmatched"),
-    },
-    {
-      title: "FOB THB",
-      dataIndex: "fobRevenueThbTotal",
-      width: 128,
-      align: "right",
-      render: (value: string | null) => money(value, locale),
-    },
-    {
-      title: t("tax.colCustomsRate"),
-      dataIndex: "customsExchangeRate",
-      width: 104,
-      align: "right",
-      render: (value: string | null) => (value ? Number(value).toFixed(4) : "—"),
-    },
-    {
-      title: t("tax.colCustomsThb"),
-      dataIndex: "customsFobThbPrintedTotal",
-      width: 138,
-      align: "right",
-      render: (value: string | null) => money(value, locale),
-    },
-  ];
+  // 复核台不再用扁平表：整批摊成对账卡（BatchReviewCard），逐行发票/报关单
+  // FOB USD 并排。原 reviewColumns（末尾并排海关汇率/报关单 THB）已随之移除。
 
-  const approveSelected = () => {
-    if (!selected) return;
-    const warnings = warningCount(selected);
+  // 单条批准：抽屉里的 selected 和复核卡上的任一张票都走这里。只动 invoices，
+  // batchInvoices 由既有 effect 从 invoices 镜像回来；抽屉开着且是同一张才同步 selected。
+  const approveInvoice = (target: TaxInvoice) => {
+    const warnings = warningCount(target);
     modal.confirm({
       title: t("tax.approveTitle"),
       content:
@@ -1227,14 +1438,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         setBusy(true);
         try {
           const updated = await approveTaxInvoice(
-            selected.id,
-            selected.version,
+            target.id,
+            target.version,
             warnings > 0,
           );
-          setSelected(updated);
           setInvoices((current) =>
             current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
           );
+          setSelected((current) => (current?.id === updated.id ? updated : current));
           message.success(
             t("tax.numberAssigned", { number: updated.documentNo ?? "" }),
           );
@@ -1246,6 +1457,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         }
       },
     });
+  };
+
+  const approveSelected = () => {
+    if (selected) approveInvoice(selected);
   };
 
   const generateSelected = async () => {
@@ -1274,15 +1489,14 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
-  const matchRateSelected = async () => {
-    if (!selected) return;
+  const matchRateInvoice = async (target: TaxInvoice) => {
     setBusy(true);
     try {
-      const updated = await matchTaxInvoiceRate(selected.id, selected.version);
-      setSelected(updated);
+      const updated = await matchTaxInvoiceRate(target.id, target.version);
       setInvoices((current) =>
         current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
       );
+      setSelected((current) => (current?.id === updated.id ? updated : current));
       message.success(
         t("tax.matchRateDone", {
           rate: updated.exchangeRate ? Number(updated.exchangeRate).toFixed(4) : "",
@@ -1295,8 +1509,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
-  const rejectSelected = () => {
-    if (!selected) return;
+  const matchRateSelected = async () => {
+    if (selected) await matchRateInvoice(selected);
+  };
+
+  const rejectInvoice = (target: TaxInvoice) => {
     modal.confirm({
       title: t("tax.rejectTitle"),
       content: t("tax.rejectBody"),
@@ -1306,11 +1523,11 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
       async onOk() {
         setBusy(true);
         try {
-          const updated = await rejectTaxInvoice(selected.id, selected.version);
-          setSelected(updated);
+          const updated = await rejectTaxInvoice(target.id, target.version);
           setInvoices((current) =>
             current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
           );
+          setSelected((current) => (current?.id === updated.id ? updated : current));
           message.success(t("tax.rejected"));
         } catch (error) {
           message.error(error instanceof Error ? error.message : t("tax.rejectFailed"));
@@ -1320,6 +1537,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
         }
       },
     });
+  };
+
+  const rejectSelected = () => {
+    if (selected) rejectInvoice(selected);
   };
 
   const restoreSelected = async () => {
@@ -1378,20 +1599,21 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
-  const openEdit = () => {
-    if (!selected) return;
+  const openEdit = (target: TaxInvoice | null = selected) => {
+    if (!target) return;
+    setEditingInvoice(target);
     editForm.setFieldsValue({
-      invoiceDate: selected.invoiceDate,
-      exchangeTargetDate: selected.exchangeTargetDate,
-      exchangeRateDate: selected.exchangeRateDate,
-      exchangeRate: selected.exchangeRate ? Number(selected.exchangeRate) : null,
-      customerName: selected.customerName,
-      customerAddress: selected.customerAddress,
-      taxId: selected.taxId,
-      poNo: selected.poNo,
-      incoterms: selected.incoterms,
-      paymentTerm: selected.paymentTerm,
-      items: selected.items.map((item) => ({
+      invoiceDate: target.invoiceDate,
+      exchangeTargetDate: target.exchangeTargetDate,
+      exchangeRateDate: target.exchangeRateDate,
+      exchangeRate: target.exchangeRate ? Number(target.exchangeRate) : null,
+      customerName: target.customerName,
+      customerAddress: target.customerAddress,
+      taxId: target.taxId,
+      poNo: target.poNo,
+      incoterms: target.incoterms,
+      paymentTerm: target.paymentTerm,
+      items: target.items.map((item) => ({
         lineNumber: item.lineNumber,
         productName: item.productName,
         productCode: item.productCode,
@@ -1410,7 +1632,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   };
 
   const saveEdit = async () => {
-    if (!selected) return;
+    if (!editingInvoice) return;
     const values = await editForm.validateFields();
     setBusy(true);
     try {
@@ -1420,15 +1642,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           lineNumber: index + 1,
         }),
       );
-      const updated = await updateTaxInvoice(selected.id, {
+      const updated = await updateTaxInvoice(editingInvoice.id, {
         ...values,
-        version: selected.version,
+        version: editingInvoice.version,
         items,
       });
-      setSelected(updated);
       setInvoices((current) =>
         current.map((invoice) => (invoice.id === updated.id ? updated : invoice)),
       );
+      // 抽屉开着且是同一张才同步；复核卡编辑时抽屉没开，别硬把它弹出来。
+      setSelected((current) => (current?.id === updated.id ? updated : current));
       setEditOpen(false);
       message.success(t("tax.editSaved"));
     } catch (error) {
@@ -2218,6 +2441,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   />
                   <span className="tax-review-spacer" />
                   <Button
+                    icon={
+                      allReviewExpanded ? <ShrinkOutlined /> : <ArrowsAltOutlined />
+                    }
+                    onClick={toggleAllCards}
+                  >
+                    {allReviewExpanded
+                      ? t("tax.reviewCollapseAll")
+                      : t("tax.reviewExpandAll")}
+                  </Button>
+                  <Button
                     icon={<DownloadOutlined />}
                     loading={busy}
                     onClick={() => void runBatchExport()}
@@ -2247,29 +2480,48 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                       : t("tax.reviewApproveAll")}
                   </Button>
                 </div>
-                <Table<TaxInvoice>
-                  columns={reviewColumns}
-                  dataSource={reviewRows}
-                  loading={batchInvoicesLoading}
-                  pagination={{ pageSize: 15, showSizeChanger: false }}
-                  rowClassName={(record) =>
-                    record.id === selected?.id ? "selected-table-row" : ""
-                  }
-                  rowKey="id"
-                  rowSelection={{
-                    selectedRowKeys: reviewSelectedKeys,
-                    onChange: (keys) => setReviewSelectedKeys(keys.map(String)),
-                    // 只有未批准的才能被批量批准/拒批；已批准/已开具/已拒批的不给勾。
-                    getCheckboxProps: (record) => ({
-                      disabled: !["draft", "needs_review", "ready"].includes(
-                        record.status,
-                      ),
-                    }),
-                  }}
-                  scroll={{ x: 1500, y: "calc(100vh - 430px)" }}
-                  size="middle"
-                  onRow={(record) => ({ onClick: () => void openInvoice(record.id) })}
-                />
+                {/* 整批摊成一列对账卡：每张票直接展开审，逐条批准/拒批就在卡上，
+                    不用点行开抽屉再关。卡片流融进 .tax-ledger-main 的 flex 链，
+                    自身滚动（外层 overflow:hidden 兜底）。 */}
+                {batchInvoicesLoading ? (
+                  <div className="tax-review-cards is-status">
+                    <Spin />
+                  </div>
+                ) : reviewRows.length === 0 ? (
+                  <div className="tax-review-cards is-status">
+                    <Empty description={t("tax.reviewNoInvoices")} />
+                  </div>
+                ) : (
+                  <div className="tax-review-cards">
+                    {reviewRows.map((invoice) => (
+                      <BatchReviewCard
+                        busy={busy}
+                        expanded={expandedKeys.has(invoice.id)}
+                        invoice={invoice}
+                        key={invoice.id}
+                        locale={locale}
+                        selectable={["draft", "needs_review", "ready"].includes(
+                          invoice.status,
+                        )}
+                        selected={reviewSelectedKeys.includes(invoice.id)}
+                        t={t}
+                        onApprove={() => approveInvoice(invoice)}
+                        onEdit={() => openEdit(invoice)}
+                        onMatchRate={() => void matchRateInvoice(invoice)}
+                        onOpenDrawer={() => void openInvoice(invoice.id)}
+                        onReject={() => rejectInvoice(invoice)}
+                        onToggle={() => toggleCardExpand(invoice.id)}
+                        onToggleSelect={(checked) =>
+                          setReviewSelectedKeys((current) =>
+                            checked
+                              ? [...current, invoice.id]
+                              : current.filter((id) => id !== invoice.id),
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </main>
@@ -2921,7 +3173,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
             onApprove={approveSelected}
             onClose={() => setSelected(null)}
             onDownload={(document) => void downloadTaxInvoiceDocument(document)}
-            onEdit={openEdit}
+            onEdit={() => openEdit()}
             onGenerate={() => void generateSelected()}
             onMatchRate={() => void matchRateSelected()}
             onReject={rejectSelected}

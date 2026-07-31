@@ -133,6 +133,52 @@ def test_combination_separates_invoice_and_matched_exchange_dates() -> None:
     assert combined["fob_verification_failed"] is False
 
 
+def test_combination_attaches_customs_line_fob_usd_by_position() -> None:
+    """报关单该行自印的 FOB USD 按行位置挂到发票行上落库，供复核台逐行核对。
+
+    汇总对得上、分行对不上（合计相同但某行金额不同）在总额上完全看不出来，
+    所以行级值必须落库、能在复核台并排看到，不能只留一个 fob_verification_failed。
+    """
+    invoice = parse_invoice_workbook(_invoice_workbook(), "invoice.xlsx")
+    invoice["fob_amount_usd"] = Decimal("309.00")
+    customs = {
+        "cdn": "A001234567890",
+        "submission_date": date(2026, 6, 7),
+        "customs_fob_usd_total": Decimal("309.00"),
+        "submission_date_low_confidence": False,
+        # 报关单该行金额与发票行（309.00）不同，仍如实挂上——复核台标红交人看。
+        "customs_items": [{"line_number": 1, "fob_usd": Decimal("300.00")}],
+    }
+
+    combined = combine_invoice_and_customs(
+        invoice,
+        customs,
+        {date(2026, 6, 5): Decimal("32.1234")},
+    )
+
+    assert combined["items"][0]["customs_fob_usd"] == Decimal("300.00")
+
+
+def test_combination_leaves_customs_line_none_without_customs_items() -> None:
+    """报关单读不到明细时，行级 customs_fob_usd 留空——「没得核对」而不是「核对不过」。"""
+    invoice = parse_invoice_workbook(_invoice_workbook(), "invoice.xlsx")
+    invoice["fob_amount_usd"] = Decimal("309.00")
+    customs = {
+        "cdn": "A001234567890",
+        "submission_date": date(2026, 6, 7),
+        "customs_fob_usd_total": Decimal("309.00"),
+        "submission_date_low_confidence": False,
+    }
+
+    combined = combine_invoice_and_customs(
+        invoice,
+        customs,
+        {date(2026, 6, 5): Decimal("32.1234")},
+    )
+
+    assert combined["items"][0]["customs_fob_usd"] is None
+
+
 def test_sample_import_marks_legacy_fx_date_fallback_for_review() -> None:
     workbook = Workbook()
     sheet = workbook.active

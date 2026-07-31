@@ -44,6 +44,8 @@ class TaxInvoiceItemPayload(ApiSchema):
 class TaxInvoiceItemResponse(TaxInvoiceItemPayload):
     id: int
     invoice_id: uuid.UUID
+    # 只读：报关单该行自印的 FOB USD，供复核台逐行核对。不进 Payload，编辑时不接受。
+    customs_fob_usd: Decimal | None = None
 
 
 class TaxInvoiceEventResponse(ApiSchema):

@@ -693,6 +693,221 @@
   flex: 1;
 }
 
+/* ── 复核卡：整批摊成一列对账卡 ─────────────────────────────────────────────
+   卡片流是 .tax-ledger-main 的直接子元素，得顶掉上面 `> *:not(.ant-table-wrapper)`
+   的 flex:none（同特异性、靠源码顺序赢），才能吃掉剩余高度并自身滚动。 */
+.tax-ledger-main > .tax-review-cards {
+  flex: 1;
+  min-height: 0;
+}
+
+.tax-review-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding: 0 20px 16px;
+}
+
+.tax-review-cards.is-status {
+  align-items: center;
+  justify-content: center;
+}
+
+.tax-review-card {
+  flex: none;
+  overflow: hidden;
+  background: var(--finance-surface);
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-md);
+}
+
+/* 需细看的卡片头部淡黄底，扫一眼就知道哪几张要停下来看。 */
+.tax-review-card.is-flagged .review-card-head {
+  background: var(--finance-warning-bg);
+}
+
+.review-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+
+.tax-review-card.is-open .review-card-head {
+  border-bottom: 1px solid var(--finance-border);
+}
+
+/* 头部主区就是展开/折叠的点击区，button 复位成一整块。 */
+.review-card-headline {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.review-card-caret {
+  flex: none;
+  font-size: 12px;
+  color: var(--finance-text-muted);
+  transition: transform var(--finance-motion-fast, 0.15s) ease;
+}
+
+.tax-review-card.is-open .review-card-caret {
+  transform: rotate(90deg);
+}
+
+.review-card-id {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.review-card-cdn {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--finance-text-muted);
+}
+
+.review-card-sub {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-card-flag {
+  margin-left: 8px;
+  color: var(--finance-warning-text);
+}
+
+.review-card-ok {
+  margin-left: 8px;
+  color: var(--finance-success-text);
+}
+
+.review-card-flag .anticon,
+.review-card-ok .anticon {
+  margin-right: 3px;
+}
+
+.review-card-body {
+  padding: 12px 14px 14px;
+}
+
+.review-card-alert {
+  margin-bottom: 10px;
+}
+
+.review-warning-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.review-rate-missing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--finance-warning-text);
+}
+
+.review-line-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+}
+
+.review-thb-ref {
+  white-space: nowrap;
+}
+
+.review-thb-ref .ant-tag {
+  margin-left: 6px;
+}
+
+/* 逐行核对：不符行整行淡红。 */
+.review-line-table .review-line-off > td {
+  background: var(--finance-danger-bg);
+}
+
+.review-check-ok {
+  color: var(--finance-success-text);
+}
+
+.review-check-off {
+  color: var(--finance-danger-text);
+}
+
+.review-check-na {
+  color: var(--finance-text-muted);
+}
+
+/* 汇总核对条：发票汇总 | 报关单汇总 | 判定。不符时描边转红、判定块淡红底。 */
+.review-summary {
+  display: flex;
+  align-items: stretch;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-sm);
+}
+
+.review-summary.is-off {
+  border-color: var(--finance-danger-text);
+}
+
+.review-summary > div {
+  flex: 1;
+  padding: 8px 12px;
+}
+
+.review-summary > div + div {
+  border-left: 1px solid var(--finance-border);
+}
+
+.review-summary span {
+  display: block;
+  color: var(--finance-text-muted);
+  font-size: 11px;
+}
+
+.review-summary strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-summary-verdict {
+  display: flex;
+  flex: 0 0 140px;
+  align-items: center;
+  justify-content: center;
+}
+
+.review-summary.is-off .review-summary-verdict {
+  background: var(--finance-danger-bg);
+}
+
+.review-summary-verdict .anticon {
+  margin-right: 4px;
+}
+
 /* 这条规则覆盖 global.css 里的同名选择器（main.tsx 里 finance-ui.css 排最后）。
    列数必须等于筛选栏里的控件数：期数 / 状态 / 搜索 / 按月分组 / 刷新 / 导出＝6。
    少一列最后那个按钮会掉到第二行，白白多占 40px 首屏高度。 */

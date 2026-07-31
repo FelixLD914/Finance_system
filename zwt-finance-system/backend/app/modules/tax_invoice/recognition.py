@@ -646,8 +646,18 @@ def combine_invoice_and_customs(
                 "fob_unit_price_usd": fob_unit_price,
                 "fob_revenue_usd": fob_usd,
                 "fob_revenue_thb": fob_thb,
+                # 报关单该行的 USD 在下方按行位置回填；先占位保证每个 item dict
+                # 键一致，TaxInvoiceItem(**item) 才稳定。
+                "customs_fob_usd": None,
             }
         )
+
+    # 逐行核对口径（2026-07-30）：报关单第 N 行 ↔ 发票第 N 行，顺序一致。把报关单
+    # 该行自印的 FOB USD 挂到发票行上落库，复核台才能并排展示、标红。发票行多于
+    # 报关单行时多出的行保持 None（没得核对）。只搬值不改值，和 _check_customs_lines
+    # 是同一份 customs_items、同一套按位置对应。
+    for item, customs_item in zip(items, customs.get("customs_items") or [], strict=False):
+        item["customs_fob_usd"] = customs_item.get("fob_usd")
 
     calculated_total = sum(
         (item["fob_revenue_usd"] or Decimal("0") for item in items),

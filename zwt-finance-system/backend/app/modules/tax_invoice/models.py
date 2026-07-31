@@ -212,6 +212,10 @@ class TaxInvoiceItem(Base):
     fob_unit_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), nullable=True)
     fob_revenue_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
     fob_revenue_thb: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
+    # 报关单该行自印的 FOB USD，仅供复核台逐行核对（发票行 ↔ 报关单行），不参与
+    # 计价。识别时按行位置对应填入；报关单读不到明细、或发票行多于报关单行时为空
+    # （"没得核对"，不是"核对不过"）。存量行为 NULL，回填靠重新识别。
+    customs_fob_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), nullable=True)
 
 
 class TaxInvoiceIssueCounter(Base):

@@ -723,6 +723,19 @@ class TaxInvoiceService:
         for field, value in updates.items():
             setattr(invoice, field, value)
         if payload.items is not None:
+            # 报关单每行 USD 来自报关单、与发票行编辑无关：编辑发票行不该把这份
+            # 核对参考值抹掉。按 line_number 先缓存，重建后回填（编辑表单不带这一列）。
+            existing_items = (
+                await self.session.scalars(
+                    select(TaxInvoiceItem).where(
+                        TaxInvoiceItem.invoice_id == invoice.id
+                    )
+                )
+            ).all()
+            customs_by_line = {
+                existing.line_number: existing.customs_fob_usd
+                for existing in existing_items
+            }
             await self.session.execute(
                 delete(TaxInvoiceItem).where(TaxInvoiceItem.invoice_id == invoice.id)
             )
@@ -732,7 +745,13 @@ class TaxInvoiceService:
                 item_values = item_payload.model_dump(by_alias=False)
                 usd_total += item_payload.fob_revenue_usd or Decimal("0")
                 thb_total += item_payload.fob_revenue_thb or Decimal("0")
-                self.session.add(TaxInvoiceItem(invoice_id=invoice.id, **item_values))
+                self.session.add(
+                    TaxInvoiceItem(
+                        invoice_id=invoice.id,
+                        customs_fob_usd=customs_by_line.get(item_payload.line_number),
+                        **item_values,
+                    )
+                )
             invoice.fob_revenue_usd_total = usd_total
             invoice.fob_revenue_thb_total = thb_total
             await self.session.flush()
@@ -1218,6 +1237,7 @@ class TaxInvoiceService:
                     fob_unit_price_usd=item.fob_unit_price_usd,
                     fob_revenue_usd=item.fob_revenue_usd,
                     fob_revenue_thb=item.fob_revenue_thb,
+                    customs_fob_usd=item.customs_fob_usd,
                 )
             )
         self.session.add(
