@@ -225,6 +225,79 @@ def test_two_invoices_for_one_ci_no_are_not_silently_deduped() -> None:
     assert [item.file_name for item in unpairable] == ["改后.xlsx"]
 
 
+def test_duplicate_invoice_is_reported_as_duplicate_not_as_missing_ci_no() -> None:
+    """票号读到了却配不上（另一份发票占了同一个 C/I No.），要说"重复"，不能说"没读到"。
+
+    真实案例：3 月归档里第 7 份与第 15 份是同一张发票（字节完全一致，
+    C/I No. 都是 ZWT-NSB26030601）。批量识别时后出现的那份进 unpairable，
+    界面却回报"文件里没读到 C/I No."——用户对着文件里白纸黑字的票号只会
+    以为系统坏了。回归钉死：重复分支的措辞必须点名票号、说明是重复。
+    """
+    from app.modules.tax_invoice.router import _unpairable_reason
+
+    _, unpairable = pair_identified_files(
+        [invoice(ci_no="ZWT-NSB26030601"), invoice(name="15.xlsx", ci_no="ZWT-NSB26030601")]
+    )
+    (duplicate,) = unpairable
+    reason = _unpairable_reason(duplicate)
+    assert "ZWT-NSB26030601" in reason
+    assert "重复" in reason
+    assert "没读到" not in reason
+
+
+def test_unpairable_reason_still_names_the_real_failure_for_the_other_two_cases() -> None:
+    """另外两类配不上仍要各说各的：解析失败透传原错，空票号才说"没读到"。"""
+    from app.modules.tax_invoice.router import _unpairable_reason
+
+    broken = IdentifiedFile(file_name="broken.pdf", kind="customs", error="坏文件")
+    keyless = IdentifiedFile(file_name="no-ci.xlsx", kind="invoice", key="")
+    assert _unpairable_reason(broken) == "坏文件"
+    assert _unpairable_reason(keyless) == "文件里没读到 C/I No.，无法配对"
+
+
+def _minimal_invoice_bytes(ci_no: str = "ZWT-NSB26030601") -> bytes:
+    """一份最小但走得通全链路的 Export Invoice：sheet 名带 CI（过 _xlsx_grid 选表），
+    单元格里写 INV.NO.（让 parse_invoice_workbook 读得出 C/I No.）。字节可复用，
+    两份内容一致正是真实归档里第 7、15 份的样子。"""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "CI"
+    sheet["G3"] = f"INV.NO.:{ci_no}"
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+    return output.getvalue()
+
+
+def test_identify_endpoint_reports_duplicate_invoice_accurately(admin_client) -> None:  # noqa: ANN001
+    """端到端：两份同 C/I No. 的发票一起传，后出现的那份回报"重复"而非"没读到"。
+
+    盯的是接口契约：从上传一路到 rejected[].reason，措辞不能再把"读到票号但重复"
+    说成"没读到 C/I No."——用户就是被那句假话绊住的（真实文件：3 月第 7、15 份）。
+    """
+    content = _minimal_invoice_bytes()
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    response = admin_client.post(
+        "/api/v1/tax-invoice/import/dual/identify",
+        files=[
+            ("files", ("7、ZWT(ZWT-NSB26030601).xlsx", content, mime)),
+            ("files", ("15、ZWT(ZWT-NSB26030601).xlsx", content, mime)),
+        ],
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["invoiceOnlyCount"] == 1
+    assert len(body["rejected"]) == 1
+    reason = body["rejected"][0]["reason"]
+    assert "ZWT-NSB26030601" in reason
+    assert "重复" in reason
+    assert "没读到" not in reason
+
+
 @pytest.mark.parametrize(
     ("file_name", "expected"),
     [

@@ -209,17 +209,40 @@ async def _identify_uploads(
     return identified, rejected, contents
 
 
+def _unpairable_reason(item: IdentifiedFile) -> str:
+    """配不上的文件为什么配不上——三种情形要说清，别都甩同一句。
+
+    `pair_identified_files` 把三类文件都塞进同一个 unpairable 列表，但成因不同，
+    只有 item 自己的 (error, key) 能区分：
+
+    - `error` 非空：解析阶段就报错了（xlsx 损坏 / 改名的 PDF / 传错文件），原样透传。
+    - `error` 空、`key` 也空：读进来了但没找到 C/I No.，确实无从配对。
+    - `error` 空、`key` 非空：C/I No. 明明读到了，却仍进不了配对——只可能是本次
+      上传里另有一份发票用了同一个 C/I No.（去重分支，见 dual_pairing）。这一类
+      以前也被扣上"没读到 C/I No."，用户看着文件里白纸黑字的票号只会以为系统坏了。
+      点名重复的号码，让他自己确认是不是重复上传、删掉多余那份。
+    """
+    if item.error:
+        return item.error
+    if not item.key:
+        return "文件里没读到 C/I No.，无法配对"
+    return (
+        f"这张发票的 C/I No.（{item.key}）和本次上传里另一份发票重复了，"
+        "系统只保留先出现的那一份；请确认是否重复上传，删掉多余的一份再试。"
+    )
+
+
 def _report_unpairable(
     unpairable: list[IdentifiedFile],
     rejected: list[DualRejectedFile],
 ) -> None:
-    """把配不上的文件（读不了 / 没有 C/I No. / 同名重复发票）追加进 rejected。"""
+    """把配不上的文件（读不了 / 没有 C/I No. / 同 C/I No. 重复发票）追加进 rejected。"""
     for item in unpairable:
         rejected.append(
             DualRejectedFile(
                 file_name=item.file_name,
                 kind=item.kind,
-                reason=item.error or "文件里没读到 C/I No.，无法配对",
+                reason=_unpairable_reason(item),
             )
         )
 
