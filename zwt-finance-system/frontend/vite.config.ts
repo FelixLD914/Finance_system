@@ -57,9 +57,16 @@ export default defineConfig(({ mode }) => {
     test: {
       // antd 组件在 jsdom 里渲染本就慢，整套并行跑时 CPU 抢占会让个别重的用例
       // 超过默认 5s 假红（单跑都过）。放宽上限，别让负载抖动变成红叉。
-      // 2026-08-01 实测最慢的一条（WHT「税率偏离法定值时必须填理由」）：整套并行跑
-      // 13.9s，单文件跑 10.7s——光并行抢占就多吃 3s。CI runner 比开发机更慢更挤，
-      // 30s 才有约两倍余量。
+      // 2026-08-01 实测最慢的一条是 TAX INV「conflict 组不参与导入」：整套并行跑
+      // 9.8s。CI runner 比开发机更慢更挤，30s 才有约三倍余量。
+      //
+      // 上限曾由 WHT「税率偏离法定值时必须填理由」定（并行 13.9s / 单文件 10.7s），
+      // 现已降到并行 2.4s：真正的开销是 antd 6 的 cssinjs 往 jsdom 灌 ~384KB / 1375
+      // 条 CSS，此后每次 getComputedStyle 都要线性跑完整份级联，光两次
+      // getByRole(name) 就吃掉 5.1s。用例改用 StyleProvider mock="server" 后不再注入
+      // （见 IssuanceConsole.test.tsx 的 Harness）。同一招还没用到 DualImport 上，
+      // 本表的上限现在来自那边。
+      //
       // 注意：describe/it 上的 { timeout: n } 会盖掉这里，连命令行 --testTimeout 都
       // 压不过它，所以超时口径只在本处维护，用例里不要再写。
       testTimeout: 30000,

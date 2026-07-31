@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StyleProvider } from "@ant-design/cssinjs";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -67,23 +68,37 @@ beforeAll(() => {
 
 afterEach(() => cleanup());
 
+/**
+ * `mock="server"` 让 antd 6 的 cssinjs 只算样式、不把 <style> 灌进 document
+ * （它自带的测试开关，`process.env.NODE_ENV !== "production"` 时才生效，
+ * 打包产物里是死代码）。类名照旧挂在元素上——那是 token 哈希算出来的，与注不注入
+ * 无关，所以 `.ant-select-item-option`、`is-warning` 这些选择器一个都不受影响。
+ *
+ * 为什么值得这么做：jsdom 没有排版但**实现了 CSS 级联**，且是线性匹配。antd 一屏
+ * 要注入 ~384KB / 1375 条规则，此后每次 getComputedStyle 都得跑完整份。
+ * `getByRole(name)` 要为每个后代算无障碍名，每个后代还要各问一次 ::before/::after，
+ * 于是**一次查询就要 2.8s**；摘掉样式表后同一棵树上只要 68ms（实测 2026-08-01）。
+ * 本套用例断言的是文本、类名与 disabled，从不读计算样式，这些 CSS 是纯开销。
+ */
 function Harness({ onCreate = vi.fn() }: { onCreate?: () => Promise<WhtTask> }) {
   const { locale, t } = useI18n();
   return (
-    <AntApp>
-      <IssuanceConsole
-        defaultPeriod="2026-06"
-        incomeTypes={demoIncomeTypes}
-        locale={locale}
-        payees={[payee]}
-        pending={false}
-        periodOptions={[{ value: "2026-06", label: "2026-06" }]}
-        t={t}
-        viewSwitch={null}
-        onCancel={vi.fn()}
-        onCreate={onCreate as never}
-      />
-    </AntApp>
+    <StyleProvider mock="server">
+      <AntApp>
+        <IssuanceConsole
+          defaultPeriod="2026-06"
+          incomeTypes={demoIncomeTypes}
+          locale={locale}
+          payees={[payee]}
+          pending={false}
+          periodOptions={[{ value: "2026-06", label: "2026-06" }]}
+          t={t}
+          viewSwitch={null}
+          onCancel={vi.fn()}
+          onCreate={onCreate as never}
+        />
+      </AntApp>
+    </StyleProvider>
   );
 }
 
@@ -121,8 +136,8 @@ function settlementText() {
 }
 
 // 这里不要再写 { timeout: n }：describe 上的 timeout 会盖掉 vite.config.ts 里的
-// testTimeout，连命令行 --testTimeout 也压不过它。本套是最重的一组用例，超时口径
-// 统一由 vite.config.ts 的 testTimeout 管，改一处就够。
+// testTimeout，连命令行 --testTimeout 也压不过它。超时口径统一由 vite.config.ts 的
+// testTimeout 管，改一处就够。
 describe("WHT 开票操作页", () => {
   it("选中收款方后，凭证上要打印的每一项都分行列出", async () => {
     render(<Harness />);
