@@ -263,10 +263,16 @@ def render_clean_template_workbook(template_path: Path) -> bytes:
         workbook.close()
 
 
+# \u5e95\u7248\u662f Excel \u4ece\u6a21\u677f\u5bfc\u51fa\u7684\uff0c\u8868\u683c\u91cc\u7684\u6807\u7b7e\u7528\u7684\u662f TH SarabunPSK\uff1b\u53e0\u52a0\u5c42\u5fc5\u987b\u6ce8\u518c
+# \u540c\u4e00\u4e2a\u5b57\u4f53\uff0c\u5426\u5219\u540c\u5b57\u53f7\u4e0b\u586b\u5165\u7684\u5b57\u8981\u5bbd/\u7c97\u4e00\u534a\uff0c\u548c\u8868\u683c\u660e\u663e\u4e0d\u662f\u4e00\u5957\u3002\u6ce8\u518c\u540d\u5e26\u4e0a
+# \u5b57\u4f53\u540d\u662f\u6709\u610f\u4e3a\u4e4b\u2014\u2014reportlab \u6309\u540d\u5b57\u7f13\u5b58\uff0c\u540d\u5b57\u542b\u7cca\u65f6\u6362\u4e86\u6587\u4ef6\u4e5f\u4e0d\u4f1a\u91cd\u65b0\u52a0\u8f7d\u3002
+FORM_FONT_NAME = "SalaryAdvanceThSarabunPSK"
+
+
 def _font_for(text: str) -> str:
     if re.search(r"[\u4e00-\u9fff]", text):
         return "STSong-Light"
-    return "SalaryAdvanceSarabun"
+    return FORM_FONT_NAME
 
 
 def _fit(text: str, font: str, size: float, width: float) -> tuple[float, str]:
@@ -363,14 +369,14 @@ def export_pdf_from_template(
     underlay_path: Path,
     output_path: Path,
     snapshot: GenerationSnapshot,
-    thai_font_path: Path,
+    form_font_path: Path,
     *,
     xlsx_template_path: Path | None = None,
 ) -> None:
     if not underlay_path.is_file():
         raise SalaryAdvanceDocumentError(f"工资预支 PDF 底版不存在：{underlay_path}")
-    if not thai_font_path.is_file():
-        raise SalaryAdvanceDocumentError(f"泰文字体不存在：{thai_font_path}")
+    if not form_font_path.is_file():
+        raise SalaryAdvanceDocumentError(f"表单字体不存在：{form_font_path}")
     if xlsx_template_path is not None:
         _validate_layout(xlsx_template_path, underlay_path)
 
@@ -380,8 +386,8 @@ def export_pdf_from_template(
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.pdfgen import canvas
 
-    if "SalaryAdvanceSarabun" not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont("SalaryAdvanceSarabun", str(thai_font_path)))
+    if FORM_FONT_NAME not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FORM_FONT_NAME, str(form_font_path)))
     if "STSong-Light" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
 

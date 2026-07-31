@@ -6,8 +6,10 @@ from openpyxl import load_workbook
 from PIL import Image, ImageDraw
 from pypdf import PdfReader
 
+from app.core.config import get_settings
 from app.modules.salary_advance import pdf_layout
 from app.modules.salary_advance.document_generator import (
+    FORM_FONT_NAME,
     WRAPPED_FIELDS,
     GenerationSnapshot,
     export_pdf_from_template,
@@ -75,6 +77,27 @@ def test_template_triple_hashes_match_checked_in_assets() -> None:
         pdf_layout.PDF_UNDERLAY_SHA256
     )
     assert pdf_layout.PAGE_COUNT == 1
+
+
+def test_overlay_font_ships_with_repo() -> None:
+    """叠加层字体必须随仓库发布，不能依赖机器上装没装。
+
+    底版是 Excel 从模板导出的，表里的标签用的是 TH SarabunPSK；叠加层若换了
+    别的字体，同字号下填入的字会和表格明显不是一套。这里钉住两件事：配置指向的
+    字体文件确实签入在 assets/fonts 下，且 reportlab 能按 FORM_FONT_NAME 注册它。
+    """
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    font_path = get_settings().salary_advance_font_path
+    assert font_path.is_file(), font_path
+    fonts_dir = Path(__file__).parents[1] / "app" / "assets" / "fonts"
+    assert font_path.resolve().parent == fonts_dir.resolve()
+
+    # 换了文件却复用旧注册名，reportlab 会继续吐旧字体——这里真注册一次兜底。
+    if FORM_FONT_NAME not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FORM_FONT_NAME, str(font_path)))
+    assert FORM_FONT_NAME in pdfmetrics.getRegisteredFontNames()
 
 
 def test_renders_approved_xlsx_without_applicant_signature(tmp_path: Path) -> None:

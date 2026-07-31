@@ -262,7 +262,7 @@ class SalaryAdvanceDocumentService:
                     self.settings.salary_advance_pdf_template_path,
                     output_path,
                     snapshot,
-                    self.settings.thai_font_path,
+                    self.settings.salary_advance_font_path,
                     xlsx_template_path=self.settings.salary_advance_template_path,
                 )
             )
@@ -629,7 +629,7 @@ async def run_salary_advance_job(job_id: uuid.UUID) -> None:
                         settings.salary_advance_pdf_template_path,
                         pdf_path,
                         snapshot,
-                        settings.thai_font_path,
+                        settings.salary_advance_font_path,
                         xlsx_template_path=settings.salary_advance_template_path,
                     )
                 )

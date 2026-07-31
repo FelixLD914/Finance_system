@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     salary_advance_pdf_template_path: Path = (
         Path(__file__).parents[1] / "assets" / "templates" / "Salary-Advance-Template.pdf"
     )
+    # 工资预支单的 PDF 叠加层必须用 TH SarabunPSK：底版是 Excel 从模板导出的，
+    # 标签就是这个字体，用 Sarabun-Regular 填出来的字同字号下要宽/粗一半，
+    # 一眼就能看出填入内容和表格本身不是一套字。WHT / TAX INV 仍用
+    # thai_font_path，它们的底版还没做过这项核对，不在本次范围内。
+    salary_advance_font_path: Path = (
+        Path(__file__).parents[1] / "assets" / "fonts" / "THSarabunPSK.ttf"
+    )
     thai_font_path: Path = (
         Path(__file__).parents[1] / "assets" / "fonts" / "Sarabun-Regular.ttf"
     )
