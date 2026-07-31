@@ -1990,13 +1990,15 @@ select {
 
 .dual-pair-row {
   display: grid;
-  align-items: start;
-  padding: 8px 10px;
+  align-items: center;
+  padding: 8px 12px;
   background: #fdfbf8;
   border: 1px solid var(--line);
   border-radius: 9px;
-  gap: 0 10px;
-  grid-template-columns: 22px minmax(96px, 0.9fr) minmax(0, 1.6fr) minmax(0, 1.6fr);
+  gap: 4px 12px;
+  /* 序号 | C/I键 | 两枚文件徽章。关单核对字段挪到第二行整行横排（见 .dual-pair-facts），
+     不再各占一列竖着堆四行，行高砍掉一大半。 */
+  grid-template-columns: 22px minmax(96px, 0.8fr) minmax(0, 1.6fr);
 }
 
 /* 三种状态各自一个底色，扫一眼就知道哪几组会跑、哪几组要等。 */
@@ -2091,20 +2093,32 @@ select {
   font-size: var(--tax-fs-micro);
 }
 
-/* 关单读出来的核对字段，摆在配对行右侧：点导入之前就该看见。 */
+/* 关单读出来的核对字段：第二行铺满整行、横向排布，点导入之前就该看见。
+   横排比竖排四行省一半高度（这是「卡片信息很占空间」那条整改的核心）。 */
 .dual-pair-facts {
+  grid-column: 1 / -1;
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 2px;
+  flex-flow: row wrap;
+  align-items: baseline;
+  gap: 2px 18px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
   color: var(--muted);
   font-size: var(--tax-fs-micro);
 }
 
 .dual-pair-facts > span {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 冲突/待补关单等提示语较长，各占整行、允许折行，不跟事实字段挤在一排。 */
+.dual-pair-facts > .dual-pair-warning {
+  flex-basis: 100%;
+  white-space: normal;
 }
 
 .dual-pair-facts b {

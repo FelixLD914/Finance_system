@@ -314,6 +314,41 @@
   letter-spacing: 0;
 }
 
+/* ── 共享模块顶部瘦身 ────────────────────────────────────────────────────────
+   模块页头（大标题 + 说明）与子导航原来占掉近 150px 首屏。它们是"我在哪个
+   模块"的背景信息，不该和业务内容抢首屏。收窄内边距、退一档标题字号，全部
+   模块（TAX INV / WHT / 工资预支 / 管理）共用同一套 .workspace-header /
+   .workspace-subnav，改这一处全站同步。finance-ui.css 最后加载，这里写的值
+   会盖掉 global.css 的旧尺度。 */
+.workspace-header {
+  padding: 14px 20px 10px;
+}
+
+.workspace-header h1 {
+  margin: 1px 0 3px;
+  font-size: 20px;
+}
+
+.workspace-header p {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tax-health-pill,
+.workspace-health-pill {
+  margin-top: 4px;
+  padding: 4px 10px;
+}
+
+.workspace-subnav {
+  padding: 0 20px 8px;
+}
+
+.workspace-subnav button {
+  min-height: 30px;
+  padding: 0 13px;
+}
+
 .work-surface,
 .directory-surface {
   border-color: var(--finance-border);
@@ -506,6 +541,47 @@
 
 .tax-workspace {
   background: var(--finance-canvas);
+}
+
+/* ── 详情抽屉：商品明细紧凑、合计突出 ───────────────────────────────────────
+   明细表是逐行核对用的密集数据，正文退到 13px、数字用 tabular-nums 对齐；
+   合计才是这一段真正要看的结论，反而要最重——做成一条带上边线的总计行，
+   金额 16px 粗体。原来两者字号是反的（表体 14px、合计 11px），一眼看过去
+   最不重要的行最大、最该看的数字最小。 */
+.tax-inspector .inspector-section .ant-table-wrapper {
+  font-size: 13px;
+}
+
+.tax-inspector .inspector-section .ant-table-thead > tr > th,
+.tax-inspector .inspector-section .ant-table-tbody > tr > td {
+  padding: 6px 8px;
+}
+
+.tax-inspector .inspector-section .ant-table-tbody > tr > td {
+  font-variant-numeric: tabular-nums;
+}
+
+.tax-total-strip {
+  align-items: baseline;
+  gap: 18px;
+  margin-top: 10px;
+  padding: 9px 12px;
+  background: var(--finance-surface-muted);
+  border-top: 2px solid var(--finance-border);
+  border-radius: 0 0 var(--finance-radius-sm) var(--finance-radius-sm);
+  font-size: 12px;
+}
+
+.tax-total-strip span {
+  color: var(--finance-text-muted);
+  font-weight: 600;
+}
+
+.tax-total-strip strong {
+  color: var(--finance-text);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .tax-workspace > .finance-page-header {
@@ -1232,6 +1308,324 @@
   gap: 10px;
   color: var(--finance-text-muted);
   font-size: 12px;
+}
+
+/* ── 开票向导 ─────────────────────────────────────────────────────────────
+   顶部只留一条「返回台账 + 横向步骤标」的窄条（约 48px），模块大标题与子导航
+   全部让位。第 3、4 步（核对匹配 / 汇总复核）铺满剩余高度，让核对内容独占屏幕。 */
+.tax-wizard-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  padding: 8px 16px;
+  background: var(--finance-surface);
+  border-bottom: 1px solid var(--finance-border);
+}
+
+.tax-wizard-steps {
+  flex: 1;
+  min-width: 0;
+  max-width: 760px;
+}
+
+.tax-wizard-steps .ant-steps-item-title {
+  font-size: 13px;
+}
+
+/* rate / import / reconcile / submit 四步的正文容器：一条占满剩余高度的 flex 列。 */
+.tax-wizard-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tax-wizard-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 16px;
+  min-height: 0;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 20px 24px 26px;
+  overflow-y: auto;
+}
+
+/* 核对匹配那一步内容宽、且要头/脚固定中间滚，单独放宽并交给内层滚动。 */
+.tax-wizard-panel.is-wide {
+  max-width: 1120px;
+  overflow: hidden;
+}
+
+.tax-reconcile-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 4px;
+}
+
+/* 步内页脚：上一步/下一步。内容短时靠 margin-top:auto 压到底部。 */
+.tax-wizard-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.tax-wizard-panel.is-wide .tax-wizard-foot {
+  margin-top: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--finance-border);
+}
+
+.tax-wizard-foot.is-center {
+  justify-content: center;
+}
+
+.tax-wizard-foot-spacer {
+  flex: 1;
+}
+
+/* 选汇率步：月份 + 币种并排；入库入口一排。 */
+.tax-rate-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.tax-rate-picker .date-field {
+  flex: 1;
+  min-width: 180px;
+}
+
+.tax-rate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 导入方式二选一：分段控件，图标不放大，保持简约。 */
+.tax-issue-methods.ant-segmented {
+  padding: 4px;
+}
+
+.tax-method-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-weight: 600;
+}
+
+/* 提交步：三格统计（总数 / 待批准 / 已批准）。 */
+.tax-submit-stats {
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-md);
+}
+
+.tax-submit-stats > div {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+}
+
+.tax-submit-stats > div + div {
+  border-left: 1px solid var(--finance-border);
+}
+
+.tax-submit-stats strong {
+  color: var(--finance-text);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tax-submit-stats span {
+  color: var(--finance-text-muted);
+  font-size: 12px;
+}
+
+/* 提交步「已完成」态：居中的完成卡。 */
+.tax-submit-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 34px 24px;
+  text-align: center;
+}
+
+.tax-submit-done-mark {
+  font-size: 44px;
+  line-height: 1;
+  color: var(--finance-success-text);
+}
+
+.tax-submit-done h2 {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 18px;
+}
+
+.tax-submit-done p {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--finance-text-muted);
+  font-size: 13px;
+}
+
+/* ── 分诊状态条 ──────────────────────────────────────────────────────────────
+   「几组冲突 / 几组待补关单 / 几份没读进来」原来是三块整幅 antd Alert 叠着，
+   光标题和说明就吃掉两百多像素首屏，而信息量只有三个数。改成一行小胶囊：
+   一眼看清有哪几类、各几个，详细说明挂 title 悬停看，具体到某一组的原因由
+   配对行自己那行红字负责。整条高度约 30px。 */
+.tax-triage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  flex: none;
+}
+
+.tax-triage-bar.is-inset {
+  margin: 0 20px 8px;
+}
+
+/* 复核步那条要把原因清单竖着挂在胶囊下面。 */
+.tax-triage-bar.is-stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* 原因清单压到最小可读：一条一行、11px、无项目符号缩进浪费。 */
+.dual-reject-list.is-compact {
+  margin: 0;
+  padding-left: 2px;
+  color: var(--finance-text-muted);
+  font-size: 11px;
+  line-height: 1.65;
+  list-style: none;
+}
+
+.dual-reject-list.is-compact li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dual-reject-list.is-compact b {
+  color: var(--finance-text);
+  font-weight: 600;
+}
+
+.tax-triage-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  cursor: default;
+}
+
+.tax-triage-chip .anticon {
+  flex: none;
+  font-size: 12px;
+}
+
+/* 附带的文件名等细节退成常规字重，跟着胶囊走、超出省略。 */
+.tax-triage-chip em {
+  min-width: 0;
+  overflow: hidden;
+  font-style: normal;
+  font-weight: 400;
+  opacity: 0.85;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tax-triage-chip.is-danger {
+  color: var(--finance-danger-text);
+  background: var(--finance-danger-bg);
+  border-color: rgba(139, 58, 54, 0.22);
+}
+
+.tax-triage-chip.is-warning {
+  color: var(--finance-warning-text);
+  background: var(--finance-warning-bg);
+  border-color: rgba(138, 87, 27, 0.22);
+}
+
+.tax-triage-chip.is-info {
+  color: var(--finance-info-text);
+  background: var(--finance-info-bg);
+  border-color: rgba(54, 93, 120, 0.22);
+}
+
+/* ── 向导字号与告警密度 ──────────────────────────────────────────────────────
+   向导四步面板要继承和 .tax-tool-page 同一套字号刻度：否则 --tax-fs-* 在这里
+   没定义，引用它的正文/提示/文件名会掉回 antd 的 14px 基准，整屏字都偏大
+   （就是"界面字体过大"那条）。 */
+.tax-wizard-body {
+  --tax-fs-title: 16px;
+  --tax-fs-body: 13px;
+  --tax-fs-meta: 12px;
+  --tax-fs-micro: 11px;
+  font-size: var(--tax-fs-body);
+}
+
+/* 卡片标题在向导里退半档到 15px，和收紧后的正文更协调。 */
+.tax-wizard-panel .tool-card-heading h2,
+.tax-wizard-panel .tax-review-head h2 {
+  font-size: 15px;
+}
+
+.tax-wizard-panel .tax-review-head p {
+  font-size: var(--tax-fs-meta);
+}
+
+/* 分段控件（导入方式二选一）标签退到 13px，图标不放大。 */
+.tax-issue-methods .ant-segmented-item-label {
+  font-size: 13px;
+}
+
+/* 向导里的 antd Alert 压紧：默认 14px 字 + 大内边距，三条并排就把首屏吃光。
+   收成 13/12 字号、小内边距、图标 15px，警示语气还在但不再喧宾夺主
+   （对应"警告横幅占据太大空间"那条）。 */
+.tax-wizard-panel .ant-alert {
+  padding: 8px 12px;
+  border-radius: var(--finance-radius-sm);
+}
+
+.tax-wizard-panel .ant-alert-message {
+  font-size: 13px;
+}
+
+.tax-wizard-panel .ant-alert-description {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.tax-wizard-panel .ant-alert-icon {
+  font-size: 15px;
 }
 
 /* 这里故意没有窄屏分支。整个系统在 global.css 里锁了 body { min-width: 1180px;
