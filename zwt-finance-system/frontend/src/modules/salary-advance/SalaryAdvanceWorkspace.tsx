@@ -49,6 +49,7 @@ import {
 import {
   createSalaryAdvanceJob,
   deleteSalaryAdvanceBatch,
+  downloadImportTemplate,
   downloadJobArtifact,
   downloadSalaryAdvanceDocument,
   downloadValidationReport,
@@ -473,6 +474,16 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       message.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // 模板下载要把失败说出来：直接 `void downloadImportTemplate()` 会把 rejection
+  // 丢掉，端点 403 或断网时点了没反应，用户无从判断。参见 shared/download 的注释。
+  const downloadTemplate = async () => {
+    try {
+      await downloadImportTemplate();
+    } catch (error) {
+      if (error instanceof Error) message.error(error.message);
     }
   };
 
@@ -1016,6 +1027,12 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           type="info"
           title={t("salary.importSafety")}
         />
+        <div className="salary-template-download">
+          <Button icon={<DownloadOutlined />} size="small" onClick={() => void downloadTemplate()}>
+            {t("salary.downloadImportTemplate")}
+          </Button>
+          <small>{t("salary.importTemplateHint")}</small>
+        </div>
         <Form form={importForm} layout="vertical">
           <Form.Item
             label={t("salary.importPeriod")}

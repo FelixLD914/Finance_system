@@ -4,9 +4,12 @@ import pytest
 from openpyxl import Workbook
 
 from app.modules.salary_advance.importer import (
+    IMPORT_TEMPLATE_SHEET,
     SalaryAdvanceImportError,
+    build_import_template_workbook,
     parse_salary_advance_workbook,
 )
+from app.modules.salary_advance.validation import FIELD_ORDER
 
 HEADERS = (
     "期间",
@@ -97,3 +100,34 @@ def test_import_rejects_non_xlsx_zip_content() -> None:
             period="202607",
             active_signature_codes=set(),
         )
+
+
+def test_import_template_columns_and_example_align() -> None:
+    """列头与示例行长度必须都等于 FIELD_ORDER，否则示例行会串列。"""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(BytesIO(build_import_template_workbook()))
+    try:
+        assert workbook.sheetnames[0] == IMPORT_TEMPLATE_SHEET
+        sheet = workbook[IMPORT_TEMPLATE_SHEET]
+        header = [cell.value for cell in sheet[1]]
+        example = [cell.value for cell in sheet[2]]
+        assert len(header) == len(FIELD_ORDER)
+        assert len(example) == len(FIELD_ORDER)
+    finally:
+        workbook.close()
+
+
+def test_generated_template_round_trips_through_parser() -> None:
+    """把导出的模板原样喂回解析器：示例行必须零错误，模板与解析口径不许脱节。"""
+    parsed = parse_salary_advance_workbook(
+        build_import_template_workbook(),
+        period="202607",
+        active_signature_codes={"FIN_XING_LANHUI", "MD_GONG_YAOWEN"},
+    )
+
+    assert len(parsed.records) == 1
+    record = parsed.records[0]
+    assert record.validation_errors == []
+    assert record.validation_status in {"valid", "warning"}
+    assert record.emp_id == "E001"

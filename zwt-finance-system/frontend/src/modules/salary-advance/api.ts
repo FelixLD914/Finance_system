@@ -1,3 +1,4 @@
+import { fileNameFromResponse, saveBlobAsFile } from "../../shared/download";
 import { apiFetch, apiRequest } from "../../shared/http";
 import type {
   SalaryAdvanceBatch,
@@ -115,17 +116,18 @@ export function retrySalaryAdvanceJob(jobId: string): Promise<SalaryAdvanceJob> 
 }
 
 async function download(path: string, fileName?: string): Promise<void> {
+  // 走 shared/download：anchor 挂进 DOM 再点、revoke 延后一个宏任务，
+  // 修掉原先复制版的两个脆点（detached anchor 静默无下载 / 过早 revoke）。
   const response = await apiFetch(path);
-  const contentDisposition = response.headers.get("content-disposition") ?? "";
-  const encodedName = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const resolvedName = encodedName ? decodeURIComponent(encodedName) : fileName;
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = window.document.createElement("a");
-  anchor.href = url;
-  anchor.download = resolvedName ?? "download";
-  anchor.click();
-  URL.revokeObjectURL(url);
+  saveBlobAsFile(await response.blob(), fileNameFromResponse(response, fileName ?? "download"));
+}
+
+export async function downloadImportTemplate(): Promise<void> {
+  const response = await apiFetch("/v1/salary-advance/batches/import-template");
+  saveBlobAsFile(
+    await response.blob(),
+    fileNameFromResponse(response, "ZWT-SalaryAdvance-Import-Template.xlsx"),
+  );
 }
 
 export function downloadValidationReport(batchId: string): Promise<void> {
