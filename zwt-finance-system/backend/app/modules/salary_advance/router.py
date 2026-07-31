@@ -26,6 +26,7 @@ from app.modules.salary_advance.document_service import (
     SalaryAdvanceDocumentService,
     run_salary_advance_job,
 )
+from app.modules.salary_advance.importer import build_import_template_workbook
 from app.modules.salary_advance.schemas import (
     SalaryAdvanceBatchDetail,
     SalaryAdvanceBatchResponse,
@@ -154,6 +155,17 @@ async def import_batch(
         period=period,
     )
     return _batch_detail(aggregate)
+
+
+# 必须排在 /batches/{batch_id} 之前：batch_id 声明为 UUID，
+# "import-template" 到不了这个路由就会先被 UUID 校验拒成 422。
+@router.get("/batches/import-template")
+async def import_template() -> Response:
+    return _download_response(
+        build_import_template_workbook(),
+        "ZWT-SalaryAdvance-Import-Template.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @router.get("/batches/{batch_id}", response_model=SalaryAdvanceBatchDetail)
