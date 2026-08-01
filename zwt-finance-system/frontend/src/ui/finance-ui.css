@@ -1832,16 +1832,38 @@
   font-weight: 600;
 }
 
-.wht-review-summary .wht-review-count {
+.wht-review-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--finance-radius-sm);
+  background: transparent;
   color: var(--finance-text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  transition: background-color 120ms ease, border-color 120ms ease;
 }
 
-.wht-review-summary .wht-review-count b {
+.wht-review-filter:hover {
+  background: var(--finance-surface);
+}
+
+.wht-review-filter.is-active {
+  border-color: rgba(145, 87, 48, 0.28);
+  background: var(--finance-surface);
+  box-shadow: 0 1px 2px rgba(53, 35, 25, 0.05);
+}
+
+.wht-review-filter b {
   font-weight: 600;
 }
 
-.wht-review-summary .wht-review-count.is-todo,
-.wht-review-summary .wht-review-count.is-todo b {
+.wht-review-filter.is-todo,
+.wht-review-filter.is-todo b {
   color: var(--finance-warning-text);
 }
 
@@ -1871,6 +1893,10 @@
   font-size: 11px;
 }
 
+.wht-review-payee small .numeric {
+  font-size: 12px;
+}
+
 /* 「主数据中无此税号」要一眼看见 —— 这是核对页唯一必须动手的地方。 */
 .wht-review-payee small.is-missing {
   color: var(--finance-warning-text);
@@ -1881,9 +1907,147 @@
   background: var(--finance-warning-bg);
 }
 
+.wht-review-table .wht-review-row {
+  cursor: pointer;
+}
+
+.wht-review-table .wht-review-row:focus-visible {
+  outline: 2px solid rgba(145, 87, 48, 0.42);
+  outline-offset: -2px;
+}
+
+.wht-review-table .ant-table-pagination.ant-pagination {
+  min-height: 32px;
+  margin: 0 0 10px;
+}
+
+.wht-review-table .ant-table-cell {
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+  vertical-align: middle;
+}
+
+.wht-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .wht-review-table .numeric.is-overridden {
   color: var(--finance-warning-text);
   font-weight: 600;
+}
+
+.wht-row-detail-drawer .ant-drawer-header,
+.wht-row-detail-drawer .ant-drawer-footer {
+  padding: 14px 18px;
+}
+
+.wht-row-detail-drawer .ant-drawer-body {
+  padding: 0 18px 20px;
+}
+
+.wht-row-detail {
+  display: grid;
+  gap: 0;
+}
+
+.wht-row-detail-source {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--finance-border);
+  color: var(--finance-text-muted);
+  font-size: 12px;
+}
+
+.wht-row-detail-source span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--finance-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wht-row-detail-source small {
+  font-size: 11px;
+}
+
+.wht-row-detail section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--finance-border);
+}
+
+.wht-row-detail section:last-child {
+  border-bottom: 0;
+}
+
+.wht-row-detail h3 {
+  margin: 0 0 10px;
+  color: var(--finance-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wht-row-detail dl {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.wht-row-detail dt {
+  color: var(--finance-text-muted);
+}
+
+.wht-row-detail dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--finance-text);
+  overflow-wrap: anywhere;
+}
+
+.wht-row-detail dd.is-overridden,
+.wht-row-detail section.is-issues {
+  color: var(--finance-warning-text);
+}
+
+.wht-row-detail section.is-issues {
+  padding: 12px;
+  border: 1px solid rgba(138, 87, 27, 0.2);
+  border-radius: var(--finance-radius-sm);
+  background: var(--finance-warning-bg);
+}
+
+.wht-row-detail section.is-issues h3 {
+  color: inherit;
+}
+
+.wht-row-detail-foot,
+.wht-row-detail-nav {
+  display: flex;
+  align-items: center;
+}
+
+.wht-row-detail-foot {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.wht-row-detail-nav {
+  gap: 8px;
+}
+
+.wht-row-detail-nav span {
+  min-width: 68px;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .wht-wizard-done {

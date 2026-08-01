@@ -149,8 +149,11 @@ const commitResult = {
 };
 
 /** 走到核对步：塞一个文件进 antd Upload 的隐藏 input，再点「读取并核对」。 */
-async function reachReviewStep(onCommit = vi.fn().mockResolvedValue(commitResult)) {
-  const onPreview = vi.fn().mockResolvedValue(preview);
+async function reachReviewStep(
+  onCommit = vi.fn().mockResolvedValue(commitResult),
+  previewResult: BatchPreviewResult = preview,
+) {
+  const onPreview = vi.fn().mockResolvedValue(previewResult);
   const { container } = render(<Harness onCommit={onCommit} onPreview={onPreview} />);
 
   const input = container.querySelector('input[type="file"]');
@@ -162,7 +165,7 @@ async function reachReviewStep(onCommit = vi.fn().mockResolvedValue(commitResult
   const next = screen.getByRole("button", { name: "读取并核对" });
   await waitFor(() => expect((next as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(next);
-  await screen.findByText(/2 项任务/);
+  await screen.findByText(new RegExp(`${previewResult.rows.length} 项任务`));
   return { onPreview, onCommit };
 }
 
@@ -179,6 +182,56 @@ describe("批量开具向导", () => {
     // 待办数字才上色；全部就绪时这条汇总应当是安静的。
     expect(summary?.querySelectorAll(".is-todo")).toHaveLength(1);
     expect(screen.getByText("主数据中无此税号")).toBeTruthy();
+  });
+
+  it("每一行都能打开完整详情，并可连续查看上一份和下一份", async () => {
+    await reachReviewStep();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "查看" })[0]);
+    const firstTitle = await screen.findByText("第 2 行详情");
+    const first = firstTitle.closest(".ant-drawer");
+    if (!first) throw new Error("row detail drawer not found");
+    const firstDetail = within(first as HTMLElement);
+    expect(firstDetail.getByText("BatchIssue.xlsx")).toBeTruthy();
+    expect(firstDetail.getByText("99/1 ถนนสุขุมวิท กรุงเทพมหานคร")).toBeTruthy();
+    expect(firstDetail.getByText("0105540057561")).toBeTruthy();
+    expect(firstDetail.getByText("第 1 / 2 份")).toBeTruthy();
+
+    fireEvent.click(firstDetail.getByRole("button", { name: "下一份" }));
+    const secondTitle = await screen.findByText("第 3 行详情");
+    const second = secondTitle.closest(".ant-drawer");
+    if (!second) throw new Error("next row detail drawer not found");
+    expect(within(second as HTMLElement).getByText("0999999999999")).toBeTruthy();
+    expect(within(second as HTMLElement).getByText("第 2 / 2 份")).toBeTruthy();
+  });
+
+  it("87 条数据按页显示，不会一次全部铺开，并支持按状态筛选", async () => {
+    const readyRow = preview.rows[0];
+    const manyPreview: BatchPreviewResult = {
+      ...preview,
+      rows: Array.from({ length: 87 }, (_, index) => ({
+        ...readyRow,
+        rowNumber: index + 2,
+        payee: {
+          ...readyRow.payee,
+          taxId: String(105540057561 + index).padStart(13, "0"),
+        },
+      })),
+      ready: 87,
+      payeeMissing: 0,
+      needsInput: 0,
+    };
+
+    await reachReviewStep(vi.fn().mockResolvedValue(commitResult), manyPreview);
+
+    expect(await screen.findByText("第 1-10 条，共 87 条")).toBeTruthy();
+    expect(document.querySelector(".ant-pagination")).toBeTruthy();
+    expect(document.querySelectorAll(".wht-review-table .ant-table-tbody > .ant-table-row"))
+      .toHaveLength(10);
+
+    fireEvent.click(screen.getByRole("button", { name: "可开具 87" }));
+    expect(screen.getByRole("button", { name: "可开具 87" }).getAttribute("aria-pressed"))
+      .toBe("true");
   });
 
   it("还有行没处理完时不让建草稿", async () => {
