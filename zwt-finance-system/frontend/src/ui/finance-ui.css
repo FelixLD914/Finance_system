@@ -1738,39 +1738,50 @@
   overflow: hidden;
 }
 
+/* 核对步骤是数据工作台，不再沿用上传页的“大标题 + 步骤条 + 说明”纵向预算。
+   页签保留方向感，其余背景信息让位给表格；整个页面仍锁在视口内。 */
+.workspace-main.is-wizard.is-review {
+  padding: 8px 20px 12px;
+}
+
+.workspace-main.is-review .page-heading {
+  min-height: 34px;
+  flex: none;
+  margin-bottom: 6px;
+}
+
+.workspace-main.is-review .page-heading h1,
+.workspace-main.is-review .tax-wizard-bar {
+  display: none;
+}
+
+.workspace-main.is-review .workspace-view-switch {
+  margin-top: 0;
+}
+
+.workspace-main.is-review .page-actions .ant-btn {
+  height: 30px;
+  padding-inline: 11px;
+  font-size: 12px;
+}
+
+.workspace-main.is-review .tax-wizard-panel.is-wide {
+  gap: 8px;
+  padding: 8px 16px 10px;
+}
+
+.workspace-main.is-review .tax-wizard-panel.is-wide .tax-wizard-foot {
+  flex: none;
+  min-height: 38px;
+  padding-top: 7px;
+}
+
 /* 未匹配收款方按税号汇总成一份维护清单，不在每一行重复同一个动作。 */
 .wht-payee-maintenance {
   flex: none;
   overflow: hidden;
   border: 1px solid var(--finance-border);
   border-radius: var(--finance-radius-sm);
-}
-
-.wht-payee-maintenance-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 9px 12px;
-  background: var(--finance-surface-muted);
-  border-bottom: 1px solid var(--finance-border);
-}
-
-.wht-payee-maintenance-head > div {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.wht-payee-maintenance-head strong {
-  color: var(--finance-text);
-  font-size: 13px;
-}
-
-.wht-payee-maintenance-head span {
-  color: var(--finance-text-muted);
-  font-size: 11.5px;
 }
 
 .wht-payee-maintenance-list {
@@ -1807,6 +1818,48 @@
 .wht-payee-maintenance-list .ant-btn {
   grid-column: 2;
   grid-row: 1 / span 2;
+}
+
+/* 未匹配税号的入口并入汇总条，不再单占一行。只有用户主动展开时才出现一条
+   42px 的横向工作带；税号再多也不会继续向下挤压表格。 */
+.workspace-main.is-review .wht-review-summary > .wht-payee-maintenance-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.workspace-main.is-review .wht-payee-maintenance-actions .ant-btn {
+  height: 26px;
+  padding-inline: 7px;
+  font-size: 11.5px;
+}
+
+.workspace-main.is-review .wht-payee-maintenance-list {
+  max-height: 42px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.workspace-main.is-review .wht-payee-maintenance-list > div {
+  display: flex;
+  min-width: 300px;
+  flex: 1 0 300px;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 0;
+}
+
+.workspace-main.is-review .wht-payee-maintenance-list > div > small {
+  white-space: nowrap;
+}
+
+.workspace-main.is-review .wht-payee-maintenance-list .ant-btn {
+  grid-column: auto;
+  grid-row: auto;
+  margin-left: auto;
 }
 
 /* 核对汇总条。刻意不用 Alert：整屏最重的信息是下面那张表，横幅铺满一行加底色
@@ -1874,6 +1927,21 @@
   font-size: 12px;
 }
 
+.workspace-main.is-review .wht-review-summary {
+  min-height: 34px;
+  padding: 3px 7px;
+  gap: 4px 8px;
+}
+
+.workspace-main.is-review .wht-review-filter {
+  min-height: 26px;
+  padding: 2px 7px;
+}
+
+.workspace-main.is-review .wht-review-summary .wht-review-hint {
+  font-size: 11.5px;
+}
+
 .wht-review-payee {
   display: grid;
   gap: 2px;
@@ -1932,6 +2000,96 @@
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+
+/* 表格占满核对面板的剩余高度。分页、表头和底部提交区固定，只有 tbody 自己
+   滚动：10 条默认数据完整可达，切到 20/50/100 也不会把整页无限拉长。 */
+.workspace-main.is-review .tax-reconcile-scroll {
+  gap: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.workspace-main.is-review .tax-reconcile-scroll > .wht-review-table {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Ant Design 6 的 Table 外层是 wrapper > spin > spin-container。每一层都必须允许
+   flex item 收缩；任何一层按内容高度展开，最里面的 tbody 就只会被父层裁掉而不会滚动。 */
+.workspace-main.is-review .wht-review-table > .ant-spin,
+.workspace-main.is-review .wht-review-table > .ant-spin-nested-loading,
+.workspace-main.is-review .wht-review-table > .ant-spin > .ant-spin-container,
+.workspace-main.is-review .wht-review-table > .ant-spin-nested-loading > .ant-spin-container,
+.workspace-main.is-review .wht-review-table .ant-table,
+.workspace-main.is-review .wht-review-table .ant-table-container {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-main.is-review .wht-review-table > .ant-spin > .ant-spin-container,
+.workspace-main.is-review .wht-review-table > .ant-spin-nested-loading > .ant-spin-container {
+  height: auto !important;
+}
+
+.workspace-main.is-review .wht-review-table .ant-table-header,
+.workspace-main.is-review .wht-review-table .ant-table-pagination {
+  flex: none;
+}
+
+.workspace-main.is-review .wht-review-table .ant-table-body {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none !important;
+}
+
+.workspace-main.is-review .wht-review-table .ant-table-pagination.ant-pagination {
+  min-height: 30px;
+  margin: 0 0 6px;
+}
+
+.workspace-main.is-review .wht-review-table .ant-table-cell {
+  padding: 6px 8px !important;
+}
+
+.workspace-main.is-review .wht-review-payee {
+  gap: 0;
+  line-height: 1.35;
+}
+
+.workspace-main.is-review .wht-review-payee > .thai-copy {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-main.is-review .wht-review-payee small {
+  line-height: 1.2;
+}
+
+.workspace-main.is-review .wht-review-actions {
+  gap: 4px;
+}
+
+.workspace-main.is-review .wht-review-actions .ant-btn {
+  height: 26px;
+  padding-inline: 7px;
+  font-size: 11.5px;
+}
+
+/* 截图场景约等效于 1366 × 768 的逻辑视口。低高度只收紧表格行，不缩小字号；
+   默认 10 条能尽量一次看全，更多条数仍只在 tbody 内滚动。 */
+@media (max-height: 820px) {
+  .workspace-main.is-wizard.is-review .wht-review-table .ant-table-cell {
+    padding-block: 4px !important;
+  }
 }
 
 .wht-review-table .numeric.is-overridden {

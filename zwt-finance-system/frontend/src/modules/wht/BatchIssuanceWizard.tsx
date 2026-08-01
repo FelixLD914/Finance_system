@@ -3,10 +3,12 @@ import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
   CheckCircleFilled,
+  DownOutlined,
   EyeOutlined,
   FileExcelOutlined,
   SyncOutlined,
   UploadOutlined,
+  UpOutlined,
   UserAddOutlined,
 } from "@ant-design/icons";
 import {
@@ -141,6 +143,7 @@ export function BatchIssuanceWizard({
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
   const [reviewPage, setReviewPage] = useState(1);
   const [reviewPageSize, setReviewPageSize] = useState(10);
+  const [payeeWorklistExpanded, setPayeeWorklistExpanded] = useState(false);
   const [payeeForm] = Form.useForm();
   const [rowForm] = Form.useForm();
   const payeeWhtType = Form.useWatch("whtType", payeeForm);
@@ -208,6 +211,7 @@ export function BatchIssuanceWizard({
       setSourceFileName(preview.sourceFileName);
       setReviewFilter("all");
       setReviewPage(1);
+      setPayeeWorklistExpanded(false);
       setStep("review");
     } catch (previewError) {
       // 结构性问题（缺列、日期格式不对）在解析阶段就整表退回：这类错误改 Excel 比
@@ -406,6 +410,7 @@ export function BatchIssuanceWizard({
     setReviewFilter("all");
     setReviewPage(1);
     setViewingRow(null);
+    setPayeeWorklistExpanded(false);
   };
 
   const columns: ColumnsType<EditableRow> = [
@@ -436,7 +441,14 @@ export function BatchIssuanceWizard({
       render: (_, row) => {
         if (row.payee.payeeId) {
           return (
-            <div className="wht-review-payee">
+            <div
+              className="wht-review-payee"
+              title={displayPayeeName(
+                row.payee.nameTh ?? "",
+                row.payee.branchType,
+                row.payee.branchNumber,
+              )}
+            >
               <ThaiText>
                 {displayPayeeName(
                   row.payee.nameTh ?? "",
@@ -449,7 +461,18 @@ export function BatchIssuanceWizard({
           );
         }
         return (
-          <div className="wht-review-payee">
+          <div
+            className="wht-review-payee"
+            title={
+              row.payee.nameTh
+                ? displayPayeeName(
+                    row.payee.nameTh,
+                    row.payee.branchType,
+                    row.payee.branchNumber,
+                  )
+                : row.payee.taxId
+            }
+          >
             {row.payee.nameTh ? (
               <>
                 <ThaiText>
@@ -569,7 +592,9 @@ export function BatchIssuanceWizard({
 
   return (
     // is-wizard 把这一屏切成有界的 flex 列，步骤条与页脚才固定得住（见 finance-ui.css）。
-    <section className="workspace-main is-wizard">
+    <section
+      className={`workspace-main is-wizard${step === "review" ? " is-review" : ""}`}
+    >
       <div className="page-heading">
         <div>
           <h1>
@@ -713,29 +738,31 @@ export function BatchIssuanceWizard({
                     ? t("wht.reviewBlocked", { count: blocked })
                     : t("wht.reviewAllReady", { total: counts.total })}
                 </span>
-              </div>
-              <p className="wht-wizard-note">{t("wht.reviewIntro")}</p>
-              {missingGroups.length > 0 && (
-                <section className="wht-payee-maintenance">
-                  <div className="wht-payee-maintenance-head">
-                    <div>
-                      <strong>{t("wht.missingPayeeWorklist")}</strong>
-                      <span>
-                        {t("wht.missingPayeeWorklistHint", {
-                          taxIds: missingGroups.length,
-                          rows: missingGroups.reduce((sum, group) => sum + group.rowCount, 0),
-                        })}
-                      </span>
-                    </div>
+                {missingGroups.length > 0 && (
+                  <div className="wht-payee-maintenance-actions">
                     <Button
-                      icon={<SyncOutlined />}
+                      aria-controls="wht-payee-worklist"
+                      aria-expanded={payeeWorklistExpanded}
+                      icon={payeeWorklistExpanded ? <UpOutlined /> : <DownOutlined />}
                       size="small"
-                      onClick={rematchPayees}
+                      onClick={() => setPayeeWorklistExpanded((current) => !current)}
                     >
+                      {payeeWorklistExpanded
+                        ? t("wht.collapsePayeeWorklist")
+                        : t("wht.expandPayeeWorklist", { count: missingGroups.length })}
+                    </Button>
+                    <Button icon={<SyncOutlined />} size="small" onClick={rematchPayees}>
                       {t("wht.rematchPayees")}
                     </Button>
                   </div>
-                  <div className="wht-payee-maintenance-list">
+                )}
+              </div>
+              {missingGroups.length > 0 && payeeWorklistExpanded && (
+                <section
+                  aria-label={t("wht.missingPayeeWorklist")}
+                  className="wht-payee-maintenance is-expanded"
+                >
+                  <div className="wht-payee-maintenance-list" id="wht-payee-worklist">
                     {missingGroups.map((group) => (
                       <div key={group.taxId}>
                         <span className="numeric">{group.taxId}</span>
@@ -791,6 +818,7 @@ export function BatchIssuanceWizard({
                   scroll={{
                     x: 1068,
                     y: "clamp(160px, calc(100vh - 660px), 460px)",
+                    scrollToFirstRowOnChange: true,
                   }}
                   size="small"
                   tableLayout="fixed"

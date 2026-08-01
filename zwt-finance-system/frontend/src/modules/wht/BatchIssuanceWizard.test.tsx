@@ -174,6 +174,7 @@ describe("批量开具向导", () => {
     const { onPreview } = await reachReviewStep();
 
     expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".workspace-main.is-review")).toBeTruthy();
     // 汇总条要说清楚有几行要动手，否则人只会盯着表格一行行找。
     const summary = document.querySelector(".wht-review-summary");
     expect(summary?.textContent).toContain("2 项任务");
@@ -182,6 +183,18 @@ describe("批量开具向导", () => {
     // 待办数字才上色；全部就绪时这条汇总应当是安静的。
     expect(summary?.querySelectorAll(".is-todo")).toHaveLength(1);
     expect(screen.getByText("主数据中无此税号")).toBeTruthy();
+  });
+
+  it("未匹配税号默认收起，需要维护时再展开，不长期占用表格高度", async () => {
+    await reachReviewStep();
+
+    expect(document.querySelector(".wht-payee-maintenance-list")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /展开 1 个税号/ }));
+    expect(document.querySelector(".wht-payee-maintenance-list")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "维护一次" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /收起维护/ }));
+    expect(document.querySelector(".wht-payee-maintenance-list")).toBeNull();
   });
 
   it("每一行都能打开完整详情，并可连续查看上一份和下一份", async () => {

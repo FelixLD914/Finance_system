@@ -281,6 +281,8 @@ const resources = {
     "wht.newPayeeAppliesTo": "本批还有 {count} 行用同一个税号，填一次全部生效。",
     "wht.missingPayeeWorklist": "未匹配收款方汇总",
     "wht.missingPayeeWorklistHint": "{taxIds} 个税号影响 {rows} 行；每个税号只需维护一次。",
+    "wht.expandPayeeWorklist": "展开 {count} 个税号",
+    "wht.collapsePayeeWorklist": "收起维护",
     "wht.affectedRows": "影响 {count} 行",
     "wht.maintainOnce": "维护一次",
     "wht.rematchPayees": "重新匹配主数据",
@@ -1179,6 +1181,8 @@ const resources = {
     "wht.missingPayeeWorklist": "Unmatched payees",
     "wht.missingPayeeWorklistHint":
       "{taxIds} tax ID(s) affect {rows} row(s); maintain each tax ID only once.",
+    "wht.expandPayeeWorklist": "Show {count} tax ID(s)",
+    "wht.collapsePayeeWorklist": "Collapse",
     "wht.affectedRows": "Affects {count} row(s)",
     "wht.maintainOnce": "Maintain once",
     "wht.rematchPayees": "Rematch master data",
