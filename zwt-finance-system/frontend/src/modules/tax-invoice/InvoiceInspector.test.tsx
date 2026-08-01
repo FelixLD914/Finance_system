@@ -7,6 +7,7 @@
  * (2) 「商品明细」的合计行必须真的渲染出金额（合计是这一段的结论，不能只有表体）。
  */
 
+import { StyleProvider } from "@ant-design/cssinjs";
 import { cleanup, render, within } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -87,29 +88,35 @@ function makeInvoice(partial: Partial<TaxInvoice> = {}): TaxInvoice {
   } as TaxInvoice;
 }
 
+// `mock="server"` 让 antd 的 cssinjs 只算样式、不把 <style> 灌进 jsdom：样式表一大，
+// 之后每次 getComputedStyle 都要线性跑完整份级联。类名由 token 哈希算出、与注不注入
+// 无关，本文件断言的版式顺序查的是 DOM 结构而非计算样式，一律不受影响。
+// 实测数据见 wht/IssuanceConsole.test.tsx 的 Harness。
 function renderInspector(invoice: TaxInvoice) {
   function Harness() {
     const { t, locale } = useI18n();
     return (
-      <AntApp>
-        <InvoiceInspector
-          busy={false}
-          documents={[]}
-          invoice={invoice}
-          locale={locale}
-          t={t}
-          onApprove={() => {}}
-          onClose={() => {}}
-          onCorrection={() => {}}
-          onDownload={() => {}}
-          onEdit={() => {}}
-          onGenerate={() => {}}
-          onMatchRate={() => {}}
-          onReject={() => {}}
-          onRestore={() => {}}
-          onVoid={() => {}}
-        />
-      </AntApp>
+      <StyleProvider mock="server">
+        <AntApp>
+          <InvoiceInspector
+            busy={false}
+            documents={[]}
+            invoice={invoice}
+            locale={locale}
+            t={t}
+            onApprove={() => {}}
+            onClose={() => {}}
+            onCorrection={() => {}}
+            onDownload={() => {}}
+            onEdit={() => {}}
+            onGenerate={() => {}}
+            onMatchRate={() => {}}
+            onReject={() => {}}
+            onRestore={() => {}}
+            onVoid={() => {}}
+          />
+        </AntApp>
+      </StyleProvider>
     );
   }
   return render(<Harness />);
