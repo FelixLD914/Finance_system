@@ -208,7 +208,12 @@ describe("批量开具向导", () => {
     expect(firstDetail.getByText("BatchIssue.xlsx")).toBeTruthy();
     expect(firstDetail.getByText("99/1 ถนนสุขุมวิท กรุงเทพมหานคร")).toBeTruthy();
     expect(firstDetail.getByText("0105540057561")).toBeTruthy();
-    expect(firstDetail.getByText("第 1 / 2 份")).toBeTruthy();
+    const position = firstDetail.getByText("第 1 / 2 份");
+    expect(position.classList.contains("wht-row-detail-position")).toBe(true);
+    expect(firstDetail.getByRole("button", { name: "上一份" }).querySelector(".anticon"))
+      .toBeTruthy();
+    expect(firstDetail.getByRole("button", { name: "下一份" }).querySelector(".anticon"))
+      .toBeTruthy();
 
     fireEvent.click(firstDetail.getByRole("button", { name: "下一份" }));
     const secondTitle = await screen.findByText("第 3 行详情");

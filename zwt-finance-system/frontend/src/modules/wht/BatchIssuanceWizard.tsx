@@ -906,7 +906,7 @@ export function BatchIssuanceWizard({
                   icon={<ArrowLeftOutlined />}
                   onClick={() => moveRowDetail(-1)}
                 />
-                <span>
+                <span className="wht-row-detail-position">
                   {t("wht.detailPosition", {
                     current: viewingIndex + 1,
                     total: rows.length,
