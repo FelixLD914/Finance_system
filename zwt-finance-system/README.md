@@ -75,6 +75,9 @@ Set-Location D:\AI\gpt_codex\finan_system_DIV_Part\zwt-finance-system
 .\scripts\Start-Zwt.ps1
 ```
 
+启动后端前会自动执行数据库迁移，因此拉取包含新字段的代码后无需再手动运行
+`alembic upgrade head`。
+
 停止：
 
 ```powershell
@@ -90,7 +93,7 @@ Set-Location D:\AI\gpt_codex\finan_system_DIV_Part\zwt-finance-system
 | --- | --- |
 | `Initialize-ZwtPostgres.ps1` | 建立 ZWT 专用的 PostgreSQL 15 集群（需管理员权限，只需跑一次） |
 | `Initialize-ZwtDev.ps1` | 首次部署。可重复执行，已完成的步骤自动跳过 |
-| `Start-Zwt.ps1` | 启动后端与前端（各开一个窗口，日志可见），等健康检查通过后开浏览器 |
+| `Start-Zwt.ps1` | 自动同步数据库结构，再启动后端与前端（各开一个窗口，日志可见），等健康检查通过后开浏览器 |
 | `Stop-Zwt.ps1` | 按端口停止本项目进程 |
 
 常用参数：

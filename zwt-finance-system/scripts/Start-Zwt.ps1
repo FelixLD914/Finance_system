@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     默认在各自的 PowerShell 窗口里启动后端与前端，等待健康检查通过后打开浏览器。
-    首次使用请先运行 .\Initialize-ZwtDev.ps1 完成依赖安装与数据库迁移。
+    首次使用请先运行 .\Initialize-ZwtDev.ps1 完成依赖安装；之后每次启动后端前会
+    自动把数据库迁移到当前代码所需的最新版本。
 
     端口：前端 5273 / 后端 8100。启动前会确认本项目没有占用 BOI 的
     5173 / 4173 / 8000。
@@ -65,6 +66,22 @@ Assert-BoiPortsUntouched
 Write-Ok "BOI 保留端口 (5173/4173/8000) 未被本项目占用"
 
 if ($startBackend) { Show-PostgresStatus }
+
+# 代码更新可能同时带来数据库结构更新。启动前总是执行一次幂等迁移，避免后端
+# 虽然能通过 SELECT 1 健康检查，但业务查询因缺少新列而持续返回 500。
+if ($startBackend) {
+    Write-Step "同步数据库结构"
+    Push-Location $script:BackendRoot
+    try {
+        & $script:VenvPython -m alembic upgrade head
+        if ($LASTEXITCODE -ne 0) {
+            throw "数据库迁移失败（退出码 $LASTEXITCODE）"
+        }
+    } finally {
+        Pop-Location
+    }
+    Write-Ok "数据库结构已同步到当前版本"
+}
 
 # 端口占用处理
 $targets = @()
