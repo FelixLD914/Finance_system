@@ -32,6 +32,23 @@ def test_blank_note_does_not_count_as_a_reason() -> None:
         note_for(Decimal("0.05"), "   ")
 
 
+def test_the_same_rule_guards_edits_not_just_creation() -> None:
+    """改草稿走的是同一个判定函数，所以补开的编辑入口不会成为绕过口径的后门。
+
+    2026-08-01：明细面板的「编辑」按钮以前是死的（点了没反应），update_task 也就
+    从没校验过税率理由。分步开票把编辑做成真的能改，这条空档必须同时补上——
+    修订已开具票据也走这条路（revise 先退回草稿再改）。
+    """
+    with pytest.raises(WhtStateError, match="rateOverrideNote is required"):
+        note_for(Decimal("0.05"), None)
+
+    # 收入类型换成法定税率不同的一类，同样会让原本合规的税率变成偏离。
+    # ค่าบริการ（服务费）PND53 法定 3%，拿 3% 去配运输费的 1% 就偏离了。
+    assert note_for(Decimal("0.03"), None, income_type="ค่าบริการ") is None
+    with pytest.raises(WhtStateError, match="rateOverrideNote is required"):
+        note_for(Decimal("0.03"), None, income_type=TRANSPORT)
+
+
 def test_deviating_rate_records_both_rates_and_the_reason() -> None:
     note = note_for(Decimal("0.05"), "合同约定 5%，见 2026-06 补充协议")
     # 事后审计只看事件 note，所以实际税率和法定税率都要写进去，

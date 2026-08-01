@@ -104,6 +104,11 @@ class WhtTask(Base):
     amount_text_thai: Mapped[str | None] = mapped_column(Text, nullable=True)
     date_text_thai: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_file_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
+    # 批量导入时人工补录的收款方还没进 wht.payees，等这张票批准时才写库
+    # （见 migration 0017）。资料本身就在上面那几个反规范化字段里，这里只标记状态。
+    payee_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_by_name: Mapped[str] = mapped_column(String(160), nullable=False, default="系统管理员")
     updated_by_name: Mapped[str] = mapped_column(String(160), nullable=False, default="系统管理员")

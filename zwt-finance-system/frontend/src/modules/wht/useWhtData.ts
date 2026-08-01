@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  batchCreateTasks,
   batchTransitionTasks,
+  commitBatchTasks,
   createWhtTask,
   deletePayee,
   getWhtTask,
@@ -11,16 +11,21 @@ import {
   listIncomeTypes,
   listPayees,
   listWhtTasks,
+  previewBatchTasks,
   restorePayee,
+  reviseWhtTask,
   savePayee,
   transitionWhtTask,
+  updateWhtTask,
 } from "./api";
 import type {
+  BatchCommitInput,
   IncomeTypeOption,
   Payee,
   PayeeInput,
   WhtTask,
   WhtTaskCreateInput,
+  WhtTaskUpdateInput,
 } from "./types";
 
 function errorMessage(error: unknown): string {
@@ -177,11 +182,45 @@ export function useWhtData() {
     }
   }, []);
 
-  const uploadBatchTasks = useCallback(async (file: File) => {
+  const editTask = useCallback(
+    async (task: WhtTask, input: WhtTaskUpdateInput) => {
+      setMutationPending(true);
+      try {
+        const updated = await updateWhtTask(task, input);
+        replaceTask(updated);
+        return updated;
+      } finally {
+        setMutationPending(false);
+      }
+    },
+    [replaceTask],
+  );
+
+  const reviseTask = useCallback(
+    async (task: WhtTask, reason: string) => {
+      setMutationPending(true);
+      try {
+        const revised = await reviseWhtTask(task, reason);
+        replaceTask(revised);
+        return revised;
+      } finally {
+        setMutationPending(false);
+      }
+    },
+    [replaceTask],
+  );
+
+  /** 分步开票第一步。只读，所以不动 tasks，也不算 mutation。 */
+  const previewBatch = useCallback((file: File) => previewBatchTasks(file), []);
+
+  const commitBatch = useCallback(async (input: BatchCommitInput) => {
     setMutationPending(true);
     try {
-      const result = await batchCreateTasks(file);
-      setTasks(await listWhtTasks());
+      const result = await commitBatchTasks(input);
+      // 新草稿可能带着刚补录的收款方（批准时才写库），两份列表都重取。
+      const [nextTasks, nextPayees] = await Promise.all([listWhtTasks(), listPayees()]);
+      setTasks(nextTasks);
+      setPayees(nextPayees);
       return result;
     } finally {
       setMutationPending(false);
@@ -216,13 +255,16 @@ export function useWhtData() {
     reload,
     loadTaskDetail,
     createTask,
+    editTask,
+    reviseTask,
     transitionTask,
     persistPayee,
     removePayee,
     recoverPayee,
     uploadPayees,
     uploadHistoricalTasks,
-    uploadBatchTasks,
+    previewBatch,
+    commitBatch,
     runBatchTransition,
   };
 }

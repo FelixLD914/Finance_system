@@ -229,6 +229,62 @@ const resources = {
     "wht.batchImportPick": "选择批量开具 Excel",
     "wht.batchImportCompleted": "批量开具完成：新建 {created} 条草稿",
     "wht.batchImportRejected": "整张表已退回，未导入任何数据",
+
+    // 分步开票：点「开票」先选路径，两条路径最终都落成草稿。
+    "wht.chooseMode": "选择开票方式",
+    "wht.chooseModeHint": "两条路径都只建草稿，正式编号仍在批准时由服务器生成。",
+    "wht.modeSingle": "单张开具",
+    "wht.modeSingleDesc": "逐条录入一张票，收款方从主数据里选。适合临时的一两张。",
+    "wht.modeBatch": "导入已有数据批量开具",
+    "wht.modeBatchDesc": "上传 Excel，先在页面上逐行核对、补齐缺的收款方，确认无误再建草稿。",
+    "wht.batchWizardTitle": "批量开具",
+    "wht.stepUpload": "上传数据",
+    "wht.stepReview": "核对数据",
+    "wht.stepDone": "完成",
+    "wht.uploadIntro":
+      "上传只做解析，不会写库；下一步会把读到的每一行摊开给你核对，缺的收款方也在那一步补。",
+    "wht.toReview": "读取并核对",
+    "wht.reviewIntro":
+      "以下是从表里读到的数据。请逐行核对；标「待补收款方」的行需要手工填写收款方资料，票据批准时会自动写入主数据。",
+    "wht.reviewSummary": "共 {total} 行 · 可开具 {ready} · 待补收款方 {missing} · 待处理 {invalid}",
+    "wht.reviewBlocked": "还有 {count} 行需要处理，全部处理完才能建草稿。",
+    "wht.reviewAllReady": "{total} 行全部核对通过，可以建草稿了。",
+    "wht.rowNumber": "行",
+    "wht.rowReady": "可开具",
+    "wht.rowPayeeMissing": "待补收款方",
+    "wht.rowNeedsInput": "待处理",
+    "wht.fillPayee": "补录收款方",
+    "wht.editRow": "修改",
+    "wht.payeeNotInMaster": "主数据中无此税号",
+    "wht.pendingPayeeTag": "待建档",
+    "wht.newPayeeTitle": "补录收款方（税号 {taxId}）",
+    "wht.newPayeeHint":
+      "泰文名称、泰文地址、申报表类型都会原样印在正式凭证上，推导不出来，必须手工填写。资料在票据批准时写入收款方主数据。",
+    "wht.newPayeeAppliesTo": "本批还有 {count} 行用同一个税号，填一次全部生效。",
+    "wht.editRowTitle": "修改第 {row} 行",
+    "wht.commitBatch": "建 {count} 条草稿",
+    "wht.commitDone": "已建 {created} 条草稿",
+    "wht.commitDonePayees": "其中 {count} 条带着新收款方，会在票据批准时写入主数据。",
+    "wht.importAnother": "再导一批",
+    "wht.issuePayeeMissing": "税号 {taxId} 不在收款方主数据里，请补录资料",
+    "wht.issuePayeeInactive": "收款方「{name}」已停用，请先在收款方主数据里启用",
+    "wht.issueRateRequired": "收入类型「{incomeType}」不在 {whtType} 的目录里，请直接填写税率",
+    "wht.issueRateReason": "税率 {rate} 偏离法定 {statutory}，必须填写理由",
+
+    // 修订：已开具的票保号更正，改完重新出具，旧文件版本留档。
+    "wht.revise": "修订",
+    "wht.reviseTitle": "修订 {taskNo}",
+    "wht.reviseIntro":
+      "票号保持不变。退回草稿后即可修改内容；重新提交复核 → 批准 → 出具时文件版本号 +1，旧版本永久留档。",
+    "wht.reviseReason": "修订理由",
+    "wht.reviseReasonHint": "写清楚改了什么、依据是什么。这是事后解释这张正式凭证为何被改过的唯一依据。",
+    "wht.reviseReasonPlaceholder": "例如：收款方泰文地址填错，按 2026-06 变更函更正",
+    "wht.reviseReasonRequired": "请填写修订理由",
+    "wht.revised": "已退回草稿，票号 {taskNo} 保持不变",
+    "wht.editTaskTitle": "修改 {label}",
+    "wht.editOnlyDraft": "只有草稿可以直接修改。已批准或已开具的票请先点「修订」。",
+    "wht.payeePendingNotice": "本单收款方为人工补录，尚未进入主数据；批准这张票时自动写入。",
+    "wht.revisionCount": "修订 {count} 次",
     "wht.batchSubmitReview": "批量提交复核",
     "wht.batchApprove": "批量批准取号",
     "wht.batchReturnDraft": "批量退回草稿",
@@ -1040,6 +1096,70 @@ const resources = {
     "wht.batchImportPick": "Select batch issuance file",
     "wht.batchImportCompleted": "Batch issuance finished: {created} drafts created",
     "wht.batchImportRejected": "The whole sheet was rejected; nothing was imported",
+
+    "wht.chooseMode": "How do you want to issue?",
+    "wht.chooseModeHint":
+      "Both paths only create drafts; formal numbers are still assigned by the server on approval.",
+    "wht.modeSingle": "Single certificate",
+    "wht.modeSingleDesc":
+      "Enter one certificate at a time, picking the payee from the master data. Best for one or two.",
+    "wht.modeBatch": "Import a spreadsheet",
+    "wht.modeBatchDesc":
+      "Upload an Excel file, check every row on screen and fill in any missing payee, then create the drafts.",
+    "wht.batchWizardTitle": "Batch issuance",
+    "wht.stepUpload": "Upload",
+    "wht.stepReview": "Check the data",
+    "wht.stepDone": "Done",
+    "wht.uploadIntro":
+      "Uploading only parses the file; nothing is written yet. The next step lays out every row for you to check, and that is where any missing payee gets filled in.",
+    "wht.toReview": "Read and check",
+    "wht.reviewIntro":
+      "This is what was read from the file. Check every row; rows marked “Payee needed” require the payee details to be typed in, and they are written to the master data when the certificate is approved.",
+    "wht.reviewSummary":
+      "{total} rows · {ready} ready · {missing} need a payee · {invalid} need attention",
+    "wht.reviewBlocked": "{count} row(s) still need attention before drafts can be created.",
+    "wht.reviewAllReady": "All {total} rows check out. Ready to create drafts.",
+    "wht.rowNumber": "Row",
+    "wht.rowReady": "Ready",
+    "wht.rowPayeeMissing": "Payee needed",
+    "wht.rowNeedsInput": "Needs attention",
+    "wht.fillPayee": "Add payee",
+    "wht.editRow": "Edit",
+    "wht.payeeNotInMaster": "Tax ID not in master data",
+    "wht.pendingPayeeTag": "New payee",
+    "wht.newPayeeTitle": "Add payee (tax ID {taxId})",
+    "wht.newPayeeHint":
+      "The Thai name, Thai address and declaration form are printed on the certificate and cannot be derived, so they must be typed in. They are written to the payee master data when the certificate is approved.",
+    "wht.newPayeeAppliesTo": "{count} more row(s) in this batch use the same tax ID and will be filled in too.",
+    "wht.editRowTitle": "Edit row {row}",
+    "wht.commitBatch": "Create {count} drafts",
+    "wht.commitDone": "{created} drafts created",
+    "wht.commitDonePayees":
+      "{count} of them carry a new payee, which is written to the master data when the certificate is approved.",
+    "wht.importAnother": "Import another file",
+    "wht.issuePayeeMissing": "Tax ID {taxId} is not in the payee master data; fill in the details",
+    "wht.issuePayeeInactive": "Payee “{name}” is deactivated; reactivate it in the payee master data first",
+    "wht.issueRateRequired":
+      "“{incomeType}” is not in the {whtType} catalogue, so a rate must be typed in",
+    "wht.issueRateReason": "{rate} deviates from the statutory {statutory}; a reason is required",
+
+    "wht.revise": "Revise",
+    "wht.reviseTitle": "Revise {taskNo}",
+    "wht.reviseIntro":
+      "The number stays the same. The task returns to draft so it can be edited; when it is submitted, approved and generated again the document version increments and the old version is kept.",
+    "wht.reviseReason": "Reason for the revision",
+    "wht.reviseReasonHint":
+      "Say what changed and on what basis. This is the only record explaining why an issued certificate was altered.",
+    "wht.reviseReasonPlaceholder":
+      "For example: the Thai payee address was wrong, corrected per the June 2026 amendment letter",
+    "wht.reviseReasonRequired": "A reason is required",
+    "wht.revised": "Returned to draft; number {taskNo} is unchanged",
+    "wht.editTaskTitle": "Edit {label}",
+    "wht.editOnlyDraft":
+      "Only drafts can be edited directly. For an approved or issued certificate, use Revise first.",
+    "wht.payeePendingNotice":
+      "This payee was typed in by hand and is not in the master data yet; it is written there when this certificate is approved.",
+    "wht.revisionCount": "Revised {count} time(s)",
     "wht.batchSubmitReview": "Submit selected for review",
     "wht.batchApprove": "Approve selected",
     "wht.batchReturnDraft": "Return selected to draft",
