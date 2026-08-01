@@ -69,6 +69,15 @@ class WhtTask(Base):
             "(issuance_type = 'supplement' AND supplement_run BETWEEN 1 AND 9)",
             name="supplement_run_matches_type",
         ),
+        CheckConstraint(
+            "branch_type IN ('none', 'head_office', 'branch')",
+            name="tasks_branch_type_allowed",
+        ),
+        CheckConstraint(
+            "(branch_type = 'branch' AND branch_number ~ '^[0-9]{5}$') OR "
+            "(branch_type <> 'branch' AND branch_number IS NULL)",
+            name="tasks_branch_number_matches_type",
+        ),
         CheckConstraint("version >= 1", name="version_positive"),
         Index("ix_wht_tasks_period_status", "period", "status"),
         {"schema": "wht"},
@@ -91,6 +100,11 @@ class WhtTask(Base):
     payee_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     tax_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     wht_type: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # 收款方分支是正式凭证快照的一部分，不能只留在会变化的主数据里。
+    branch_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none", server_default=text("'none'")
+    )
+    branch_number: Mapped[str | None] = mapped_column(String(5), nullable=True)
     income_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
     payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -139,6 +153,20 @@ class PayeeProfile(Base, SoftDeleteMixin):
             postgresql_where=text("deleted_at IS NULL"),
         ),
         CheckConstraint("wht_type IN ('PND3', 'PND53')", name="wht_type_allowed"),
+        CheckConstraint(
+            "branch_type IN ('none', 'head_office', 'branch')",
+            name="payees_branch_type_allowed",
+        ),
+        CheckConstraint(
+            "(branch_type = 'branch' AND branch_number ~ '^[0-9]{5}$') OR "
+            "(branch_type <> 'branch' AND branch_number IS NULL)",
+            name="payees_branch_number_matches_type",
+        ),
+        CheckConstraint(
+            "(wht_type = 'PND53' AND branch_type IN ('head_office', 'branch')) OR "
+            "(wht_type = 'PND3' AND branch_type = 'none')",
+            name="payees_branch_matches_wht_type",
+        ),
         Index("ix_wht_payees_name_th", "name_th"),
         {"schema": "wht"},
     )
@@ -149,6 +177,10 @@ class PayeeProfile(Base, SoftDeleteMixin):
     name_en: Mapped[str | None] = mapped_column(String(300), nullable=True)
     address_th: Mapped[str] = mapped_column(Text, nullable=False)
     wht_type: Mapped[str] = mapped_column(String(12), nullable=False)
+    branch_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="none", server_default=text("'none'")
+    )
+    branch_number: Mapped[str | None] = mapped_column(String(5), nullable=True)
     aliases: Mapped[list[str]] = mapped_column(
         JSONB,
         nullable=False,

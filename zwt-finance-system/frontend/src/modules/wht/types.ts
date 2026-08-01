@@ -1,6 +1,7 @@
 export type WhtStatus = "draft" | "pending_review" | "approved" | "issued" | "voided";
 export type WhtType = "PND3" | "PND53";
 export type IssuanceType = "normal" | "supplement";
+export type BranchType = "none" | "head_office" | "branch";
 
 export interface WhtTaskEvent {
   id: number;
@@ -26,6 +27,8 @@ export interface WhtTask {
   payeeAddress: string | null;
   taxId: string | null;
   whtType: WhtType | null;
+  branchType: BranchType;
+  branchNumber: string | null;
   incomeType: string | null;
   paymentDate: string | null;
   dueDate: string | null;
@@ -85,6 +88,8 @@ export interface Payee {
   nameEn: string | null;
   addressTh: string;
   whtType: WhtType;
+  branchType: BranchType;
+  branchNumber: string | null;
   aliases: string[];
   isActive: boolean;
   sourceFileName: string | null;
@@ -102,6 +107,8 @@ export interface PayeeInput {
   nameEn?: string | null;
   addressTh: string;
   whtType: WhtType;
+  branchType: BranchType;
+  branchNumber?: string | null;
   aliases: string[];
   isActive?: boolean;
 }
@@ -158,6 +165,8 @@ export interface BatchPreviewPayee {
   nameEn: string | null;
   addressTh: string | null;
   whtType: WhtType | null;
+  branchType: BranchType;
+  branchNumber: string | null;
   isActive: boolean;
 }
 
@@ -194,6 +203,8 @@ export interface BatchCommitPayeeInput {
   nameEn?: string | null;
   addressTh?: string | null;
   whtType?: WhtType | null;
+  branchType?: BranchType | null;
+  branchNumber?: string | null;
 }
 
 export interface BatchCommitRowInput {

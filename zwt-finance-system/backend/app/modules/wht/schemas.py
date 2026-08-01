@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic.alias_generators import to_camel
 
 from app.core.signature_usage import parse_signature_usage
+from app.modules.wht.branching import BranchType, normalize_branch
 
 IssuanceType = Literal["normal", "supplement"]
 WhtStatus = Literal["draft", "pending_review", "approved", "issued", "voided"]
@@ -42,6 +43,8 @@ class WhtTaskCreate(ApiSchema):
     payee_address: str | None = None
     tax_id: str | None = Field(default=None, max_length=20)
     wht_type: WhtType | None = None
+    branch_type: BranchType | None = None
+    branch_number: str | None = Field(default=None, max_length=5)
     income_type: str | None = Field(default=None, max_length=160)
     payment_date: date | None = None
     due_date: date | None = None
@@ -74,6 +77,8 @@ class WhtTaskUpdate(ApiSchema):
     payee_address: str | None = None
     tax_id: str | None = Field(default=None, max_length=20)
     wht_type: WhtType | None = None
+    branch_type: BranchType | None = None
+    branch_number: str | None = Field(default=None, max_length=5)
     income_type: str | None = Field(default=None, max_length=160)
     payment_date: date | None = None
     due_date: date | None = None
@@ -111,6 +116,8 @@ class WhtTaskResponse(ApiSchema):
     payee_address: str | None
     tax_id: str | None
     wht_type: WhtType | None
+    branch_type: BranchType
+    branch_number: str | None
     income_type: str | None
     payment_date: date | None
     due_date: date | None
@@ -146,7 +153,16 @@ class PayeeCreate(ApiSchema):
     name_en: str | None = Field(default=None, max_length=300)
     address_th: str = Field(min_length=1)
     wht_type: WhtType
+    branch_type: BranchType | None = None
+    branch_number: str | None = Field(default=None, max_length=5)
     aliases: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_branch(self) -> "PayeeCreate":
+        self.branch_type, self.branch_number = normalize_branch(
+            self.wht_type, self.branch_type, self.branch_number
+        )
+        return self
 
 
 class PayeeUpdate(ApiSchema):
@@ -154,6 +170,8 @@ class PayeeUpdate(ApiSchema):
     name_en: str | None = Field(default=None, max_length=300)
     address_th: str | None = Field(default=None, min_length=1)
     wht_type: WhtType | None = None
+    branch_type: BranchType | None = None
+    branch_number: str | None = Field(default=None, max_length=5)
     aliases: list[str] | None = None
     is_active: bool | None = None
 
@@ -165,6 +183,8 @@ class PayeeResponse(ApiSchema):
     name_en: str | None
     address_th: str
     wht_type: WhtType
+    branch_type: BranchType
+    branch_number: str | None
     aliases: list[str]
     is_active: bool
     source_file_name: str | None
@@ -240,6 +260,8 @@ class BatchPreviewPayee(ApiSchema):
     name_en: str | None = None
     address_th: str | None = None
     wht_type: WhtType | None = None
+    branch_type: BranchType = "none"
+    branch_number: str | None = None
     is_active: bool = True
 
 
@@ -286,6 +308,8 @@ class BatchCommitPayee(ApiSchema):
     name_en: str | None = Field(default=None, max_length=300)
     address_th: str | None = None
     wht_type: WhtType | None = None
+    branch_type: BranchType | None = None
+    branch_number: str | None = Field(default=None, max_length=5)
 
     @model_validator(mode="after")
     def require_profile_for_new_payee(self) -> "BatchCommitPayee":
@@ -305,6 +329,9 @@ class BatchCommitPayee(ApiSchema):
                 f"a new payee needs {', '.join(missing)}; these are printed on the "
                 f"certificate and cannot be derived"
             )
+        self.branch_type, self.branch_number = normalize_branch(
+            self.wht_type, self.branch_type, self.branch_number
+        )
         return self
 
 

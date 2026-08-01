@@ -100,7 +100,7 @@ const resources = {
     "wht.taxId": "税号",
     "wht.incomeType": "收入类型",
     "wht.rate": "预扣税率",
-    "wht.totalAmount": "总金额",
+    "wht.totalAmount": "不含税金额",
     "wht.whtAmount": "预扣税额",
     "wht.createdBy": "创建人",
     "wht.createdAt": "创建时间",
@@ -130,6 +130,12 @@ const resources = {
     "wht.payeeNameTh": "泰文名称",
     "wht.payeeNameEn": "英文名称",
     "wht.address": "泰文地址",
+    "wht.branchOffice": "公司分支",
+    "wht.headOffice": "สำนักงานใหญ่（总公司）",
+    "wht.branch": "สาขา（分支）",
+    "wht.branchNumber": "5 位分支编号",
+    "wht.branchNumberHint": "请输入 5 位数字，例如 00001",
+    "wht.notApplicable": "不适用",
     "wht.active": "启用状态",
     "wht.enabled": "启用",
     "wht.disabled": "停用",
@@ -216,7 +222,7 @@ const resources = {
       "按模板填好一张 Excel，一次建出多条 WHT 草稿。正式编号仍然只在批准时由服务器生成，模板里不能填编号。",
     "wht.batchImportStep1": "下载模板，第二张表「说明 Notes」写明每列的填写规则。",
     "wht.batchImportStep2":
-      "必填 PayeeTaxID、IncomeType、PaymentDate、Amount；税号必须已存在于收款方主数据。",
+      "必填 PayeeTaxID、IncomeType、PaymentDate、Amount；未匹配的税号可在核对页集中维护。",
     "wht.batchImportStep3":
       "TaxRate 留空会按收入类型自动带出法定税率；要覆盖请写小数 0.03 或带百分号的 3%。覆盖成非法定税率时，必须在 TaxRateReason 列写明理由，否则整张表退回。",
     "wht.batchImportStep4":
@@ -261,6 +267,15 @@ const resources = {
     "wht.newPayeeHint":
       "泰文名称、泰文地址、申报表类型都会原样印在正式凭证上，推导不出来，必须手工填写。资料在票据批准时写入收款方主数据。",
     "wht.newPayeeAppliesTo": "本批还有 {count} 行用同一个税号，填一次全部生效。",
+    "wht.missingPayeeWorklist": "未匹配收款方汇总",
+    "wht.missingPayeeWorklistHint": "{taxIds} 个税号影响 {rows} 行；每个税号只需维护一次。",
+    "wht.affectedRows": "影响 {count} 行",
+    "wht.maintainOnce": "维护一次",
+    "wht.rematchPayees": "重新匹配主数据",
+    "wht.rematchDone": "已把 {taxIds} 个税号重新匹配到 {rows} 行",
+    "wht.rematchNone": "当前主数据中没有可重新匹配的税号",
+    "wht.batchPreviewUnavailable":
+      "批量核对接口尚未加载，请重启 ZWT 后端服务后再试；文件没有被导入。",
     "wht.editRowTitle": "修改第 {row} 行",
     "wht.commitBatch": "建 {count} 条草稿",
     "wht.commitDone": "已建 {created} 条草稿",
@@ -960,7 +975,7 @@ const resources = {
     "wht.taxId": "Tax ID",
     "wht.incomeType": "Income Type",
     "wht.rate": "WHT Rate",
-    "wht.totalAmount": "Total Amount",
+    "wht.totalAmount": "Amount excl. tax",
     "wht.whtAmount": "WHT Amount",
     "wht.createdBy": "Created By",
     "wht.createdAt": "Created At",
@@ -991,6 +1006,12 @@ const resources = {
     "wht.payeeNameTh": "Thai Name",
     "wht.payeeNameEn": "English Name",
     "wht.address": "Thai Address",
+    "wht.branchOffice": "Company office",
+    "wht.headOffice": "สำนักงานใหญ่ (Head office)",
+    "wht.branch": "สาขา (Branch)",
+    "wht.branchNumber": "5-digit branch number",
+    "wht.branchNumberHint": "Enter 5 digits, for example 00001",
+    "wht.notApplicable": "Not applicable",
     "wht.active": "Status",
     "wht.enabled": "Active",
     "wht.disabled": "Inactive",
@@ -1081,7 +1102,7 @@ const resources = {
     "wht.batchImportStep1":
       "Download the template. Sheet 2 (说明 Notes) documents every column.",
     "wht.batchImportStep2":
-      "PayeeTaxID, IncomeType, PaymentDate and Amount are required; the tax ID must already exist in the payee master data.",
+      "PayeeTaxID, IncomeType, PaymentDate and Amount are required. Unmatched tax IDs can be maintained together on the review page.",
     "wht.batchImportStep3":
       "Leave TaxRate blank to take the statutory rate for that income type, or override it with a decimal such as 0.03 or a percentage such as 3%. An override away from the statutory rate must carry a reason in the TaxRateReason column, or the whole sheet is rejected.",
     "wht.batchImportStep4":
@@ -1131,6 +1152,16 @@ const resources = {
     "wht.newPayeeHint":
       "The Thai name, Thai address and declaration form are printed on the certificate and cannot be derived, so they must be typed in. They are written to the payee master data when the certificate is approved.",
     "wht.newPayeeAppliesTo": "{count} more row(s) in this batch use the same tax ID and will be filled in too.",
+    "wht.missingPayeeWorklist": "Unmatched payees",
+    "wht.missingPayeeWorklistHint":
+      "{taxIds} tax ID(s) affect {rows} row(s); maintain each tax ID only once.",
+    "wht.affectedRows": "Affects {count} row(s)",
+    "wht.maintainOnce": "Maintain once",
+    "wht.rematchPayees": "Rematch master data",
+    "wht.rematchDone": "Rematched {taxIds} tax ID(s) across {rows} row(s)",
+    "wht.rematchNone": "No unmatched tax ID currently exists in the master data",
+    "wht.batchPreviewUnavailable":
+      "The batch-review endpoint is not loaded. Restart the ZWT API service and try again; the file was not imported.",
     "wht.editRowTitle": "Edit row {row}",
     "wht.commitBatch": "Create {count} drafts",
     "wht.commitDone": "{created} drafts created",

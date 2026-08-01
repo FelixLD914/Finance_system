@@ -42,6 +42,8 @@ class PayeeSnapshot:
     name_en: str | None = None
     address_th: str | None = None
     wht_type: str | None = None
+    branch_type: str = "none"
+    branch_number: str | None = None
     is_active: bool = True
 
 

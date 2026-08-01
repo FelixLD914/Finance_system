@@ -15,6 +15,7 @@ import {
 
 import type { Locale, Translate } from "../../i18n";
 import { ThaiText } from "../../shared/ThaiText";
+import { branchLabel, displayPayeeName } from "./branching";
 import type {
   IncomeTypeOption,
   Payee,
@@ -137,14 +138,16 @@ export function IssuanceConsole({
         .filter((payee) => payee.isActive)
         .map((payee) => ({
           value: payee.id,
-          title: payee.nameTh,
+          title: displayPayeeName(payee.nameTh, payee.branchType, payee.branchNumber),
           search: [payee.nameTh, payee.nameEn, payee.taxId, ...payee.aliases]
             .filter(Boolean)
             .join(" ")
             .toLocaleLowerCase(),
           label: (
             <div className="payee-option">
-              <ThaiText>{payee.nameTh}</ThaiText>
+              <ThaiText>
+                {displayPayeeName(payee.nameTh, payee.branchType, payee.branchNumber)}
+              </ThaiText>
               <small>
                 <span className="numeric">{payee.taxId}</span>
                 <Tag>{payee.whtType}</Tag>
@@ -258,6 +261,8 @@ export function IssuanceConsole({
         rateOverrideNote: values.rateOverrideNote?.trim() || null,
       });
       message.success(t("wht.createdGoLedger"));
+      // 成功建单才清空；普通页面切换时组件保持挂载，未提交内容不会消失。
+      form.resetFields();
       return task;
     } catch (createError) {
       // validateFields 的 reject 不是 Error，没有 message 就是校验没过，
@@ -335,7 +340,13 @@ export function IssuanceConsole({
                 </div>
                 <dl className="issuance-profile-grid">
                   <ProfileField label={t("wht.payeeNameTh")} wide>
-                    <ThaiText>{selectedPayee.nameTh}</ThaiText>
+                    <ThaiText>
+                      {displayPayeeName(
+                        selectedPayee.nameTh,
+                        selectedPayee.branchType,
+                        selectedPayee.branchNumber,
+                      )}
+                    </ThaiText>
                   </ProfileField>
                   <ProfileField label={t("wht.payeeNameEn")}>
                     {selectedPayee.nameEn ?? "—"}
@@ -348,6 +359,14 @@ export function IssuanceConsole({
                   </ProfileField>
                   <ProfileField label={t("wht.declarationForm")}>
                     {selectedPayee.whtType}
+                  </ProfileField>
+                  <ProfileField label={t("wht.branchOffice")}>
+                    <ThaiText>
+                      {branchLabel(
+                        selectedPayee.branchType,
+                        selectedPayee.branchNumber,
+                      ) ?? t("wht.notApplicable")}
+                    </ThaiText>
                   </ProfileField>
                   <ProfileField label={t("wht.aliases")}>
                     {selectedPayee.aliases.length > 0

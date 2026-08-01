@@ -12,6 +12,7 @@ from app.core.errors import ServiceError
 from app.modules.wht import income_types
 from app.modules.wht.batch_import import resolve_rate as resolve_batch_rate
 from app.modules.wht.batch_review import PayeeSnapshot, review_row
+from app.modules.wht.branching import normalize_branch
 from app.modules.wht.models import IssueCounter, PayeeProfile, WhtTask, WhtTaskEvent
 from app.modules.wht.number_service import assign_number_on_approval
 from app.modules.wht.schemas import (
@@ -126,8 +127,18 @@ class WhtService:
             values["payee_address"] = values["payee_address"] or payee.address_th
             values["tax_id"] = values["tax_id"] or payee.tax_id
             values["wht_type"] = values["wht_type"] or payee.wht_type
+            values["branch_type"] = payee.branch_type
+            values["branch_number"] = payee.branch_number
         if not company_name:
             raise WhtStateError("companyName is required")
+        try:
+            values["branch_type"], values["branch_number"] = normalize_branch(
+                values["wht_type"],
+                values.get("branch_type"),
+                values.get("branch_number"),
+            )
+        except ValueError as exc:
+            raise WhtStateError(str(exc)) from exc
 
         note = self._rate_override_note(
             values["income_type"],
@@ -184,10 +195,18 @@ class WhtService:
                         "payee_address": payee.address_th,
                         "tax_id": payee.tax_id,
                         "wht_type": payee.wht_type,
+                        "branch_type": payee.branch_type,
+                        "branch_number": payee.branch_number,
                     }
                 )
         for name, value in updates.items():
             setattr(task, name, value)
+        try:
+            task.branch_type, task.branch_number = normalize_branch(
+                task.wht_type, task.branch_type, task.branch_number
+            )
+        except ValueError as exc:
+            raise WhtStateError(str(exc)) from exc
         if {"total_amount", "wht_rate"}.intersection(payload.model_fields_set) and (
             "wht_amount" not in payload.model_fields_set
         ):
@@ -332,6 +351,8 @@ class WhtService:
             name_en=task.company_name_en,
             address_th=task.payee_address,
             wht_type=task.wht_type,
+            branch_type=task.branch_type,
+            branch_number=task.branch_number,
             # 别名要靠人辨认历史写法，建单时没有依据可填，留空由收款方主数据页补。
             aliases=[],
             is_active=True,
@@ -437,6 +458,12 @@ class WhtService:
         payee = await self._load_payee(payee_id, for_update=True)
         for name, value in payload.model_dump(by_alias=False, exclude_unset=True).items():
             setattr(payee, name, value)
+        try:
+            payee.branch_type, payee.branch_number = normalize_branch(
+                payee.wht_type, payee.branch_type, payee.branch_number
+            )
+        except ValueError as exc:
+            raise WhtStateError(str(exc)) from exc
         payee.updated_by_name = self.actor_name
         await self.session.commit()
         await self.session.refresh(payee)
@@ -516,8 +543,19 @@ class WhtService:
                 .with_for_update()
             )
             if payee is None:
-                payee = PayeeProfile(
+                try:
+                    branch_type, branch_number = normalize_branch(
+                        row["wht_type"], row.get("branch_type"), row.get("branch_number")
+                    )
+                except ValueError as exc:
+                    raise WhtStateError(str(exc)) from exc
+                profile = {
                     **row,
+                    "branch_type": branch_type,
+                    "branch_number": branch_number,
+                }
+                payee = PayeeProfile(
+                    **profile,
                     source_file_name=source_file_name,
                     created_by_name=self.actor_name,
                     updated_by_name=self.actor_name,
@@ -527,6 +565,12 @@ class WhtService:
             else:
                 payee.name_th = row["name_th"]
                 payee.address_th = row["address_th"]
+                if payee.wht_type != row["wht_type"]:
+                    # 旧版 Excel 没有分支列；申报表类型真的发生变化时只能回到该类型
+                    # 的安全默认，不能留下 PND3 + head_office 这类自相矛盾组合。
+                    payee.branch_type, payee.branch_number = normalize_branch(
+                        row["wht_type"], None, None
+                    )
                 payee.wht_type = row["wht_type"]
                 payee.aliases = list(dict.fromkeys([*payee.aliases, *row["aliases"]]))
                 payee.is_active = True
@@ -664,6 +708,8 @@ class WhtService:
                 payee_address=payee.address_th,
                 tax_id=payee.tax_id,
                 wht_type=payee.wht_type,
+                branch_type=payee.branch_type,
+                branch_number=payee.branch_number,
                 income_type=row["income_type"],
                 payment_date=row["payment_date"],
                 wht_rate=entry["wht_rate"],
@@ -735,6 +781,8 @@ class WhtService:
                         name_en=item.payee.name_en,
                         address_th=item.payee.address_th,
                         wht_type=item.payee.wht_type,  # type: ignore[arg-type]
+                        branch_type=item.payee.branch_type,  # type: ignore[arg-type]
+                        branch_number=item.payee.branch_number,
                         is_active=item.payee.is_active,
                     ),
                     wht_rate=item.wht_rate,
@@ -848,6 +896,12 @@ class WhtService:
                 ),
                 tax_id=payee.tax_id if payee is not None else profile.tax_id,
                 wht_type=payee.wht_type if payee is not None else profile.wht_type,
+                branch_type=(
+                    payee.branch_type if payee is not None else profile.branch_type
+                ),
+                branch_number=(
+                    payee.branch_number if payee is not None else profile.branch_number
+                ),
                 income_type=row.income_type,
                 payment_date=row.payment_date,
                 wht_rate=wht_rate,
@@ -905,6 +959,8 @@ class WhtService:
             name_en=payee.name_en,
             address_th=payee.address_th,
             wht_type=payee.wht_type,
+            branch_type=payee.branch_type,
+            branch_number=payee.branch_number,
             is_active=payee.is_active,
         )
 
