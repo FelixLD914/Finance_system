@@ -191,6 +191,10 @@ export function BatchIssuanceWizard({
         : rows.filter((_, index) => states[index]?.status === reviewFilter),
     [reviewFilter, rows, states],
   );
+  const displayOrderByRowNumber = useMemo(
+    () => new Map(rows.map((row, index) => [row.rowNumber, index + 1])),
+    [rows],
+  );
 
   useEffect(() => {
     const lastPage = Math.max(1, Math.ceil(filteredRows.length / reviewPageSize));
@@ -415,10 +419,14 @@ export function BatchIssuanceWizard({
 
   const columns: ColumnsType<EditableRow> = [
     {
-      title: t("wht.rowNumber"),
-      dataIndex: "rowNumber",
+      title: t("wht.sequence"),
+      key: "sequence",
       width: 48,
-      render: (value: number) => <span className="numeric">{value}</span>,
+      // rowNumber 是 Excel 的物理行号（标题行使首条数据从 2 开始），不能拿来当任务序号。
+      // 显示序号按导入结果稳定编号，筛选后也不改变，源行号仍用于编辑、报错和详情定位。
+      render: (_, row) => (
+        <span className="numeric">{displayOrderByRowNumber.get(row.rowNumber)}</span>
+      ),
     },
     {
       title: t("wht.status"),
