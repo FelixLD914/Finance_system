@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeftOutlined,
+  ArrowRightOutlined,
   CheckCircleFilled,
+  EyeOutlined,
   FileExcelOutlined,
   SyncOutlined,
   UploadOutlined,
@@ -10,6 +12,7 @@ import {
 import {
   App as AntApp,
   Button,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -27,7 +30,7 @@ import type { Translate } from "../../i18n";
 import { ApiError } from "../../shared/http";
 import { ThaiText } from "../../shared/ThaiText";
 import { downloadBatchTemplate } from "./api";
-import { displayPayeeName } from "./branching";
+import { branchLabel, displayPayeeName } from "./branching";
 import {
   type EditableRow,
   type RowIssue,
@@ -59,6 +62,7 @@ interface BatchIssuanceWizardProps {
 }
 
 type Step = "upload" | "review" | "done";
+type ReviewFilter = "all" | BatchRowStatus;
 
 const statusTone: Record<BatchRowStatus, string> = {
   ready: "status-approved",
@@ -133,6 +137,10 @@ export function BatchIssuanceWizard({
   /** 正在补录的税号。同税号的所有行共用一份资料，所以按税号而不是按行开框。 */
   const [payeeTaxId, setPayeeTaxId] = useState<string | null>(null);
   const [editingRow, setEditingRow] = useState<number | null>(null);
+  const [viewingRow, setViewingRow] = useState<number | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewPageSize, setReviewPageSize] = useState(10);
   const [payeeForm] = Form.useForm();
   const [rowForm] = Form.useForm();
   const payeeWhtType = Form.useWatch("whtType", payeeForm);
@@ -173,6 +181,18 @@ export function BatchIssuanceWizard({
     });
     return [...groups].map(([taxId, rowCount]) => ({ taxId, rowCount }));
   }, [rows, states]);
+  const filteredRows = useMemo(
+    () =>
+      reviewFilter === "all"
+        ? rows
+        : rows.filter((_, index) => states[index]?.status === reviewFilter),
+    [reviewFilter, rows, states],
+  );
+
+  useEffect(() => {
+    const lastPage = Math.max(1, Math.ceil(filteredRows.length / reviewPageSize));
+    if (reviewPage > lastPage) setReviewPage(lastPage);
+  }, [filteredRows.length, reviewPage, reviewPageSize]);
 
   const stateOf = (rowNumber: number) => {
     const index = rows.findIndex((row) => row.rowNumber === rowNumber);
@@ -186,6 +206,8 @@ export function BatchIssuanceWizard({
       const preview = await onPreview(file);
       setRows(preview.rows.map(toEditableRow));
       setSourceFileName(preview.sourceFileName);
+      setReviewFilter("all");
+      setReviewPage(1);
       setStep("review");
     } catch (previewError) {
       // 结构性问题（缺列、日期格式不对）在解析阶段就整表退回：这类错误改 Excel 比
@@ -381,6 +403,9 @@ export function BatchIssuanceWizard({
     setRows([]);
     setResult(null);
     setSourceFileName("");
+    setReviewFilter("all");
+    setReviewPage(1);
+    setViewingRow(null);
   };
 
   const columns: ColumnsType<EditableRow> = [
@@ -495,25 +520,33 @@ export function BatchIssuanceWizard({
     {
       title: "",
       key: "actions",
-      width: 112,
+      width: 164,
       render: (_, row) => {
         const state = stateOf(row.rowNumber);
-        if (state?.status === "payee_missing") {
-          return (
-            <Button
-              icon={<UserAddOutlined />}
-              size="small"
-              type="primary"
-              onClick={() => openPayeeForm(row.payee.taxId)}
-            >
-              {t("wht.fillPayee")}
-            </Button>
-          );
-        }
         return (
-          <Button size="small" onClick={() => openRowForm(row.rowNumber)}>
-            {t("wht.editRow")}
-          </Button>
+          <div className="wht-review-actions">
+            <Button
+              aria-label={t("wht.viewDetails")}
+              icon={<EyeOutlined />}
+              size="small"
+              onClick={() => setViewingRow(row.rowNumber)}
+            >
+              {t("wht.viewDetails")}
+            </Button>
+            {state?.status === "payee_missing" ? (
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => openPayeeForm(row.payee.taxId)}
+              >
+                {t("wht.fillPayee")}
+              </Button>
+            ) : (
+              <Button size="small" onClick={() => openRowForm(row.rowNumber)}>
+                {t("wht.editRow")}
+              </Button>
+            )}
+          </div>
         );
       },
     },
@@ -523,6 +556,16 @@ export function BatchIssuanceWizard({
     ? rows.filter((row) => row.payee.taxId === payeeTaxId && !row.payee.payeeId).length
     : 0;
   const editingState = editingRow === null ? null : stateOf(editingRow);
+  const viewingRowData =
+    viewingRow === null ? null : rows.find((row) => row.rowNumber === viewingRow) ?? null;
+  const viewingState = viewingRow === null ? null : stateOf(viewingRow);
+  const viewingIndex =
+    viewingRow === null ? -1 : rows.findIndex((row) => row.rowNumber === viewingRow);
+
+  const moveRowDetail = (offset: -1 | 1) => {
+    const target = rows[viewingIndex + offset];
+    if (target) setViewingRow(target.rowNumber);
+  };
 
   return (
     // is-wizard 把这一屏切成有界的 flex 列，步骤条与页脚才固定得住（见 finance-ui.css）。
@@ -621,20 +664,50 @@ export function BatchIssuanceWizard({
             <main className="tax-wizard-panel is-wide">
               {/* 汇总用一条与台账同密度的信息条，不是横幅：这一屏最重的是下面那张表。 */}
               <div className="wht-review-summary">
-                <strong>{t("wht.taskCount", { count: counts.total })}</strong>
-                <span className="wht-review-count">
+                <button
+                  aria-pressed={reviewFilter === "all"}
+                  className={`wht-review-filter is-total${reviewFilter === "all" ? " is-active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setReviewFilter("all");
+                    setReviewPage(1);
+                  }}
+                >
+                  <strong>{t("wht.taskCount", { count: counts.total })}</strong>
+                </button>
+                <button
+                  aria-pressed={reviewFilter === "ready"}
+                  className={`wht-review-filter${reviewFilter === "ready" ? " is-active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setReviewFilter("ready");
+                    setReviewPage(1);
+                  }}
+                >
                   {t("wht.rowReady")} <b>{counts.ready}</b>
-                </span>
-                <span
-                  className={`wht-review-count${counts.missing > 0 ? " is-todo" : ""}`}
+                </button>
+                <button
+                  aria-pressed={reviewFilter === "payee_missing"}
+                  className={`wht-review-filter${counts.missing > 0 ? " is-todo" : ""}${reviewFilter === "payee_missing" ? " is-active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setReviewFilter("payee_missing");
+                    setReviewPage(1);
+                  }}
                 >
                   {t("wht.rowPayeeMissing")} <b>{counts.missing}</b>
-                </span>
-                <span
-                  className={`wht-review-count${counts.invalid > 0 ? " is-todo" : ""}`}
+                </button>
+                <button
+                  aria-pressed={reviewFilter === "needs_input"}
+                  className={`wht-review-filter${counts.invalid > 0 ? " is-todo" : ""}${reviewFilter === "needs_input" ? " is-active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setReviewFilter("needs_input");
+                    setReviewPage(1);
+                  }}
                 >
                   {t("wht.rowNeedsInput")} <b>{counts.invalid}</b>
-                </span>
+                </button>
                 <span className="wht-review-hint">
                   {blocked > 0
                     ? t("wht.reviewBlocked", { count: blocked })
@@ -679,17 +752,46 @@ export function BatchIssuanceWizard({
                 <Table<EditableRow>
                   className="wht-review-table"
                   columns={columns}
-                  dataSource={rows}
+                  dataSource={filteredRows}
                   locale={{ emptyText: <Empty description={t("wht.emptyTasks")} /> }}
-                  pagination={{ pageSize: 20, hideOnSinglePage: true }}
+                  pagination={{
+                    current: reviewPage,
+                    pageSize: reviewPageSize,
+                    pageSizeOptions: [10, 20, 50, 100],
+                    placement: ["topEnd"],
+                    showSizeChanger: true,
+                    showTotal: (total, range) =>
+                      t("wht.reviewPagination", {
+                        start: range[0],
+                        end: range[1],
+                        total,
+                      }),
+                    onChange: (page, pageSize) => {
+                      setReviewPage(pageSize === reviewPageSize ? page : 1);
+                      setReviewPageSize(pageSize);
+                    },
+                  }}
                   rowKey="rowNumber"
                   rowClassName={(row) => {
                     const state = stateOf(row.rowNumber);
-                    return state && state.status !== "ready" ? "is-blocked-row" : "";
+                    return `wht-review-row${state && state.status !== "ready" ? " is-blocked-row" : ""}`;
                   }}
-                  // 各列合计 968 + 展开列 48 = 1016，正好落在核对面板的可用宽度内；
+                  onRow={(row) => ({
+                    tabIndex: 0,
+                    onClick: (event) => {
+                      if ((event.target as HTMLElement).closest("button, a, input")) return;
+                      setViewingRow(row.rowNumber);
+                    },
+                    onKeyDown: (event) => {
+                      if (event.key === "Enter") setViewingRow(row.rowNumber);
+                    },
+                  })}
+                  // 各列合计 1020 + 展开列 48 = 1068，正好落在核对面板的可用宽度内；
                   // 窗口收到系统下限 1180 时由表格自己横向滚动。
-                  scroll={{ x: 1016 }}
+                  scroll={{
+                    x: 1068,
+                    y: "clamp(160px, calc(100vh - 660px), 460px)",
+                  }}
                   size="small"
                   tableLayout="fixed"
                   expandable={{
@@ -704,7 +806,7 @@ export function BatchIssuanceWizard({
                     ),
                     rowExpandable: (row) =>
                       (stateOf(row.rowNumber)?.issues.length ?? 0) > 0,
-                    defaultExpandAllRows: true,
+                    defaultExpandAllRows: false,
                   }}
                 />
               </div>
@@ -747,6 +849,159 @@ export function BatchIssuanceWizard({
           </div>
         )}
       </section>
+
+      <Drawer
+        className="wht-row-detail-drawer"
+        destroyOnHidden
+        extra={
+          viewingState ? (
+            <Tag className={`status-tag ${statusTone[viewingState.status]}`}>
+              {statusLabel(viewingState.status, t)}
+            </Tag>
+          ) : null
+        }
+        footer={
+          viewingRowData ? (
+            <div className="wht-row-detail-foot">
+              <div className="wht-row-detail-nav">
+                <Button
+                  aria-label={t("wht.detailPrevious")}
+                  disabled={viewingIndex <= 0}
+                  icon={<ArrowLeftOutlined />}
+                  onClick={() => moveRowDetail(-1)}
+                />
+                <span>
+                  {t("wht.detailPosition", {
+                    current: viewingIndex + 1,
+                    total: rows.length,
+                  })}
+                </span>
+                <Button
+                  aria-label={t("wht.detailNext")}
+                  disabled={viewingIndex >= rows.length - 1}
+                  icon={<ArrowRightOutlined />}
+                  onClick={() => moveRowDetail(1)}
+                />
+              </div>
+              <Button
+                icon={
+                  viewingState?.status === "payee_missing" ? (
+                    <UserAddOutlined />
+                  ) : undefined
+                }
+                type="primary"
+                onClick={() => {
+                  const row = viewingRowData;
+                  const isPayeeMissing = viewingState?.status === "payee_missing";
+                  setViewingRow(null);
+                  if (isPayeeMissing) openPayeeForm(row.payee.taxId);
+                  else openRowForm(row.rowNumber);
+                }}
+              >
+                {viewingState?.status === "payee_missing"
+                  ? t("wht.fillPayee")
+                  : t("wht.editRow")}
+              </Button>
+            </div>
+          ) : null
+        }
+        open={viewingRowData !== null}
+        title={t("wht.batchRowDetailTitle", { row: viewingRowData?.rowNumber ?? "" })}
+        size={560}
+        onClose={() => setViewingRow(null)}
+      >
+        {viewingRowData && viewingState && (
+          <div className="wht-row-detail">
+            <div className="wht-row-detail-source">
+              <FileExcelOutlined />
+              <span>{sourceFileName}</span>
+              <small>
+                {t("wht.importSourceRow")} {viewingRowData.rowNumber}
+              </small>
+            </div>
+
+            <section>
+              <h3>{t("wht.billingInfo")}</h3>
+              <dl>
+                <dt>{t("wht.period")}</dt>
+                <dd className="numeric">{viewingRowData.period}</dd>
+                <dt>{t("wht.issuanceType")}</dt>
+                <dd>
+                  {viewingRowData.issuanceType === "normal"
+                    ? t("wht.normal")
+                    : `${t("wht.supplement")} · ${viewingRowData.supplementRun}`}
+                </dd>
+                <dt>{t("wht.paymentDate")}</dt>
+                <dd className="numeric">{viewingRowData.paymentDate}</dd>
+                <dt>{t("wht.incomeType")}</dt>
+                <dd><ThaiText>{viewingRowData.incomeType}</ThaiText></dd>
+              </dl>
+            </section>
+
+            <section>
+              <h3>{t("wht.payeeInfo")}</h3>
+              <dl>
+                <dt>{t("wht.payeeNameTh")}</dt>
+                <dd>
+                  <ThaiText>
+                    {viewingRowData.payee.nameTh
+                      ? displayPayeeName(
+                          viewingRowData.payee.nameTh,
+                          viewingRowData.payee.branchType,
+                          viewingRowData.payee.branchNumber,
+                        )
+                      : "—"}
+                  </ThaiText>
+                </dd>
+                <dt>{t("wht.payeeNameEn")}</dt>
+                <dd>{viewingRowData.payee.nameEn || "—"}</dd>
+                <dt>{t("wht.taxId")}</dt>
+                <dd className="numeric">{viewingRowData.payee.taxId}</dd>
+                <dt>{t("wht.address")}</dt>
+                <dd><ThaiText>{viewingRowData.payee.addressTh || "—"}</ThaiText></dd>
+                <dt>{t("wht.declarationForm")}</dt>
+                <dd>{viewingRowData.payee.whtType || "—"}</dd>
+                <dt>{t("wht.branchOffice")}</dt>
+                <dd>
+                  {branchLabel(
+                    viewingRowData.payee.branchType,
+                    viewingRowData.payee.branchNumber,
+                  ) ?? t("wht.notApplicable")}
+                </dd>
+              </dl>
+            </section>
+
+            <section>
+              <h3>{t("wht.amountAndRate")}</h3>
+              <dl>
+                <dt>{t("wht.totalAmount")}</dt>
+                <dd className="numeric">{formatMoney(viewingRowData.totalAmount)}</dd>
+                <dt>{t("wht.statutoryRate")}</dt>
+                <dd className="numeric">{formatRate(viewingState.statutoryRate)}</dd>
+                <dt>{t("wht.rate")}</dt>
+                <dd className={viewingState.deviates ? "numeric is-overridden" : "numeric"}>
+                  {formatRate(viewingState.effectiveRate)}
+                </dd>
+                <dt>{t("wht.whtAmount")}</dt>
+                <dd className="numeric">{formatMoney(viewingState.whtAmount)}</dd>
+                <dt>{t("wht.rateOverrideNote")}</dt>
+                <dd>{viewingRowData.rateReason || "—"}</dd>
+              </dl>
+            </section>
+
+            {viewingState.issues.length > 0 && (
+              <section className="is-issues">
+                <h3>{t("wht.itemsToHandle")}</h3>
+                <ul className="import-error-list">
+                  {viewingState.issues.map((issue) => (
+                    <li key={issue.code}>{issueText(issue, t)}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        )}
+      </Drawer>
 
       <Modal
         destroyOnHidden
