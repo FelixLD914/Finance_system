@@ -224,7 +224,8 @@ describe("批量开具向导", () => {
       ...preview,
       rows: Array.from({ length: 87 }, (_, index) => ({
         ...readyRow,
-        rowNumber: index + 2,
+        // 模拟 Excel 中夹有空行：展示序号必须按任务连续编号，不能拿物理行号减一。
+        rowNumber: index * 2 + 2,
         payee: {
           ...readyRow.payee,
           taxId: String(105540057561 + index).padStart(13, "0"),
@@ -241,6 +242,15 @@ describe("批量开具向导", () => {
     expect(document.querySelector(".ant-pagination")).toBeTruthy();
     expect(document.querySelectorAll(".wht-review-table .ant-table-tbody > .ant-table-row"))
       .toHaveLength(10);
+    expect(screen.getByRole("columnheader", { name: "序号" })).toBeTruthy();
+    expect(
+      document.querySelector('.wht-review-table tr[data-row-key="2"] td:nth-child(2)')
+        ?.textContent,
+    ).toBe("1");
+    expect(
+      document.querySelector('.wht-review-table tr[data-row-key="20"] td:nth-child(2)')
+        ?.textContent,
+    ).toBe("10");
 
     fireEvent.click(screen.getByRole("button", { name: "可开具 87" }));
     expect(screen.getByRole("button", { name: "可开具 87" }).getAttribute("aria-pressed"))
