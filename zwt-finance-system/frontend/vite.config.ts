@@ -57,15 +57,17 @@ export default defineConfig(({ mode }) => {
     test: {
       // antd 组件在 jsdom 里渲染本就慢，整套并行跑时 CPU 抢占会让个别重的用例
       // 超过默认 5s 假红（单跑都过）。放宽上限，别让负载抖动变成红叉。
-      // 2026-08-01 实测最慢的一条是 TAX INV「conflict 组不参与导入」：整套并行跑
-      // 9.8s。CI runner 比开发机更慢更挤，30s 才有约三倍余量。
+      // 2026-08-01 实测整套并行最慢的一条约 3.6s。CI runner 比开发机更慢更挤，
+      // 30s 才有约八倍余量。
       //
-      // 上限曾由 WHT「税率偏离法定值时必须填理由」定（并行 13.9s / 单文件 10.7s），
-      // 现已降到并行 2.4s：真正的开销是 antd 6 的 cssinjs 往 jsdom 灌 ~384KB / 1375
-      // 条 CSS，此后每次 getComputedStyle 都要线性跑完整份级联，光两次
-      // getByRole(name) 就吃掉 5.1s。用例改用 StyleProvider mock="server" 后不再注入
-      // （见 IssuanceConsole.test.tsx 的 Harness）。同一招还没用到 DualImport 上，
-      // 本表的上限现在来自那边。
+      // 曾经的上限是 WHT「税率偏离法定值时必须填理由」（并行 13.9s / 单文件 10.7s），
+      // 之后是 TAX INV「conflict 组不参与导入」（并行 9.8s），现在两条都在 2～4s。
+      // 真正的开销是 antd 6 的 cssinjs 往 jsdom 灌 ~384KB / 1375 条 CSS：jsdom 没有
+      // 排版却实现了 CSS 级联而且是线性匹配，样式表一大，之后每次 getComputedStyle
+      // 都要跑完整份；`getByRole(name)` 要为每个后代算无障碍名，光两次就吃掉 5.1s。
+      // 五个 antd 用例文件的 Harness 现已全部套 `StyleProvider mock="server"`，只算
+      // 样式不注入 document（原理与实测见 wht/IssuanceConsole.test.tsx 的 Harness）。
+      // 新写 antd 用例请照抄那个 Harness，否则会把这笔开销重新引回来。
       //
       // 注意：describe/it 上的 { timeout: n } 会盖掉这里，连命令行 --testTimeout 都
       // 压不过它，所以超时口径只在本处维护，用例里不要再写。

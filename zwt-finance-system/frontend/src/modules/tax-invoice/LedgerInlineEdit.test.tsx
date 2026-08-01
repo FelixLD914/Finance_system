@@ -9,6 +9,7 @@
  *     整份明细清空）。这是税票编辑最容易出事的地方，钉死。
  */
 
+import { StyleProvider } from "@ant-design/cssinjs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -149,12 +150,17 @@ afterEach(() => {
   getTaxInvoice.mockClear();
 });
 
+// `mock="server"` 让 antd 的 cssinjs 只算样式、不把 <style> 灌进 jsdom：样式表一大，
+// 之后每次 getComputedStyle 都要线性跑完整份级联。类名由 token 哈希算出、与注不注入
+// 无关，断言一律不受影响。实测数据见 wht/IssuanceConsole.test.tsx 的 Harness。
 function Harness() {
   const { locale, t } = useI18n();
   return (
-    <AntApp>
-      <TaxInvoiceWorkspace locale={locale} t={t} />
-    </AntApp>
+    <StyleProvider mock="server">
+      <AntApp>
+        <TaxInvoiceWorkspace locale={locale} t={t} />
+      </AntApp>
+    </StyleProvider>
   );
 }
 

@@ -8,6 +8,7 @@
  *     状态藏起来了。
  */
 
+import { StyleProvider } from "@ant-design/cssinjs";
 import { cleanup, render } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -88,28 +89,34 @@ function makeInvoice(partial: Partial<TaxInvoice>): TaxInvoice {
   };
 }
 
+// `mock="server"` 让 antd 的 cssinjs 只算样式、不把 <style> 灌进 jsdom：样式表一大，
+// 之后每次 getComputedStyle 都要线性跑完整份级联。类名由 token 哈希算出、与注不注入
+// 无关，本文件断言的「标红」也是查类名而非计算样式，一律不受影响。
+// 实测数据见 wht/IssuanceConsole.test.tsx 的 Harness。
 function renderCard(invoice: TaxInvoice, expanded: boolean) {
   function Harness() {
     const { t, locale } = useI18n();
     return (
-      <AntApp>
-        <BatchReviewCard
-          busy={false}
-          expanded={expanded}
-          invoice={invoice}
-          locale={locale}
-          selectable
-          selected={false}
-          t={t}
-          onApprove={() => {}}
-          onEdit={() => {}}
-          onMatchRate={() => {}}
-          onOpenDrawer={() => {}}
-          onReject={() => {}}
-          onToggle={() => {}}
-          onToggleSelect={() => {}}
-        />
-      </AntApp>
+      <StyleProvider mock="server">
+        <AntApp>
+          <BatchReviewCard
+            busy={false}
+            expanded={expanded}
+            invoice={invoice}
+            locale={locale}
+            selectable
+            selected={false}
+            t={t}
+            onApprove={() => {}}
+            onEdit={() => {}}
+            onMatchRate={() => {}}
+            onOpenDrawer={() => {}}
+            onReject={() => {}}
+            onToggle={() => {}}
+            onToggleSelect={() => {}}
+          />
+        </AntApp>
+      </StyleProvider>
     );
   }
   return render(<Harness />);

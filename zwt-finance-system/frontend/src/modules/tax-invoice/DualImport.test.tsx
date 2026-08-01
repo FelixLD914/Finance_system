@@ -9,6 +9,7 @@
  * 这两条都在浏览器里才看得见，光靠后端测试盯不住。
  */
 
+import { StyleProvider } from "@ant-design/cssinjs";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -221,12 +222,19 @@ afterEach(() => {
   importDualBatch.mockClear();
 });
 
+// `mock="server"` 让 antd 的 cssinjs 只算样式、不把 <style> 灌进 jsdom。样式表一大，
+// 之后每次 getComputedStyle 都要线性跑完整份级联，而 `getByRole(name)` 要为每个后代
+// 算无障碍名——本文件的 `openRecognitionView` 每条用例都要走一次那种查询。类名由
+// token 哈希算出、与注不注入无关，断言一律不受影响。实测数据见
+// wht/IssuanceConsole.test.tsx 的 Harness 与 vite.config.ts 的 testTimeout 注释。
 function Harness() {
   const { locale, t } = useI18n();
   return (
-    <AntApp>
-      <TaxInvoiceWorkspace locale={locale} t={t} />
-    </AntApp>
+    <StyleProvider mock="server">
+      <AntApp>
+        <TaxInvoiceWorkspace locale={locale} t={t} />
+      </AntApp>
+    </StyleProvider>
   );
 }
 
