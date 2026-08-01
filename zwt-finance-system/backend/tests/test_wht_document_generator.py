@@ -82,6 +82,29 @@ def test_renders_old_template_placeholders(tmp_path) -> None:
     rendered.close()
 
 
+def test_shipped_wht_templates_use_correct_thai_dividend_word() -> None:
+    assets = Path(__file__).parents[1] / "app" / "assets" / "templates"
+    expected = "กรณีผู้ได้รับเงินปันผลได้รับเครดิตภาษี โดยจ่ายจาก"
+    old_typo = "กรณีผู้ด้รับ"
+
+    workbook = load_workbook(assets / "WHT-Template.xlsx", read_only=True)
+    try:
+        worksheet = workbook["3%"]
+        for address in ("C28", "U28", "AM28", "BE28"):
+            value = str(worksheet[address].value)
+            assert expected in value
+            assert old_typo not in value
+    finally:
+        workbook.close()
+
+    reader = PdfReader(assets / "WHT-Template.pdf")
+    assert len(reader.pages) == 4
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        assert expected in text
+        assert old_typo not in text
+
+
 def test_validates_png_signature() -> None:
     output = BytesIO()
     Image.new("RGBA", (20, 10), (255, 255, 255, 0)).save(output, format="PNG")
@@ -122,13 +145,25 @@ def test_signature_processing_removes_long_horizontal_rule(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize(
-    ("wht_type", "check_x_range"),
-    [("PND3", (180, 200)), ("PND53", (360, 376))],
+    ("wht_type", "checkbox_bounds", "unselected_bounds"),
+    [
+        (
+            "PND3",
+            (188.4, 202.56, 577.67, 590.87),
+            (365.04, 379.2, 577.67, 590.87),
+        ),
+        (
+            "PND53",
+            (365.04, 379.2, 577.67, 590.87),
+            (188.4, 202.56, 577.67, 590.87),
+        ),
+    ],
 )
 def test_generates_four_copy_pdf_without_office(
     tmp_path: Path,
     wht_type: str,
-    check_x_range: tuple[int, int],
+    checkbox_bounds: tuple[float, float, float, float],
+    unselected_bounds: tuple[float, float, float, float],
 ) -> None:
     assets = Path(__file__).parents[1] / "app" / "assets"
     task = WhtTask(
@@ -185,14 +220,28 @@ def test_generates_four_copy_pdf_without_office(
         assert len(totals) == 1
         assert totals[0]["bottom"] <= 619
 
-        check_lines = [
-            line
-            for line in page.lines
-            if check_x_range[0] <= min(line["x0"], line["x1"])
-            and max(line["x0"], line["x1"]) <= check_x_range[1]
-            and 573 <= min(line["y0"], line["y1"]) <= 590
-        ]
-        assert len(check_lines) == 2
+        for copy_page in rendered.pages:
+            box_left, box_right, box_bottom, box_top = checkbox_bounds
+            check_lines = [
+                line
+                for line in copy_page.lines
+                if box_left < min(line["x0"], line["x1"])
+                and max(line["x0"], line["x1"]) < box_right
+                and box_bottom < min(line["y0"], line["y1"])
+                and max(line["y0"], line["y1"]) < box_top
+            ]
+            assert len(check_lines) == 2
+
+            other_left, other_right, other_bottom, other_top = unselected_bounds
+            other_lines = [
+                line
+                for line in copy_page.lines
+                if other_left < min(line["x0"], line["x1"])
+                and max(line["x0"], line["x1"]) < other_right
+                and other_bottom < min(line["y0"], line["y1"])
+                and max(line["y0"], line["y1"]) < other_top
+            ]
+            assert other_lines == []
 
 
 def _image_count(path: Path) -> int:
@@ -259,3 +308,11 @@ def test_signature_is_rendered_for_single_and_batch_tasks(
     )
 
     assert _image_count(signed) > _image_count(unsigned)
+    with pdfplumber.open(signed) as rendered:
+        for page in rendered.pages:
+            signature = next(
+                image
+                for image in page.images
+                if 190 <= image["x0"] <= 210 and 285 <= image["x1"] <= 305
+            )
+            assert abs(((signature["x0"] + signature["x1"]) / 2) - 248.82) < 1

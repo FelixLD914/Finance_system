@@ -15,6 +15,11 @@ from app.modules.wht.models import WhtTask
 
 CHECKBOX_OFFSET = -1
 CHECKBOX_COLUMN_OFFSETS = (0, 18, 36, 54)
+PDF_CHECKBOX_CENTERS = {
+    "PND3": (195.5, 584.25),
+    "PND53": (372.0, 584.25),
+}
+PDF_SIGNATURE_BOX = (201.5, 83.0, 95.0, 42.0)
 TEMPLATE_FIELDS = {
     "No",
     "RefNo",
@@ -396,11 +401,13 @@ def export_pdf_from_template(
         # 模板中的序号框实际范围为 x=50.5..113.6 / y=597.1..612.2。
         draw_centered(values["No"], 82, 602)
 
-        # PND3 / PND53 下排复选框中心点来自模板矢量坐标。
-        check_x = 191 if task.wht_type == "PND3" else 368
+        # PND3 / PND53 下排复选框中心点来自模板矢量坐标。勾号四周
+        # 至少保留约 2pt，不再压住左边框或下边框。
+        check_x, check_y = PDF_CHECKBOX_CENTERS[task.wht_type]
         overlay.setLineWidth(1.2)
-        overlay.line(check_x - 4, 582, check_x - 1, 578)
-        overlay.line(check_x - 1, 578, check_x + 5, 587)
+        overlay.setLineCap(1)
+        overlay.line(check_x - 5, check_y - 1.25, check_x - 1.5, check_y - 4.75)
+        overlay.line(check_x - 1.5, check_y - 4.75, check_x + 5, check_y + 4.75)
 
         # 基线抬离模板虚线，防止文字被横线从中间穿过。
         draw_text(values["IncomeType"], 181, 252, font="ZwtSarabun", size=9)
@@ -423,12 +430,13 @@ def export_pdf_from_template(
 
         if prepared_signature.exists():
             image = ImageReader(str(prepared_signature))
+            signature_x, signature_y, signature_width, signature_height = PDF_SIGNATURE_BOX
             overlay.drawImage(
                 image,
-                245,
-                83,
-                width=95,
-                height=42,
+                signature_x,
+                signature_y,
+                width=signature_width,
+                height=signature_height,
                 preserveAspectRatio=True,
                 anchor="c",
                 mask="auto",
