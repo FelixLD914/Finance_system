@@ -26,7 +26,8 @@ import type { UploadProps } from "antd";
 import type { Translate } from "../../i18n";
 import { ThaiText } from "../../shared/ThaiText";
 import { getPayeeDeletePreview, listPayees } from "./api";
-import type { ImportResult, Payee, PayeeInput } from "./types";
+import { branchLabel, displayPayeeName } from "./branching";
+import type { BranchType, ImportResult, Payee, PayeeInput } from "./types";
 
 interface PayeeDirectoryProps {
   t: Translate;
@@ -46,6 +47,8 @@ interface PayeeFormValues {
   nameEn?: string;
   addressTh: string;
   whtType: "PND3" | "PND53";
+  branchType: BranchType;
+  branchNumber?: string;
   aliases?: string;
   isActive: boolean;
 }
@@ -69,6 +72,17 @@ export function PayeeDirectory({
   const [editing, setEditing] = useState<Payee | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm<PayeeFormValues>();
+  const formWhtType = Form.useWatch("whtType", form);
+  const formBranchType = Form.useWatch("branchType", form);
+
+  useEffect(() => {
+    if (!modalOpen) return;
+    if (formWhtType === "PND3") {
+      form.setFieldsValue({ branchType: "none", branchNumber: undefined });
+    } else if (formWhtType === "PND53" && form.getFieldValue("branchType") === "none") {
+      form.setFieldsValue({ branchType: "head_office", branchNumber: undefined });
+    }
+  }, [form, formWhtType, modalOpen]);
 
   const loadDeletedPayees = useCallback(async () => {
     setRecycleLoading(true);
@@ -108,6 +122,8 @@ export function PayeeDirectory({
             nameEn: payee.nameEn ?? undefined,
             addressTh: payee.addressTh,
             whtType: payee.whtType,
+            branchType: payee.branchType,
+            branchNumber: payee.branchNumber ?? undefined,
             aliases: payee.aliases.join(" / "),
             isActive: payee.isActive,
           }
@@ -117,6 +133,8 @@ export function PayeeDirectory({
             nameEn: "",
             addressTh: "",
             whtType: "PND53",
+            branchType: "head_office",
+            branchNumber: undefined,
             aliases: "",
             isActive: true,
           },
@@ -130,6 +148,11 @@ export function PayeeDirectory({
       {
         ...values,
         nameEn: values.nameEn || null,
+        branchType: values.whtType === "PND53" ? values.branchType : "none",
+        branchNumber:
+          values.whtType === "PND53" && values.branchType === "branch"
+            ? values.branchNumber
+            : null,
         aliases: (values.aliases ?? "")
           .split(/[\/\n]/)
           .map((value) => value.trim())
@@ -245,7 +268,11 @@ export function PayeeDirectory({
       title: t("wht.payeeNameTh"),
       dataIndex: "nameTh",
       width: 250,
-      render: (value: string) => <ThaiText>{value}</ThaiText>,
+      render: (_value: string, payee) => (
+        <ThaiText>
+          {displayPayeeName(payee.nameTh, payee.branchType, payee.branchNumber)}
+        </ThaiText>
+      ),
     },
     {
       title: t("wht.address"),
@@ -258,6 +285,16 @@ export function PayeeDirectory({
       dataIndex: "whtType",
       width: 90,
       render: (value: string) => <Tag className="directory-type-tag">{value}</Tag>,
+    },
+    {
+      title: t("wht.branchOffice"),
+      key: "branch",
+      width: 138,
+      render: (_, payee) => (
+        <ThaiText>
+          {branchLabel(payee.branchType, payee.branchNumber) ?? t("wht.notApplicable")}
+        </ThaiText>
+      ),
     },
     {
       title: view === "deleted" ? t("common.deletedAt") : t("wht.active"),
@@ -412,6 +449,34 @@ export function PayeeDirectory({
           <Form.Item name="nameEn" label={t("wht.payeeNameEn")}>
             <Input />
           </Form.Item>
+          {formWhtType === "PND53" && (
+            <div className="payee-form-grid">
+              <Form.Item
+                name="branchType"
+                label={t("wht.branchOffice")}
+                rules={[{ required: true }]}
+              >
+                <Select
+                  options={[
+                    { value: "head_office", label: t("wht.headOffice") },
+                    { value: "branch", label: t("wht.branch") },
+                  ]}
+                />
+              </Form.Item>
+              {formBranchType === "branch" && (
+                <Form.Item
+                  name="branchNumber"
+                  label={t("wht.branchNumber")}
+                  rules={[
+                    { required: true },
+                    { pattern: /^\d{5}$/, message: t("wht.branchNumberHint") },
+                  ]}
+                >
+                  <Input inputMode="numeric" maxLength={5} placeholder="00001" />
+                </Form.Item>
+              )}
+            </div>
+          )}
           <Form.Item name="addressTh" label={t("wht.address")} rules={[{ required: true }]}>
             <Input.TextArea className="thai-input" autoSize={{ minRows: 2, maxRows: 4 }} />
           </Form.Item>

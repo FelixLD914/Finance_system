@@ -14,6 +14,7 @@
 import type {
   BatchPreviewRow,
   BatchRowStatus,
+  BranchType,
   IncomeTypeOption,
   WhtType,
 } from "./types";
@@ -26,6 +27,8 @@ export interface EditablePayee {
   nameEn: string | null;
   addressTh: string | null;
   whtType: WhtType | null;
+  branchType: BranchType;
+  branchNumber: string | null;
   isActive: boolean;
 }
 
@@ -204,6 +207,8 @@ export function toEditableRow(row: BatchPreviewRow): EditableRow {
       nameEn: row.payee.nameEn,
       addressTh: row.payee.addressTh,
       whtType: row.payee.whtType,
+      branchType: row.payee.branchType,
+      branchNumber: row.payee.branchNumber,
       isActive: row.payee.isActive,
     },
   };

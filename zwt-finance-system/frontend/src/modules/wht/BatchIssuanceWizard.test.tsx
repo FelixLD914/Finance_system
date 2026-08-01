@@ -68,6 +68,8 @@ const preview: BatchPreviewResult = {
         nameEn: "Test Co., Ltd.",
         addressTh: "99/1 ถนนสุขุมวิท กรุงเทพมหานคร",
         whtType: "PND53",
+        branchType: "head_office",
+        branchNumber: null,
         isActive: true,
       },
       whtRate: "0.03",
@@ -92,6 +94,8 @@ const preview: BatchPreviewResult = {
         nameEn: null,
         addressTh: null,
         whtType: null,
+        branchType: "none",
+        branchNumber: null,
         isActive: true,
       },
       whtRate: null,
@@ -124,6 +128,7 @@ function Harness({
       <AntApp>
         <BatchIssuanceWizard
           incomeTypes={demoIncomeTypes}
+          payees={[]}
           pending={false}
           t={t}
           viewSwitch={null}

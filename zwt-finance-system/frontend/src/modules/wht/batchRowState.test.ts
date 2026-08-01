@@ -30,6 +30,8 @@ function row(overrides: Partial<EditableRow> = {}): EditableRow {
       nameEn: "Test Co., Ltd.",
       addressTh: "99/1 ถนนสุขุมวิท กรุงเทพมหานคร",
       whtType: "PND53",
+      branchType: "head_office",
+      branchNumber: null,
       isActive: true,
     },
     ...overrides,
@@ -44,6 +46,8 @@ function unknownPayee(overrides: Partial<EditableRow["payee"]> = {}) {
     nameEn: null,
     addressTh: null,
     whtType: null,
+    branchType: "none" as const,
+    branchNumber: null,
     isActive: true,
     ...overrides,
   };
@@ -187,6 +191,8 @@ describe("补录的收款方资料", () => {
       nameEn: null,
       addressTh: "กรุงเทพมหานคร",
       whtType: "PND3",
+      branchType: "none",
+      branchNumber: null,
     });
 
     expect(updated[0].payee.whtType).toBe("PND3");

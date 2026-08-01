@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeftOutlined,
   CheckCircleFilled,
   FileExcelOutlined,
+  SyncOutlined,
   UploadOutlined,
   UserAddOutlined,
 } from "@ant-design/icons";
@@ -26,6 +27,7 @@ import type { Translate } from "../../i18n";
 import { ApiError } from "../../shared/http";
 import { ThaiText } from "../../shared/ThaiText";
 import { downloadBatchTemplate } from "./api";
+import { displayPayeeName } from "./branching";
 import {
   type EditableRow,
   type RowIssue,
@@ -38,13 +40,16 @@ import type {
   BatchCreateResult,
   BatchPreviewResult,
   BatchRowStatus,
+  BranchType,
   IncomeTypeOption,
+  Payee,
   WhtType,
 } from "./types";
 
 interface BatchIssuanceWizardProps {
   t: Translate;
   incomeTypes: IncomeTypeOption[];
+  payees: Payee[];
   pending: boolean;
   /** 三个平行视图的页签由 workspace 统一渲染，这里只负责摆位置。 */
   viewSwitch: React.ReactNode;
@@ -111,6 +116,7 @@ function formatRate(rate: number | null): string {
 export function BatchIssuanceWizard({
   t,
   incomeTypes,
+  payees,
   pending,
   viewSwitch,
   onPreview,
@@ -129,6 +135,20 @@ export function BatchIssuanceWizard({
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [payeeForm] = Form.useForm();
   const [rowForm] = Form.useForm();
+  const payeeWhtType = Form.useWatch("whtType", payeeForm);
+  const payeeBranchType = Form.useWatch("branchType", payeeForm);
+
+  useEffect(() => {
+    if (payeeTaxId === null) return;
+    if (payeeWhtType === "PND3") {
+      payeeForm.setFieldsValue({ branchType: "none", branchNumber: undefined });
+    } else if (
+      payeeWhtType === "PND53" &&
+      payeeForm.getFieldValue("branchType") === "none"
+    ) {
+      payeeForm.setFieldsValue({ branchType: "head_office", branchNumber: undefined });
+    }
+  }, [payeeBranchType, payeeForm, payeeTaxId, payeeWhtType]);
 
   const states = useMemo(
     () => rows.map((row) => deriveRowState(row, incomeTypes)),
@@ -144,6 +164,15 @@ export function BatchIssuanceWizard({
     [states],
   );
   const blocked = counts.total - counts.ready;
+  const missingGroups = useMemo(() => {
+    const groups = new Map<string, number>();
+    rows.forEach((row, index) => {
+      if (states[index]?.status === "payee_missing") {
+        groups.set(row.payee.taxId, (groups.get(row.payee.taxId) ?? 0) + 1);
+      }
+    });
+    return [...groups].map(([taxId, rowCount]) => ({ taxId, rowCount }));
+  }, [rows, states]);
 
   const stateOf = (rowNumber: number) => {
     const index = rows.findIndex((row) => row.rowNumber === rowNumber);
@@ -161,6 +190,10 @@ export function BatchIssuanceWizard({
     } catch (previewError) {
       // 结构性问题（缺列、日期格式不对）在解析阶段就整表退回：这类错误改 Excel 比
       // 在界面上一行行改快，也没必要为一张读不出来的表渲染核对页。
+      if (previewError instanceof ApiError && previewError.status === 405) {
+        message.error(t("wht.batchPreviewUnavailable"));
+        return;
+      }
       if (previewError instanceof ApiError && previewError.details.length > 0) {
         modal.error({
           title: t("wht.batchImportRejected"),
@@ -188,6 +221,8 @@ export function BatchIssuanceWizard({
       nameEn: row?.payee.nameEn ?? "",
       addressTh: row?.payee.addressTh ?? "",
       whtType: row?.payee.whtType ?? undefined,
+      branchType: row?.payee.branchType ?? "none",
+      branchNumber: row?.payee.branchNumber ?? undefined,
     });
     setPayeeTaxId(taxId);
   };
@@ -202,11 +237,54 @@ export function BatchIssuanceWizard({
           nameEn: values.nameEn?.trim() || null,
           addressTh: values.addressTh.trim(),
           whtType: values.whtType as WhtType,
+          branchType:
+            values.whtType === "PND53"
+              ? (values.branchType as BranchType)
+              : "none",
+          branchNumber:
+            values.whtType === "PND53" && values.branchType === "branch"
+              ? values.branchNumber
+              : null,
         }),
       );
       setPayeeTaxId(null);
     } catch {
       // validateFields 的 reject 不是 Error，表单自己已经把错误标在字段上了。
+    }
+  };
+
+  const rematchPayees = () => {
+    let matchedRows = 0;
+    const matchedTaxIds = new Set<string>();
+    setRows((current) =>
+      current.map((row) => {
+        if (row.payee.payeeId) return row;
+        const payee = payees.find((candidate) => candidate.taxId === row.payee.taxId);
+        if (!payee) return row;
+        matchedRows += 1;
+        matchedTaxIds.add(payee.taxId);
+        return {
+          ...row,
+          payee: {
+            payeeId: payee.id,
+            taxId: payee.taxId,
+            nameTh: payee.nameTh,
+            nameEn: payee.nameEn,
+            addressTh: payee.addressTh,
+            whtType: payee.whtType,
+            branchType: payee.branchType,
+            branchNumber: payee.branchNumber,
+            isActive: payee.isActive,
+          },
+        };
+      }),
+    );
+    if (matchedRows > 0) {
+      message.success(
+        t("wht.rematchDone", { taxIds: matchedTaxIds.size, rows: matchedRows }),
+      );
+    } else {
+      message.info(t("wht.rematchNone"));
     }
   };
 
@@ -267,6 +345,8 @@ export function BatchIssuanceWizard({
             nameEn: row.payee.nameEn,
             addressTh: row.payee.addressTh,
             whtType: row.payee.whtType,
+            branchType: row.payee.branchType,
+            branchNumber: row.payee.branchNumber,
           },
         })),
       });
@@ -332,7 +412,13 @@ export function BatchIssuanceWizard({
         if (row.payee.payeeId) {
           return (
             <div className="wht-review-payee">
-              <ThaiText>{row.payee.nameTh}</ThaiText>
+              <ThaiText>
+                {displayPayeeName(
+                  row.payee.nameTh ?? "",
+                  row.payee.branchType,
+                  row.payee.branchNumber,
+                )}
+              </ThaiText>
               <small className="numeric">{row.payee.taxId}</small>
             </div>
           );
@@ -341,7 +427,13 @@ export function BatchIssuanceWizard({
           <div className="wht-review-payee">
             {row.payee.nameTh ? (
               <>
-                <ThaiText>{row.payee.nameTh}</ThaiText>
+                <ThaiText>
+                  {displayPayeeName(
+                    row.payee.nameTh,
+                    row.payee.branchType,
+                    row.payee.branchNumber,
+                  )}
+                </ThaiText>
                 <small>
                   <span className="numeric">{row.payee.taxId}</span>
                   <Tag color="gold">{t("wht.pendingPayeeTag")}</Tag>
@@ -550,6 +642,39 @@ export function BatchIssuanceWizard({
                 </span>
               </div>
               <p className="wht-wizard-note">{t("wht.reviewIntro")}</p>
+              {missingGroups.length > 0 && (
+                <section className="wht-payee-maintenance">
+                  <div className="wht-payee-maintenance-head">
+                    <div>
+                      <strong>{t("wht.missingPayeeWorklist")}</strong>
+                      <span>
+                        {t("wht.missingPayeeWorklistHint", {
+                          taxIds: missingGroups.length,
+                          rows: missingGroups.reduce((sum, group) => sum + group.rowCount, 0),
+                        })}
+                      </span>
+                    </div>
+                    <Button
+                      icon={<SyncOutlined />}
+                      size="small"
+                      onClick={rematchPayees}
+                    >
+                      {t("wht.rematchPayees")}
+                    </Button>
+                  </div>
+                  <div className="wht-payee-maintenance-list">
+                    {missingGroups.map((group) => (
+                      <div key={group.taxId}>
+                        <span className="numeric">{group.taxId}</span>
+                        <small>{t("wht.affectedRows", { count: group.rowCount })}</small>
+                        <Button size="small" onClick={() => openPayeeForm(group.taxId)}>
+                          {t("wht.maintainOnce")}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
               <div className="tax-reconcile-scroll">
                 <Table<EditableRow>
                   className="wht-review-table"
@@ -669,6 +794,34 @@ export function BatchIssuanceWizard({
               ]}
             />
           </Form.Item>
+          {payeeWhtType === "PND53" && (
+            <div className="payee-form-grid">
+              <Form.Item
+                name="branchType"
+                label={t("wht.branchOffice")}
+                rules={[{ required: true }]}
+              >
+                <Radio.Group
+                  options={[
+                    { value: "head_office", label: t("wht.headOffice") },
+                    { value: "branch", label: t("wht.branch") },
+                  ]}
+                />
+              </Form.Item>
+              {payeeBranchType === "branch" && (
+                <Form.Item
+                  name="branchNumber"
+                  label={t("wht.branchNumber")}
+                  rules={[
+                    { required: true },
+                    { pattern: /^\d{5}$/, message: t("wht.branchNumberHint") },
+                  ]}
+                >
+                  <Input inputMode="numeric" maxLength={5} placeholder="00001" />
+                </Form.Item>
+              )}
+            </div>
+          )}
         </Form>
       </Modal>
 

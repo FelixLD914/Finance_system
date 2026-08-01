@@ -17,6 +17,8 @@ const payee: Payee = {
   nameEn: "Ms. Chawee Inte",
   addressTh: "99/1 ถนนสุขุมวิท แขวงคลองเตย กรุงเทพมหานคร 10110",
   whtType: "PND3",
+  branchType: "none",
+  branchNumber: null,
   aliases: ["Chawee", "ฉวี"],
   isActive: true,
   sourceFileName: null,

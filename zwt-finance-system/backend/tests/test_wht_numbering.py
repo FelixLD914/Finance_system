@@ -10,6 +10,13 @@ def test_normal_number_and_book() -> None:
     assert number.book_no == "202606"
 
 
+def test_normal_number_keeps_three_digit_sequence_after_99() -> None:
+    number = build_normal_number("2026-07", 100)
+
+    assert number.task_no == "ZWT202607100"
+    assert number.book_no == "202607"
+
+
 def test_first_supplement_number_and_book() -> None:
     number = build_supplement_number("2026-06", supplement_run=1, sequence=1)
 

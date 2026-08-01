@@ -3,17 +3,12 @@ import {
   CheckCircleFilled,
   CloseOutlined,
   DownloadOutlined,
-  DownOutlined,
   EditOutlined,
   FileDoneOutlined,
-  FileExcelOutlined,
   FilterOutlined,
-  FormOutlined,
   HistoryOutlined,
   PlusOutlined,
   ReloadOutlined,
-  TableOutlined,
-  ThunderboltOutlined,
   UndoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
@@ -23,7 +18,6 @@ import {
   Button,
   Checkbox,
   Descriptions,
-  Dropdown,
   Empty,
   Form,
   Input,
@@ -42,7 +36,6 @@ import { FinanceLifecycleTabs, type FinanceLifecyclePhase } from "../../ui";
 import { ApiError } from "../../shared/http";
 import { ThaiText } from "../../shared/ThaiText";
 import {
-  downloadBatchTemplate,
   downloadWhtDocument,
   generateWhtDocuments,
   listSignatures,
@@ -80,9 +73,6 @@ interface Filters {
  * 页签仍是三个 —— 走哪条路径是进入开票时的一次选择，不是一个长期停留的位置。
  */
 type WorkspaceView = "tasks" | "compose" | "batch" | "payees";
-
-/** 开票路径。点「开票」先选这个，再进对应的操作页面。 */
-type IssuanceMode = "single" | "batch";
 
 /** 业务阶段 → 内部状态。财务同事按"手上要做什么"找单，不是按状态机找。 */
 const whtPhaseStatuses: Record<
@@ -125,7 +115,7 @@ function StatusTag({ status, t }: { status: WhtStatus; t: Translate }) {
   );
 }
 
-/** 三个平行视图共用一组页签，免得每个视图各写一份、状态还容易写漏。 */
+/** 四个平行视图共用一组页签，单张和批量都有明确、稳定的页面入口。 */
 function ViewSwitch({
   active,
   t,
@@ -137,23 +127,16 @@ function ViewSwitch({
 }) {
   const tabs: Array<{ key: WorkspaceView; label: string }> = [
     { key: "tasks", label: t("wht.taskLedger") },
-    { key: "compose", label: t("wht.issuanceConsole") },
+    { key: "compose", label: t("wht.modeSingle") },
+    { key: "batch", label: t("wht.batchWizardTitle") },
     { key: "payees", label: t("wht.payeeMaster") },
   ];
   return (
     <div className="workspace-view-switch" role="tablist">
       {tabs.map((tab) => (
         <button
-          aria-selected={
-            // batch 也归在「开票操作」名下：它是那个页签下的另一条路径，
-            // 走向导时页签落在别处会让人以为自己离开了开票区。
-            tab.key === active || (tab.key === "compose" && active === "batch")
-          }
-          className={
-            tab.key === active || (tab.key === "compose" && active === "batch")
-              ? "is-active"
-              : ""
-          }
+          aria-selected={tab.key === active}
+          className={tab.key === active ? "is-active" : ""}
           key={tab.key}
           role="tab"
           type="button"
@@ -163,70 +146,6 @@ function ViewSwitch({
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * 「点开票 → 选路径」这一步。
- *
- * 做成弹窗而不是一个独立视图：它是一次分叉，不是一个要停留的地方。选完立刻进对应
- * 的操作页面，返回上一层就是关掉它。
- */
-function IssuanceModeChooser({
-  open,
-  t,
-  onCancel,
-  onPick,
-}: {
-  open: boolean;
-  t: Translate;
-  onCancel: () => void;
-  onPick: (mode: IssuanceMode) => void;
-}) {
-  const modes: Array<{
-    key: IssuanceMode;
-    icon: React.ReactNode;
-    title: string;
-    description: string;
-  }> = [
-    {
-      key: "single",
-      icon: <FormOutlined />,
-      title: t("wht.modeSingle"),
-      description: t("wht.modeSingleDesc"),
-    },
-    {
-      key: "batch",
-      icon: <TableOutlined />,
-      title: t("wht.modeBatch"),
-      description: t("wht.modeBatchDesc"),
-    },
-  ];
-  return (
-    <Modal
-      destroyOnHidden
-      footer={null}
-      open={open}
-      title={t("wht.chooseMode")}
-      width={680}
-      onCancel={onCancel}
-    >
-      <p className="issuance-profile-hint">{t("wht.chooseModeHint")}</p>
-      <div className="wht-mode-grid">
-        {modes.map((mode) => (
-          <button
-            className="wht-mode-card"
-            key={mode.key}
-            type="button"
-            onClick={() => onPick(mode.key)}
-          >
-            <span className="wht-mode-icon">{mode.icon}</span>
-            <strong>{mode.title}</strong>
-            <small>{mode.description}</small>
-          </button>
-        ))}
-      </div>
-    </Modal>
   );
 }
 
@@ -555,7 +474,6 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   // 默认停在「待处理」：进页面最常见的诉求是"我还有什么没做完"。
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
-  const [modeOpen, setModeOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [reviseOpen, setReviseOpen] = useState(false);
   const [generateForm] = Form.useForm();
@@ -712,21 +630,8 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     return task;
   };
 
-  /**
-   * 「开票操作」页签本身就是开票入口，所以点它也要先选路径，与右上角的主按钮
-   * 走同一段。已经在某条路径里时不再问一次 —— 那等于把人从工作中拽出来。
-   */
   const changeView = (next: WorkspaceView) => {
-    if (next === "compose" && view !== "compose" && view !== "batch") {
-      setModeOpen(true);
-      return;
-    }
     setView(next);
-  };
-
-  const pickMode = (mode: IssuanceMode) => {
-    setModeOpen(false);
-    setView(mode === "single" ? "compose" : "batch");
   };
 
   const openEditor = () => {
@@ -883,19 +788,6 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     }
   };
 
-  /**
-   * 模板下载必须把失败说出来。原先是 `onClick={() => void downloadBatchTemplate()}`，
-   * `void` 把 rejection 丢掉了 —— 端点 403 或网络断掉时点按钮完全没反应，
-   * 用户无从判断是没权限还是自己没点中。旁边的 downloadDocument 一直是 try/catch。
-   */
-  const downloadTemplate = async () => {
-    try {
-      await downloadBatchTemplate();
-    } catch (downloadError) {
-      if (downloadError instanceof Error) message.error(downloadError.message);
-    }
-  };
-
   const closeImport = () => {
     setImportOpen(false);
     setImportFile(null);
@@ -946,71 +838,18 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           <ViewSwitch active="tasks" t={t} onChange={changeView} />
         </div>
         <div className="page-actions">
-          <Dropdown
-            disabled={mutationPending}
-            menu={{
-              items: [
-                {
-                  key: "batch",
-                  icon: <ThunderboltOutlined />,
-                  label: (
-                    <div className="import-menu-item">
-                      <strong>
-                        {t("wht.importBatch")}
-                        <Tag color="gold">{t("wht.importBatchTag")}</Tag>
-                      </strong>
-                      <small>{t("wht.modeBatchDesc")}</small>
-                    </div>
-                  ),
-                },
-                {
-                  key: "history",
-                  icon: <HistoryOutlined />,
-                  label: (
-                    <div className="import-menu-item">
-                      <strong>
-                        {t("wht.importHistory")}
-                        <Tag>{t("wht.importHistoryTag")}</Tag>
-                      </strong>
-                      <small>{t("wht.importHistoryDesc")}</small>
-                    </div>
-                  ),
-                },
-                // 模板不该只藏在批量开具向导里：模板加了列之后，手上拿旧模板的人
-                // 需要能直接拿到新的，不必先假装要导入一次。
-                { key: "template-divider", type: "divider" },
-                {
-                  key: "template",
-                  icon: <FileExcelOutlined />,
-                  label: (
-                    <div className="import-menu-item">
-                      <strong>{t("wht.batchTemplate")}</strong>
-                      <small>{t("wht.batchTemplateDesc")}</small>
-                    </div>
-                  ),
-                },
-              ],
-              onClick: ({ key }) => {
-                if (key === "template") {
-                  void downloadTemplate();
-                  return;
-                }
-                // 批量开具走分步向导，不再是"上传即落库"的那个弹窗。
-                if (key === "batch") {
-                  setView("batch");
-                  return;
-                }
-                setImportFile(null);
-                setImportOpen(true);
-              },
+          <Button
+            icon={<HistoryOutlined />}
+            loading={mutationPending}
+            onClick={() => {
+              setImportFile(null);
+              setImportOpen(true);
             }}
           >
-            <Button icon={<UploadOutlined />} loading={mutationPending}>
-              {t("wht.importMenu")} <DownOutlined />
-            </Button>
-          </Dropdown>
-          <Button icon={<PlusOutlined />} type="primary" onClick={() => setModeOpen(true)}>
-            {t("wht.newTask")}
+            {t("wht.importHistory")}
+          </Button>
+          <Button icon={<PlusOutlined />} type="primary" onClick={() => setView("compose")}>
+            {t("wht.modeSingle")}
           </Button>
         </div>
       </div>
@@ -1240,6 +1079,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const batchView = (
     <BatchIssuanceWizard
       incomeTypes={incomeTypes}
+      payees={payees}
       pending={mutationPending}
       t={t}
       viewSwitch={<ViewSwitch active="batch" t={t} onChange={changeView} />}
@@ -1255,13 +1095,20 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
 
   return (
     <div className={`workspace ${showInspector ? "with-inspector" : ""}`}>
-      {view === "tasks"
-        ? taskView
-        : view === "compose"
-          ? composeView
-          : view === "batch"
-            ? batchView
-            : payeeView}
+      {/* 四个工作区始终保持挂载，只切换可见性：跨页查看台账或主数据后，
+          单张表单与批量核对结果都不会被卸载。 */}
+      <div className="workspace-view-host" hidden={view !== "tasks"}>
+        {taskView}
+      </div>
+      <div className="workspace-view-host" hidden={view !== "compose"}>
+        {composeView}
+      </div>
+      <div className="workspace-view-host" hidden={view !== "batch"}>
+        {batchView}
+      </div>
+      <div className="workspace-view-host" hidden={view !== "payees"}>
+        {payeeView}
+      </div>
 
       {showInspector && selectedTask && (
         <DetailPanel
@@ -1277,13 +1124,6 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           onRevise={() => setReviseOpen(true)}
         />
       )}
-
-      <IssuanceModeChooser
-        open={modeOpen}
-        t={t}
-        onCancel={() => setModeOpen(false)}
-        onPick={pickMode}
-      />
 
       <Modal
         destroyOnHidden

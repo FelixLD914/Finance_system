@@ -10,6 +10,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+from app.modules.wht.branching import display_payee_name
 from app.modules.wht.models import WhtTask
 
 CHECKBOX_OFFSET = -1
@@ -140,7 +141,11 @@ def task_template_values(task: WhtTask) -> dict[str, Any]:
         "RefNo": task.task_no,
         "BookNo": task.book_no,
         "PayeeNameEN": task.company_name_en or "",
-        "PayeeNameTH": task.company_name,
+        "PayeeNameTH": display_payee_name(
+            task.company_name,
+            getattr(task, "branch_type", None),
+            getattr(task, "branch_number", None),
+        ),
         "PayeeAddress": task.payee_address or "",
         "PayeeTaxID": task.tax_id or "",
         "WHT Type3": "√" if task.wht_type == "PND3" else "",
@@ -238,9 +243,35 @@ def build_blue_signature(source_path: Path, target_path: Path) -> None:
 
         with Image.open(source_path) as image:
             rgba = image.convert("RGBA")
+            width, height = rgba.size
+            flattened_data = getattr(rgba, "get_flattened_data", None)
+            pixels = list(flattened_data() if flattened_data is not None else rgba.getdata())
+
+            def is_ink(pixel: tuple[int, int, int, int]) -> bool:
+                red, green, blue, alpha = pixel
+                return alpha > 0 and not (red >= 245 and green >= 245 and blue >= 245)
+
+            ink_mask = [is_ink(pixel) for pixel in pixels]
+            # 扫描并剔除扫描件/截图里常见的签名下划线。规则只处理横跨至少
+            # 45% 图片、且像素高度很薄的近水平连续线，不会把普通签名字迹抹掉。
+            minimum_rule_width = max(24, int(width * 0.45))
+            removed_pixels: set[int] = set()
+            for y in range(height):
+                row_start = y * width
+                run_start: int | None = None
+                for x in range(width + 1):
+                    occupied = x < width and ink_mask[row_start + x]
+                    if occupied and run_start is None:
+                        run_start = x
+                    if occupied or run_start is None:
+                        continue
+                    if x - run_start >= minimum_rule_width:
+                        removed_pixels.update(range(row_start + run_start, row_start + x))
+                    run_start = None
+
             converted = []
-            for red, green, blue, alpha in rgba.getdata():
-                if alpha == 0 or (red >= 245 and green >= 245 and blue >= 245):
+            for index, (red, green, blue, alpha) in enumerate(pixels):
+                if index in removed_pixels or not ink_mask[index]:
                     converted.append((255, 255, 255, 0))
                     continue
                 luminance = (299 * red + 587 * green + 114 * blue) // 1000
@@ -257,7 +288,15 @@ def build_blue_signature(source_path: Path, target_path: Path) -> None:
                     )
                 )
             rgba.putdata(converted)
-            rgba.save(target_path, format="PNG")
+            alpha_box = rgba.getchannel("A").getbbox()
+            if alpha_box is None:
+                raise DocumentGenerationError("signature image contains no usable ink")
+            padding = 2
+            left = max(0, alpha_box[0] - padding)
+            top = max(0, alpha_box[1] - padding)
+            right = min(width, alpha_box[2] + padding)
+            bottom = min(height, alpha_box[3] + padding)
+            rgba.crop((left, top, right, bottom)).save(target_path, format="PNG")
     except Exception as exc:
         raise DocumentGenerationError("signature image preparation failed") from exc
 
@@ -336,19 +375,35 @@ def export_pdf_from_template(
             _canvas.setFont("ZwtSarabun", size)
             _canvas.drawCentredString(x, y, str(text))
 
-        draw_text(values["BookNo"], 500, 799)
-        draw_text(values["RefNo"], 500, 785)
+        def draw_centered(
+            text: object,
+            x: float,
+            y: float,
+            *,
+            size: float = 8,
+            _canvas: Any = overlay,
+        ) -> None:
+            _canvas.setFont("Helvetica", size)
+            _canvas.drawCentredString(x, y, str(text))
+
+        # 右对齐到页框内侧，给泰文标签留出固定间距；三位流水号不会再压住标签。
+        draw_right(values["BookNo"], 570, 799)
+        draw_right(values["RefNo"], 570, 785)
         draw_text(values["PayeeNameTH"], 37, 660, font="ZwtSarabun", size=10)
-        draw_text(values["PayeeTaxID"], 482, 659)
+        # 收款方税号是人工核对关键字段，字号与模板主体数字保持一致。
+        draw_text(values["PayeeTaxID"], 482, 659, size=10)
         draw_text(values["PayeeAddress"], 37, 628, font="ZwtSarabun", size=9)
-        draw_text(values["No"], 80, 593)
+        # 模板中的序号框实际范围为 x=50.5..113.6 / y=597.1..612.2。
+        draw_centered(values["No"], 82, 602)
 
-        check_x = 190 if task.wht_type == "PND3" else 442
+        # PND3 / PND53 下排复选框中心点来自模板矢量坐标。
+        check_x = 191 if task.wht_type == "PND3" else 368
         overlay.setLineWidth(1.2)
-        overlay.line(check_x - 3, 580, check_x, 576)
-        overlay.line(check_x, 576, check_x + 6, 585)
+        overlay.line(check_x - 4, 582, check_x - 1, 578)
+        overlay.line(check_x - 1, 578, check_x + 5, 587)
 
-        draw_text(values["IncomeType"], 181, 248, font="ZwtSarabun", size=9)
+        # 基线抬离模板虚线，防止文字被横线从中间穿过。
+        draw_text(values["IncomeType"], 181, 252, font="ZwtSarabun", size=9)
         payment_date = task.payment_date
         if payment_date:
             draw_text(
@@ -360,8 +415,9 @@ def export_pdf_from_template(
         tax_amount = f"{task.wht_amount:,.2f}"
         draw_right(amount, 499, 259)
         draw_right(tax_amount, 571, 259)
-        draw_right(amount, 499, 232)
-        draw_right(tax_amount, 571, 232)
+        # 汇总行上下边界为 y=222.5..238.6；使用居中基线避开边框。
+        draw_right(amount, 499, 227)
+        draw_right(tax_amount, 571, 227)
         draw_centered_thai(values["AmountTextThai"], 364, 198, size=10)
         draw_centered_thai(values["DateTextThai"], 233, 78, size=10)
 

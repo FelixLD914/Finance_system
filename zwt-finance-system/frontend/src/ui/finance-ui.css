@@ -1349,7 +1349,7 @@
   gap: 16px;
   min-height: 0;
   width: 100%;
-  max-width: 880px;
+  max-width: 1040px;
   margin: 0 auto;
   padding: 20px 24px 26px;
   overflow-y: auto;
@@ -1357,7 +1357,7 @@
 
 /* 核对匹配那一步内容宽、且要头/脚固定中间滚，单独放宽并交给内层滚动。 */
 .tax-wizard-panel.is-wide {
-  max-width: 1120px;
+  max-width: 1360px;
   overflow: hidden;
 }
 
@@ -1736,6 +1736,77 @@
   min-height: 0;
   padding: 0;
   overflow: hidden;
+}
+
+/* 未匹配收款方按税号汇总成一份维护清单，不在每一行重复同一个动作。 */
+.wht-payee-maintenance {
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-sm);
+}
+
+.wht-payee-maintenance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 12px;
+  background: var(--finance-surface-muted);
+  border-bottom: 1px solid var(--finance-border);
+}
+
+.wht-payee-maintenance-head > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.wht-payee-maintenance-head strong {
+  color: var(--finance-text);
+  font-size: 13px;
+}
+
+.wht-payee-maintenance-head span {
+  color: var(--finance-text-muted);
+  font-size: 11.5px;
+}
+
+.wht-payee-maintenance-list {
+  display: flex;
+  max-height: 86px;
+  flex-wrap: wrap;
+  gap: 0;
+  overflow-y: auto;
+  background: var(--finance-surface);
+}
+
+.wht-payee-maintenance-list > div {
+  display: grid;
+  min-width: 250px;
+  flex: 1 1 250px;
+  grid-template-columns: 1fr auto;
+  gap: 1px 10px;
+  align-items: center;
+  padding: 8px 10px;
+  border-right: 1px solid var(--finance-border);
+  border-bottom: 1px solid var(--finance-border);
+}
+
+.wht-payee-maintenance-list > div > span {
+  color: var(--finance-text);
+  font-size: 12px;
+}
+
+.wht-payee-maintenance-list > div > small {
+  color: var(--finance-text-muted);
+  font-size: 10.5px;
+}
+
+.wht-payee-maintenance-list .ant-btn {
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 /* 核对汇总条。刻意不用 Alert：整屏最重的信息是下面那张表，横幅铺满一行加底色

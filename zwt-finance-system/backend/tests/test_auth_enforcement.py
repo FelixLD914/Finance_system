@@ -243,3 +243,29 @@ def test_plain_batch_import_still_works_with_only_write(client_as) -> None:  # n
     )
 
     assert response.status_code == 422, response.text
+
+
+def test_wht_template_upload_reaches_preview_parser_instead_of_405(client_as) -> None:  # noqa: ANN001
+    """锁住截图中的 Method Not Allowed：POST 必须命中静态 batch-preview 路由。"""
+    client = client_as(permissions=frozenset({"wht:read", "wht:write"}))
+    workbook = Workbook()
+    workbook.active.append(["PayeeTaxID", "Amount"])
+    workbook.active.append(["0105540057561", 3000])
+    output = BytesIO()
+    workbook.save(output)
+    workbook.close()
+
+    response = client.post(
+        "/api/v1/wht/tasks/batch-preview",
+        files={
+            "file": (
+                "ZWT-WHT-BatchIssue-Template.xlsx",
+                output.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert response.status_code != 405
+    assert "missing columns" in response.text
