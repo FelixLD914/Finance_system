@@ -35,6 +35,11 @@ MUTATING_ENDPOINTS = [
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/return-to-draft", "wht:approve"),
     ("post", f"/api/v1/wht/tasks/{FAKE_ID}/generate-documents", "wht:generate"),
     ("patch", f"/api/v1/wht/tasks/{FAKE_ID}", "wht:write"),
+    # 分步开票：核对预览虽然只读，但会把主数据里的收款方资料读出来回给调用方，
+    # 所以与落库同一档权限，不降到 wht:read。
+    ("post", "/api/v1/wht/tasks/batch-preview", "wht:write"),
+    ("post", "/api/v1/wht/tasks/batch-commit", "wht:write"),
+    ("post", f"/api/v1/wht/tasks/{FAKE_ID}/revise", "wht:write"),
     ("get", f"/api/v1/wht/payees/{FAKE_ID}/delete-preview", "wht:write"),
     ("delete", f"/api/v1/wht/payees/{FAKE_ID}", "wht:write"),
     ("post", f"/api/v1/wht/payees/{FAKE_ID}/restore", "wht:write"),

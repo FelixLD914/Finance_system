@@ -1614,8 +1614,13 @@
   border-radius: var(--finance-radius-sm);
 }
 
+/* antd 6 把标题节点从 .ant-alert-message 改名成 .ant-alert-title，只写旧名字这条
+   规则从升级那天起就是死的 —— 向导里的横幅一直吃着 antd 的 14px 基准，这正是
+   "提醒横幅字太大"的来源。两个名字都留着，回退 antd 版本也不会再哑掉。 */
+.tax-wizard-panel .ant-alert-title,
 .tax-wizard-panel .ant-alert-message {
   font-size: 13px;
+  font-weight: 600;
 }
 
 .tax-wizard-panel .ant-alert-description {
@@ -1652,4 +1657,223 @@
   .tax-ledger-layout.has-inspector {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* --- WHT 分步开票 ---------------------------------------------------------- */
+
+/* 「点开票 → 选路径」的两张卡片。做成 <button> 而不是带 onClick 的 div：
+   键盘 Tab 能到、回车能选，无障碍上本来就该是按钮。 */
+.wht-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.wht-mode-card {
+  display: grid;
+  gap: 8px;
+  padding: 20px 18px;
+  text-align: left;
+  background: var(--finance-surface);
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-md);
+  cursor: pointer;
+  transition: border-color var(--finance-motion-fast),
+    background var(--finance-motion-fast);
+}
+
+.wht-mode-card:hover,
+.wht-mode-card:focus-visible {
+  background: var(--finance-selected);
+  border-color: var(--finance-primary);
+}
+
+.wht-mode-icon {
+  color: var(--finance-primary);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.wht-mode-card strong {
+  color: var(--finance-text);
+  font-size: 13px;
+}
+
+.wht-mode-card small {
+  color: var(--finance-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 向导本身用的是与 TAX INV 共用的 tax-wizard-* 外壳，这里只补 WHT 特有的部分。
+
+   那套外壳（tax-wizard-body { flex: 1 } 等）要求祖先给出**有界高度**，在 TAX INV 里
+   由 .tax-workspace { display:flex; height:100% } 提供。WHT 的 .workspace-main 是普通
+   块容器 + overflow:auto，直接放进去 flex:1 会退化成内容高度：步骤条和页脚跟着整页
+   一起滚，核对表也就没了自己的滚动区。所以这一屏单独把 workspace-main 切成有界的
+   flex 列，只对向导生效，不动其它视图。 */
+.workspace-main.is-wizard {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding-bottom: 20px;
+  overflow: hidden;
+}
+
+/* .page-heading 和 .work-surface 都靠 `margin: 0 auto` 居中。在普通块容器里 auto
+   外边距算作 0、盒子照样占满宽度；一旦成了 flex item，**cross 轴上的 auto 外边距会
+   关掉 stretch**，两者立刻缩成内容宽度再居中（实测标题只剩 321px 飘在中间）。
+   显式给出 100% 宽度把 stretch 换回来，各自的 max-width 仍然管用。 */
+.workspace-main.is-wizard > * {
+  width: 100%;
+}
+
+.wht-batch-wizard {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 核对汇总条。刻意不用 Alert：整屏最重的信息是下面那张表，横幅铺满一行加底色
+   会把视线先抢走。沿用台账里「N 项任务」那条 .table-toolbar 的密度（42px 高、
+   12px 内边距、13px 字），只在真的有待办时给数字上色。 */
+.wht-review-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid var(--finance-border);
+  border-radius: var(--finance-radius-sm);
+  background: var(--finance-surface-muted);
+  color: var(--finance-text-muted);
+  font-size: 12.5px;
+}
+
+.wht-review-summary strong {
+  color: var(--finance-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wht-review-summary .wht-review-count {
+  color: var(--finance-text);
+}
+
+.wht-review-summary .wht-review-count b {
+  font-weight: 600;
+}
+
+.wht-review-summary .wht-review-count.is-todo,
+.wht-review-summary .wht-review-count.is-todo b {
+  color: var(--finance-warning-text);
+}
+
+.wht-review-summary .wht-review-hint {
+  flex: 1;
+  min-width: 200px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.wht-review-payee {
+  display: grid;
+  gap: 2px;
+}
+
+/* 未建档的行主行是 13 位税号。同字号下泰文（Sarabun）本就显得小一号，
+   数字照搬正文字号会比隔壁的泰文公司名明显更大，收半档让两种行看齐。 */
+.wht-review-payee > .numeric {
+  font-size: 12.5px;
+}
+
+.wht-review-payee small {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--finance-text-muted);
+  font-size: 11px;
+}
+
+/* 「主数据中无此税号」要一眼看见 —— 这是核对页唯一必须动手的地方。 */
+.wht-review-payee small.is-missing {
+  color: var(--finance-warning-text);
+  font-weight: 600;
+}
+
+.wht-review-table .is-blocked-row > td {
+  background: var(--finance-warning-bg);
+}
+
+.wht-review-table .numeric.is-overridden {
+  color: var(--finance-warning-text);
+  font-weight: 600;
+}
+
+.wht-wizard-done {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 44px 20px 28px;
+  text-align: center;
+}
+
+.wht-wizard-done .anticon {
+  color: var(--finance-success-text);
+  font-size: 26px;
+}
+
+.wht-wizard-done h2 {
+  margin: 0;
+  color: var(--finance-text);
+  font-size: 15px;
+}
+
+.wht-wizard-done p {
+  max-width: 440px;
+  margin: 0;
+  color: var(--finance-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 上传步与弹窗里的引导文字：一段静默的说明，不套 Alert、不占底色。
+   真正需要用户停下来的只有核对页那几行，别让每一屏都在喊。 */
+.wht-wizard-note {
+  margin: 0;
+  color: var(--finance-text-muted);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.wht-wizard-note.is-emphasis {
+  padding-left: 10px;
+  border-left: 2px solid var(--finance-primary);
+  color: var(--finance-text);
+}
+
+.wht-wizard-note strong {
+  color: var(--finance-text);
+  font-weight: 600;
+}
+
+/* 说明段与表单之间留一档间距；弹窗里没有 .import-intro 的 16px 下边距了。 */
+.wht-modal-form {
+  margin-top: 14px;
+}
+
+/* 明细面板里的一行提示。面板只有 412px 宽，Alert 的图标 + 内边距 + 底色
+   会占掉上半屏，这里只用一条左边框把注意力拉过去。 */
+.inspector-note {
+  margin: 0 16px 12px;
+  padding: 6px 0 6px 10px;
+  border-left: 2px solid var(--finance-warning-text);
+  color: var(--finance-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
 }

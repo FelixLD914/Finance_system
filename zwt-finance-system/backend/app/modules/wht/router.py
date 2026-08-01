@@ -19,7 +19,9 @@ from app.modules.wht.income_types import options_for
 from app.modules.wht.legacy_import import parse_payee_sheet, parse_task_sheet
 from app.modules.wht.numbering import build_normal_number, build_supplement_number
 from app.modules.wht.schemas import (
+    BatchCommitRequest,
     BatchCreateResult,
+    BatchPreviewResponse,
     BatchTransitionRequest,
     BatchTransitionResponse,
     DocumentGenerateRequest,
@@ -36,6 +38,7 @@ from app.modules.wht.schemas import (
     SignatureUsage,
     WhtDocumentResponse,
     WhtNumberPreview,
+    WhtReviseRequest,
     WhtTaskCreate,
     WhtTaskEventResponse,
     WhtTaskListResponse,
@@ -268,6 +271,27 @@ async def return_to_draft(
 
 
 @router.post(
+    "/tasks/{task_id}/revise",
+    response_model=WhtTaskResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def revise_task(
+    task_id: uuid.UUID,
+    payload: WhtReviseRequest,
+    service: WhtServiceDependency,
+) -> WhtTaskResponse:
+    """把已批准/已开具的票据退回草稿以便更正，票号不变（业务口径 2026-08-01）。
+
+    改完照旧走 submit-review → approve → generate-documents，文件版本号自然 +1，
+    旧版本留档。理由必填，落进事件流水，是事后解释「这张正式凭证为何被改过」的唯一依据。
+
+    只要 wht:write：发现打字错误的往往是经办人，而改完重新出具那一步仍由
+    approve（wht:approve）把关，正式凭证不会绕过审批就换一版。
+    """
+    return _task_response(await service.revise(task_id, payload.version, payload.reason))
+
+
+@router.post(
     "/tasks/import",
     response_model=ImportResult,
     dependencies=[Depends(require_permission("wht:write"))],
@@ -312,6 +336,55 @@ async def batch_create_tasks(
     except WorkbookError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return await service.batch_create_tasks(rows, file_name)
+
+
+@router.post(
+    "/tasks/batch-preview",
+    response_model=BatchPreviewResponse,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def preview_batch_tasks(
+    service: WhtServiceDependency,
+    file: Annotated[UploadFile, File(description="Batch issuance .xlsx")],
+) -> BatchPreviewResponse:
+    """分步开票第一步：解析并配好收款方，交给前端核对。**完全只读**。
+
+    与 /tasks/batch-create 的区别是收款方查不到不算错误，而是一行待办：前端把它标出来
+    让人补录资料，核对完再调 /tasks/batch-commit 落库。仍要求 wht:write —— 它虽然不写
+    库，却会把主数据里的收款方名称地址读出来回给调用方。
+    """
+    content, file_name = await _read_xlsx(file)
+    try:
+        rows = parse_batch_sheet(content)
+    except BatchWorkbookError as exc:
+        # 结构性问题（缺列、日期格式不对）在这一步就退回：这类错误改表比改界面快，
+        # 也没必要为一张根本读不出来的表渲染核对页。
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc), "errors": exc.errors},
+        ) from exc
+    except WorkbookError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return await service.preview_batch_tasks(rows, file_name)
+
+
+@router.post(
+    "/tasks/batch-commit",
+    response_model=BatchCreateResult,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("wht:write"))],
+)
+async def commit_batch_tasks(
+    payload: BatchCommitRequest,
+    service: WhtServiceDependency,
+) -> BatchCreateResult:
+    """分步开票第二步：把核对（并补全）后的行落成草稿。
+
+    正文是 JSON 而不是再传一次文件：用户在核对页改过的值必须能带回来，而重传文件
+    等于让人先去改 Excel。服务端不信任这些值，每一行都按主数据与收入类型目录重新
+    校验一遍。收款方是人工补录的，那份资料先跟着草稿走，等批准时才写进 wht.payees。
+    """
+    return await service.commit_batch_tasks(payload)
 
 
 @router.post(

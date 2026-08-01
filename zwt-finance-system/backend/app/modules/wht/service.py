@@ -11,10 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import ServiceError
 from app.modules.wht import income_types
 from app.modules.wht.batch_import import resolve_rate as resolve_batch_rate
+from app.modules.wht.batch_review import PayeeSnapshot, review_row
 from app.modules.wht.models import IssueCounter, PayeeProfile, WhtTask, WhtTaskEvent
 from app.modules.wht.number_service import assign_number_on_approval
 from app.modules.wht.schemas import (
+    BatchCommitRequest,
     BatchCreateResult,
+    BatchPreviewPayee,
+    BatchPreviewResponse,
+    BatchPreviewRow,
     BatchTransitionItem,
     ImportResult,
     PayeeCreate,
@@ -165,7 +170,7 @@ class WhtService:
         updates = payload.model_dump(
             by_alias=False,
             exclude_unset=True,
-            exclude={"version"},
+            exclude={"version", "rate_override_note"},
         )
         payee_id = updates.pop("payee_id", None)
         if "payee_id" in payload.model_fields_set:
@@ -191,9 +196,18 @@ class WhtService:
                 task.wht_rate,
                 None,
             )
+        # 按**改完之后**的值判定，而不是按这次改了哪些字段：把收入类型换成一个法定
+        # 税率不同的类型，同样会让原本合规的税率变成偏离。修订已开具的票走的也是
+        # 这条路（revise 先退回草稿），所以这一步同时守住了更正链路。
+        note = self._rate_override_note(
+            task.income_type,
+            task.wht_type,
+            task.wht_rate,
+            payload.rate_override_note,
+        )
         task.version += 1
         task.updated_by_name = self.actor_name
-        event = self._event(task, "updated", "draft", "draft")
+        event = self._event(task, "updated", "draft", "draft", note)
         self.session.add(event)
         await self.session.commit()
         await self.session.refresh(task)
@@ -231,7 +245,12 @@ class WhtService:
         self._check_version(task, version)
         if task.status != "pending_review":
             raise WhtStateError("only pending-review tasks can be approved")
+        payee_note = await self._materialize_pending_payee(task)
         await assign_number_on_approval(self.session, task)
+        # 修订过的票据带着原票号回到草稿，再批准时 assign_number_on_approval 会在
+        # "已有票号"处提前返回（保号是业务口径），于是状态不会被它设成 approved。
+        # 状态归属本就该在这里表达，不该藏在取号函数的一条分支里。
+        task.status = "approved"
         task.version += 1
         task.approved_at = datetime.now(UTC)
         task.updated_by_name = self.actor_name
@@ -240,13 +259,91 @@ class WhtService:
             "approved",
             "pending_review",
             "approved",
-            note,
+            "；".join(filter(None, (note, payee_note))) or None,
         )
         self.session.add(event)
         await self.session.commit()
         await self.session.refresh(task)
         await self.session.refresh(event)
         return TaskAggregate(task=task, events=[event])
+
+    async def revise(
+        self,
+        task_id: uuid.UUID,
+        version: int,
+        reason: str,
+    ) -> TaskAggregate:
+        """把已批准/已开具的票据退回草稿以便更正，**票号保持不变**。
+
+        业务口径 2026-08-01：更正走「替换件」而不是「作废重开」——原票号继续有效，
+        改完重新批准、重新出具，文件版本号 +1（v1 留档，见 WhtDocument 的
+        task_id+file_format+version 唯一约束）。号码不消耗，台账上仍是一条记录。
+
+        权限只要 wht:write：发现打字错误的往往是经办人，而改完要重新走
+        submit-review → approve，正式重新出具那一步仍由 wht:approve 把关。
+        """
+        task = await self._load_task(task_id, for_update=True)
+        self._check_version(task, version)
+        if task.status not in {"approved", "issued"}:
+            raise WhtStateError("only approved or issued tasks can be revised")
+        cleaned = reason.strip()
+        if not cleaned:
+            raise WhtStateError("a revision reason is required")
+        previous = task.status
+        task.status = "draft"
+        task.version += 1
+        task.updated_by_name = self.actor_name
+        event = self._event(task, "revised", previous, "draft", cleaned)
+        self.session.add(event)
+        await self.session.commit()
+        await self.session.refresh(task)
+        await self.session.refresh(event)
+        return TaskAggregate(task=task, events=[event])
+
+    async def _materialize_pending_payee(self, task: WhtTask) -> str | None:
+        """批准时把人工补录的收款方写进主数据，返回要记进事件的一句话。
+
+        同税号可能在预览之后被别人正常建好了（也可能同一批里有两行是同一个新收款方，
+        第一条批准时就建好了），所以先按税号找在用记录：找到就直接挂上去，**不覆盖**
+        对方的名称地址——主数据是别人维护的权威副本，一次开票不该顺手改写它。
+        """
+        if not task.payee_pending:
+            return None
+        if not task.tax_id or not task.payee_address or not task.wht_type:
+            raise WhtStateError(
+                "the manually entered payee is incomplete; taxId, address and whtType "
+                "are all printed on the certificate"
+            )
+        existing = await self.session.scalar(
+            select(PayeeProfile)
+            .where(
+                PayeeProfile.tax_id == task.tax_id,
+                PayeeProfile.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if existing is not None:
+            task.payee_id = existing.id
+            task.payee_pending = False
+            return f"收款方 {task.tax_id} 已在主数据中，直接关联「{existing.name_th}」"
+        payee = PayeeProfile(
+            tax_id=task.tax_id,
+            name_th=task.company_name,
+            name_en=task.company_name_en,
+            address_th=task.payee_address,
+            wht_type=task.wht_type,
+            # 别名要靠人辨认历史写法，建单时没有依据可填，留空由收款方主数据页补。
+            aliases=[],
+            is_active=True,
+            source_file_name=task.source_file_name,
+            created_by_name=self.actor_name,
+            updated_by_name=self.actor_name,
+        )
+        self.session.add(payee)
+        await self.session.flush()
+        task.payee_id = payee.id
+        task.payee_pending = False
+        return f"新建收款方主数据「{payee.name_th}」（税号 {payee.tax_id}）"
 
     async def return_to_draft(
         self,
@@ -601,6 +698,214 @@ class WhtService:
             source_file_name=source_file_name,
             created=len(created),
             task_ids=[task.id for task in created],
+        )
+
+    async def preview_batch_tasks(
+        self,
+        rows: list[dict[str, Any]],
+        source_file_name: str,
+    ) -> BatchPreviewResponse:
+        """核对用的只读预览：配收款方、带税率、算代扣金额，**一个字都不写库**。
+
+        与一步式 batch_create_tasks 的根本区别：收款方查不到不再是错误，而是一种
+        待办状态（payee_missing），交给前端让人补录。也因此这里绝不"有错就整表退回"
+        ——整张表都要回给用户看，他才知道要改哪几行。
+        """
+        payees = await self._payees_by_tax_id({row["payee_tax_id"] for row in rows})
+        reviewed = [
+            review_row(row, self._payee_snapshot(payees.get(row["payee_tax_id"])))
+            for row in rows
+        ]
+        return BatchPreviewResponse(
+            source_file_name=source_file_name,
+            rows=[
+                BatchPreviewRow(
+                    row_number=item.row_number,
+                    status=item.status,
+                    period=item.period,
+                    issuance_type=item.issuance_type,  # type: ignore[arg-type]
+                    supplement_run=item.supplement_run,
+                    income_type=item.income_type,
+                    payment_date=item.payment_date,
+                    total_amount=item.total_amount,
+                    payee=BatchPreviewPayee(
+                        payee_id=item.payee.payee_id,
+                        tax_id=item.payee.tax_id,
+                        name_th=item.payee.name_th,
+                        name_en=item.payee.name_en,
+                        address_th=item.payee.address_th,
+                        wht_type=item.payee.wht_type,  # type: ignore[arg-type]
+                        is_active=item.payee.is_active,
+                    ),
+                    wht_rate=item.wht_rate,
+                    statutory_rate=item.statutory_rate,
+                    wht_amount=item.wht_amount,
+                    rate_reason=item.rate_reason,
+                    errors=item.errors,
+                )
+                for item in reviewed
+            ],
+            ready=sum(1 for item in reviewed if item.status == "ready"),
+            payee_missing=sum(1 for item in reviewed if item.status == "payee_missing"),
+            needs_input=sum(1 for item in reviewed if item.status == "needs_input"),
+        )
+
+    async def commit_batch_tasks(self, payload: BatchCommitRequest) -> BatchCreateResult:
+        """把核对完的行落成草稿。仍然是全表校验、有错全退。
+
+        前端已经在核对页拦过一轮，但这里必须原样再校验一遍：预览到提交之间收款方
+        可能被人停用或删除，而且直接打 API 的调用方根本没经过那个页面。凡是能影响
+        正式凭证的判定（税率是否偏离、收款方是否在用），一律以此处为准。
+        """
+        linked_ids = {row.payee.payee_id for row in payload.rows if row.payee.payee_id}
+        by_id = {
+            payee.id: payee
+            for payee in (
+                await self.session.scalars(
+                    select(PayeeProfile).where(
+                        PayeeProfile.id.in_(linked_ids),
+                        PayeeProfile.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        }
+        # 补录的新收款方也要按税号查一遍：预览之后可能已经有人正常建好了，
+        # 这时直接挂上去，不要再走"批准时新建"那条路。
+        new_tax_ids = {row.payee.tax_id for row in payload.rows if not row.payee.payee_id}
+        by_tax_id = await self._payees_by_tax_id(new_tax_ids)
+
+        issues: list[dict[str, object]] = []
+        # (行, 命中的收款方或 None, 最终税率, 要盖进事件的税率说明)
+        prepared: list[tuple[Any, PayeeProfile | None, Decimal, str | None]] = []
+
+        def reject(row: Any, reason: str, detail: str) -> None:
+            issues.append(
+                {
+                    "rows": [row.row_number],
+                    "key": row.payee.tax_id,
+                    "reason": reason,
+                    "detail": detail,
+                }
+            )
+
+        for row in payload.rows:
+            payee = (
+                by_id.get(row.payee.payee_id)
+                if row.payee.payee_id
+                else by_tax_id.get(row.payee.tax_id)
+            )
+            if row.payee.payee_id and payee is None:
+                reject(row, "payee_missing", "the selected payee no longer exists")
+                continue
+            if payee is not None and not payee.is_active:
+                reject(row, "payee_inactive", f"payee {payee.name_th} is deactivated")
+                continue
+
+            wht_type = payee.wht_type if payee is not None else row.payee.wht_type
+            wht_rate = row.wht_rate or income_types.default_rate(row.income_type, wht_type)
+            if wht_rate is None:
+                reject(
+                    row,
+                    "rate_required",
+                    f'"{row.income_type}" is not in the {wht_type} catalogue, '
+                    f"so whtRate must be supplied",
+                )
+                continue
+            deviation = self._rate_deviation(row.income_type, wht_type, wht_rate)
+            reason = (row.rate_reason or "").strip() or None
+            if deviation is not None and reason is None:
+                entered, statutory = deviation
+                reject(
+                    row,
+                    "rate_reason_required",
+                    f"{entered} deviates from the statutory {statutory} for "
+                    f'"{row.income_type}" under {wht_type}',
+                )
+                continue
+            prepared.append((row, payee, wht_rate, self._stamp_rate_note(deviation, reason)))
+
+        if issues:
+            raise WhtStateError(
+                f"{len(issues)} row(s) need fixing; nothing was imported",
+                issues=issues,
+            )
+
+        created: list[WhtTask] = []
+        for row, payee, wht_rate, _ in prepared:
+            # 收款方在库里就以库里的为准：主数据是权威副本，界面上的显示值
+            # 不该有机会把它覆盖掉。只有补录的新档案才用前端传来的资料。
+            profile = row.payee
+            task = WhtTask(
+                period=row.period,
+                issuance_type=row.issuance_type,
+                supplement_run=row.supplement_run,
+                payee_id=payee.id if payee is not None else None,
+                payee_pending=payee is None,
+                company_name=payee.name_th if payee is not None else profile.name_th,
+                company_name_en=payee.name_en if payee is not None else profile.name_en,
+                payee_address=(
+                    payee.address_th if payee is not None else profile.address_th
+                ),
+                tax_id=payee.tax_id if payee is not None else profile.tax_id,
+                wht_type=payee.wht_type if payee is not None else profile.wht_type,
+                income_type=row.income_type,
+                payment_date=row.payment_date,
+                wht_rate=wht_rate,
+                total_amount=row.total_amount,
+                wht_amount=self._calculated_wht_amount(row.total_amount, wht_rate, None),
+                source_file_name=payload.source_file_name,
+                created_by_name=self.actor_name,
+                updated_by_name=self.actor_name,
+            )
+            self.session.add(task)
+            created.append(task)
+        await self.session.flush()
+        for task, (_, _, _, rate_note) in zip(created, prepared, strict=True):
+            notes = [payload.source_file_name]
+            if rate_note:
+                notes.append(rate_note)
+            if task.payee_pending:
+                notes.append(f"收款方 {task.tax_id} 为人工补录，批准时写入主数据")
+            self.session.add(
+                self._event(task, "batch_created", None, "draft", "；".join(notes))
+            )
+        await self.session.commit()
+        return BatchCreateResult(
+            source_file_name=payload.source_file_name,
+            created=len(created),
+            task_ids=[task.id for task in created],
+            payees_pending=sum(1 for task in created if task.payee_pending),
+        )
+
+    async def _payees_by_tax_id(self, tax_ids: set[str]) -> dict[str, PayeeProfile]:
+        """按税号取在用（未删除）收款方。停用的也要取回来——是否停用由调用方判定，
+        这里把它当"查到了"，否则界面会把停用说成"库里没有"，引导人再建一条重号的。"""
+        if not tax_ids:
+            return {}
+        return {
+            payee.tax_id: payee
+            for payee in (
+                await self.session.scalars(
+                    select(PayeeProfile).where(
+                        PayeeProfile.tax_id.in_(tax_ids),
+                        PayeeProfile.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        }
+
+    @staticmethod
+    def _payee_snapshot(payee: PayeeProfile | None) -> PayeeSnapshot | None:
+        if payee is None:
+            return None
+        return PayeeSnapshot(
+            payee_id=payee.id,
+            tax_id=payee.tax_id,
+            name_th=payee.name_th,
+            name_en=payee.name_en,
+            address_th=payee.address_th,
+            wht_type=payee.wht_type,
+            is_active=payee.is_active,
         )
 
     async def batch_transition(

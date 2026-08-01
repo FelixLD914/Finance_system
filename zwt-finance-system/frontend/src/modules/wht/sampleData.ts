@@ -50,6 +50,7 @@ const commonTask = {
   amountTextThai: null,
   dateTextThai: null,
   sourceFileName: null,
+  payeePending: false,
   version: 1,
   approvedAt: null,
   issuedAt: null,

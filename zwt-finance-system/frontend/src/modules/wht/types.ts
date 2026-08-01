@@ -35,6 +35,8 @@ export interface WhtTask {
   amountTextThai: string | null;
   dateTextThai: string | null;
   sourceFileName: string | null;
+  /** 收款方是批量导入时人工补录的，还没进主数据；批准这张票时才写库。 */
+  payeePending: boolean;
   version: number;
   createdByName: string;
   updatedByName: string;
@@ -44,6 +46,19 @@ export interface WhtTask {
   issuedAt: string | null;
   voidedAt: string | null;
   events: WhtTaskEvent[];
+}
+
+/** 草稿可改的字段。已开具的票要先走「修订」退回草稿才能用它。 */
+export interface WhtTaskUpdateInput {
+  incomeType?: string;
+  paymentDate?: string;
+  whtRate?: number;
+  totalAmount?: number;
+  /**
+   * 改完之后税率偏离目录法定值时必填的理由。偏离与否由服务端按改后的值自己判定，
+   * 前端的必填只是把话说在前面 —— 与建单那条路径同一口径。
+   */
+  rateOverrideNote?: string | null;
 }
 
 export interface WhtTaskCreateInput {
@@ -122,6 +137,81 @@ export interface BatchCreateResult {
   sourceFileName: string;
   created: number;
   taskIds: string[];
+  /** 其中有多少条带着「批准时才写进主数据」的新收款方。 */
+  payeesPending: number;
+}
+
+/**
+ * 核对表里一行的状态。只有 ready 能落库。
+ *
+ *   ready          齐了
+ *   payee_missing  税号在主数据里查不到，等人补录收款方资料
+ *   needs_input    行本身还缺东西（税率带不出来 / 偏离法定税率却没写理由 / 收款方停用）
+ */
+export type BatchRowStatus = "ready" | "payee_missing" | "needs_input";
+
+export interface BatchPreviewPayee {
+  /** 为空即「主数据里没有」。补录时前端只填下面几项，id 仍留空。 */
+  payeeId: string | null;
+  taxId: string;
+  nameTh: string | null;
+  nameEn: string | null;
+  addressTh: string | null;
+  whtType: WhtType | null;
+  isActive: boolean;
+}
+
+export interface BatchPreviewRow {
+  rowNumber: number;
+  status: BatchRowStatus;
+  period: string;
+  issuanceType: IssuanceType;
+  supplementRun: number;
+  incomeType: string;
+  paymentDate: string;
+  totalAmount: string;
+  payee: BatchPreviewPayee;
+  whtRate: string | null;
+  /** 目录法定税率。收款方未补录时为空——不知道走哪张 PND 表，算不出来。 */
+  statutoryRate: string | null;
+  whtAmount: string | null;
+  rateReason: string | null;
+  errors: string[];
+}
+
+export interface BatchPreviewResult {
+  sourceFileName: string;
+  rows: BatchPreviewRow[];
+  ready: number;
+  payeeMissing: number;
+  needsInput: number;
+}
+
+export interface BatchCommitPayeeInput {
+  payeeId: string | null;
+  taxId: string;
+  nameTh?: string | null;
+  nameEn?: string | null;
+  addressTh?: string | null;
+  whtType?: WhtType | null;
+}
+
+export interface BatchCommitRowInput {
+  rowNumber: number;
+  period: string;
+  issuanceType: IssuanceType;
+  supplementRun: number;
+  incomeType: string;
+  paymentDate: string;
+  totalAmount: number;
+  whtRate: number | null;
+  rateReason: string | null;
+  payee: BatchCommitPayeeInput;
+}
+
+export interface BatchCommitInput {
+  sourceFileName: string;
+  rows: BatchCommitRowInput[];
 }
 
 export interface BatchTransitionItem {

@@ -8,10 +8,13 @@ import {
   FileDoneOutlined,
   FileExcelOutlined,
   FilterOutlined,
+  FormOutlined,
   HistoryOutlined,
   PlusOutlined,
   ReloadOutlined,
+  TableOutlined,
   ThunderboltOutlined,
+  UndoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import {
@@ -24,6 +27,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Steps,
@@ -44,6 +48,8 @@ import {
   listSignatures,
   listWhtDocuments,
 } from "./api";
+import { BatchIssuanceWizard } from "./BatchIssuanceWizard";
+import { roundHalfUp, statutoryRateFor } from "./batchRowState";
 import { IssuanceConsole } from "./IssuanceConsole";
 import { PayeeDirectory } from "./PayeeDirectory";
 import type {
@@ -67,11 +73,16 @@ interface Filters {
   query: string;
 }
 
-/** 两种导入长得像但语义相反，用不同的入口和不同的引导文案分开。 */
-type ImportKind = "history" | "batch";
+/**
+ * 台账、开票操作、收款方主数据是模块内的三个平行视图。
+ *
+ * 「开票操作」下面有两条路径：compose（单张录入）与 batch（导入核对向导）。
+ * 页签仍是三个 —— 走哪条路径是进入开票时的一次选择，不是一个长期停留的位置。
+ */
+type WorkspaceView = "tasks" | "compose" | "batch" | "payees";
 
-/** 台账、开票操作、收款方主数据是模块内的三个平行视图。 */
-type WorkspaceView = "tasks" | "compose" | "payees";
+/** 开票路径。点「开票」先选这个，再进对应的操作页面。 */
+type IssuanceMode = "single" | "batch";
 
 /** 业务阶段 → 内部状态。财务同事按"手上要做什么"找单，不是按状态机找。 */
 const whtPhaseStatuses: Record<
@@ -133,8 +144,16 @@ function ViewSwitch({
     <div className="workspace-view-switch" role="tablist">
       {tabs.map((tab) => (
         <button
-          aria-selected={tab.key === active}
-          className={tab.key === active ? "is-active" : ""}
+          aria-selected={
+            // batch 也归在「开票操作」名下：它是那个页签下的另一条路径，
+            // 走向导时页签落在别处会让人以为自己离开了开票区。
+            tab.key === active || (tab.key === "compose" && active === "batch")
+          }
+          className={
+            tab.key === active || (tab.key === "compose" && active === "batch")
+              ? "is-active"
+              : ""
+          }
           key={tab.key}
           role="tab"
           type="button"
@@ -144,6 +163,70 @@ function ViewSwitch({
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * 「点开票 → 选路径」这一步。
+ *
+ * 做成弹窗而不是一个独立视图：它是一次分叉，不是一个要停留的地方。选完立刻进对应
+ * 的操作页面，返回上一层就是关掉它。
+ */
+function IssuanceModeChooser({
+  open,
+  t,
+  onCancel,
+  onPick,
+}: {
+  open: boolean;
+  t: Translate;
+  onCancel: () => void;
+  onPick: (mode: IssuanceMode) => void;
+}) {
+  const modes: Array<{
+    key: IssuanceMode;
+    icon: React.ReactNode;
+    title: string;
+    description: string;
+  }> = [
+    {
+      key: "single",
+      icon: <FormOutlined />,
+      title: t("wht.modeSingle"),
+      description: t("wht.modeSingleDesc"),
+    },
+    {
+      key: "batch",
+      icon: <TableOutlined />,
+      title: t("wht.modeBatch"),
+      description: t("wht.modeBatchDesc"),
+    },
+  ];
+  return (
+    <Modal
+      destroyOnHidden
+      footer={null}
+      open={open}
+      title={t("wht.chooseMode")}
+      width={680}
+      onCancel={onCancel}
+    >
+      <p className="issuance-profile-hint">{t("wht.chooseModeHint")}</p>
+      <div className="wht-mode-grid">
+        {modes.map((mode) => (
+          <button
+            className="wht-mode-card"
+            key={mode.key}
+            type="button"
+            onClick={() => onPick(mode.key)}
+          >
+            <span className="wht-mode-icon">{mode.icon}</span>
+            <strong>{mode.title}</strong>
+            <small>{mode.description}</small>
+          </button>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -187,6 +270,8 @@ function DetailPanel({
   onAction,
   onDownload,
   onGenerate,
+  onEdit,
+  onRevise,
 }: {
   task: WhtTask;
   documents: WhtDocument[];
@@ -198,14 +283,23 @@ function DetailPanel({
   ) => Promise<void>;
   onDownload: (document: WhtDocument) => Promise<void>;
   onGenerate: () => void;
+  onEdit: () => void;
+  onRevise: () => void;
 }) {
   const value = (content: string | number | null) => content ?? "—";
   const isFormal = task.status === "approved" || task.status === "issued";
+  const revisions = task.events.filter((event) => event.eventType === "revised").length;
   const workflow =
     task.events.length > 0
       ? task.events.map((event) => ({
-          title: statusLabel(event.toStatus, t),
+          // 修订也把票据打回草稿，只按 toStatus 显示会写成「草稿」，
+          // 看不出这一步是一次对正式凭证的更正 —— 流水的意义就没了。
+          title:
+            event.eventType === "revised"
+              ? t("wht.revise")
+              : statusLabel(event.toStatus, t),
           content: `${event.actorName} · ${formatDateTime(event.createdAt)}`,
+          description: event.note ?? undefined,
         }))
       : [
           {
@@ -222,9 +316,17 @@ function DetailPanel({
         <div>
           <h2>{task.taskNo ?? t("wht.pendingNumber")}</h2>
           <StatusTag status={task.status} t={t} />
+          {revisions > 0 && (
+            <Tag className="status-tag">{t("wht.revisionCount", { count: revisions })}</Tag>
+          )}
         </div>
         <div className="inspector-header-actions">
-          <Button disabled={task.status !== "draft"} icon={<EditOutlined />} size="small">
+          <Button
+            disabled={task.status !== "draft" || pending}
+            icon={<EditOutlined />}
+            size="small"
+            onClick={onEdit}
+          >
             {t("common.edit")}
           </Button>
           <Button
@@ -236,6 +338,12 @@ function DetailPanel({
           />
         </div>
       </div>
+
+      {/* 明细面板只有 412px 宽，一条带底色的告警会把上半屏吃掉。
+          用一行左边框的小字说明，信息量一样、密度和面板其余部分一致。 */}
+      {task.payeePending && (
+        <p className="inspector-note">{t("wht.payeePendingNotice")}</p>
+      )}
 
       <section className="inspector-section">
         <h3>{t("wht.basicInfo")}</h3>
@@ -395,6 +503,10 @@ function DetailPanel({
             >
               {t("wht.generateDocuments")}
             </Button>
+            {/* 已开具的票要改内容，必须先退回草稿；票号不变，文件版本 +1。 */}
+            <Button block disabled={pending} icon={<UndoOutlined />} onClick={onRevise}>
+              {t("wht.revise")}
+            </Button>
             <Button block disabled icon={<CheckCircleFilled />}>
               {t("wht.formalNumberReady")}
             </Button>
@@ -417,13 +529,16 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     reload,
     loadTaskDetail,
     createTask,
+    editTask,
+    reviseTask,
     transitionTask,
     persistPayee,
     removePayee,
     recoverPayee,
     uploadPayees,
     uploadHistoricalTasks,
-    uploadBatchTasks,
+    previewBatch,
+    commitBatch,
     runBatchTransition,
   } = useWhtData();
   // 「开票操作」是模块内的平行视图，不是弹窗：正式凭证上要打印的每一项
@@ -432,7 +547,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [generateOpen, setGenerateOpen] = useState(false);
-  const [importKind, setImportKind] = useState<ImportKind | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [documentPending, setDocumentPending] = useState(false);
   const [documents, setDocuments] = useState<WhtDocument[]>([]);
@@ -440,8 +555,15 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   // 默认停在「待处理」：进页面最常见的诉求是"我还有什么没做完"。
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
+  const [modeOpen, setModeOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [reviseOpen, setReviseOpen] = useState(false);
   const [generateForm] = Form.useForm();
+  const [editForm] = Form.useForm();
+  const [reviseForm] = Form.useForm();
   const includeSignature = Form.useWatch("includeSignature", generateForm);
+  const editIncomeType = Form.useWatch("incomeType", editForm);
+  const editWhtRate = Form.useWatch("whtRate", editForm);
   const [filters, setFilters] = useState<Filters>({
     period: "2026-06",
     status: "all",
@@ -499,6 +621,21 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   );
 
   const selectedTask = tasks.find((task) => task.id === selectedId);
+
+  /**
+   * 改草稿时税率是否偏离了目录法定值。判定基准是**字段当前的值**：把收入类型换成
+   * 一个法定税率不同的类型，同样会让原本合规的税率变成偏离，而人不一定意识到。
+   * 与服务端 `_rate_override_note` 用同一份目录，两边不会分叉。
+   */
+  const editStatutoryRate = statutoryRateFor(
+    incomeTypes,
+    editIncomeType ?? "",
+    selectedTask?.whtType ?? null,
+  );
+  const editDeviates =
+    editStatutoryRate !== null &&
+    editWhtRate != null &&
+    roundHalfUp(Number(editWhtRate) / 100) !== roundHalfUp(editStatutoryRate);
   const checkedTasks = useMemo(
     () => tasks.filter((task) => checkedIds.includes(task.id)),
     [checkedIds, tasks],
@@ -573,6 +710,70 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     setInspectorOpen(true);
     setView("tasks");
     return task;
+  };
+
+  /**
+   * 「开票操作」页签本身就是开票入口，所以点它也要先选路径，与右上角的主按钮
+   * 走同一段。已经在某条路径里时不再问一次 —— 那等于把人从工作中拽出来。
+   */
+  const changeView = (next: WorkspaceView) => {
+    if (next === "compose" && view !== "compose" && view !== "batch") {
+      setModeOpen(true);
+      return;
+    }
+    setView(next);
+  };
+
+  const pickMode = (mode: IssuanceMode) => {
+    setModeOpen(false);
+    setView(mode === "single" ? "compose" : "batch");
+  };
+
+  const openEditor = () => {
+    if (!selectedTask) return;
+    editForm.setFieldsValue({
+      incomeType: selectedTask.incomeType ?? "",
+      paymentDate: selectedTask.paymentDate ?? "",
+      // 税率对外一律按百分数编辑，与单张开具的税率框口径一致。
+      whtRate:
+        selectedTask.whtRate === null
+          ? undefined
+          : Number((Number(selectedTask.whtRate) * 100).toFixed(2)),
+      totalAmount: Number(selectedTask.totalAmount),
+    });
+    setEditOpen(true);
+  };
+
+  const saveEdits = async () => {
+    if (!selectedTask) return;
+    try {
+      const values = await editForm.validateFields();
+      await editTask(selectedTask, {
+        incomeType: values.incomeType.trim(),
+        paymentDate: values.paymentDate,
+        whtRate: values.whtRate / 100,
+        totalAmount: values.totalAmount,
+        // 字段只在偏离时渲染，没偏离时 values 里根本没有这一项。
+        rateOverrideNote: values.rateOverrideNote?.trim() || null,
+      });
+      setEditOpen(false);
+      message.success(t("common.saved"));
+    } catch (editError) {
+      if (editError instanceof Error) message.error(editError.message);
+    }
+  };
+
+  const submitRevision = async () => {
+    if (!selectedTask) return;
+    try {
+      const values = await reviseForm.validateFields();
+      const revised = await reviseTask(selectedTask, values.reason.trim());
+      setReviseOpen(false);
+      reviseForm.resetFields();
+      message.success(t("wht.revised", { taskNo: revised.taskNo ?? "" }));
+    } catch (reviseError) {
+      if (reviseError instanceof Error) message.error(reviseError.message);
+    }
   };
 
   const handleAction = async (
@@ -696,61 +897,36 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   };
 
   const closeImport = () => {
-    setImportKind(null);
+    setImportOpen(false);
     setImportFile(null);
   };
 
+  /**
+   * 历史台账迁移。批量开具已经改走分步向导（上传 → 核对 → 建草稿），不再从这里进——
+   * 两个入口一个先核对一个不核对，摆在同一个菜单里必然有人点错。
+   */
   const runImport = async () => {
-    if (!importFile || !importKind) return;
+    if (!importFile) return;
     try {
-      if (importKind === "history") {
-        const result = await uploadHistoricalTasks(importFile);
-        message.success(
-          t("wht.historyImportCompleted", {
-            created: result.created,
-            skipped: result.skipped,
-          }),
-        );
-      } else {
-        const result = await uploadBatchTasks(importFile);
-        message.success(t("wht.batchImportCompleted", { created: result.created }));
-      }
+      const result = await uploadHistoricalTasks(importFile);
+      message.success(
+        t("wht.historyImportCompleted", {
+          created: result.created,
+          skipped: result.skipped,
+        }),
+      );
       closeImport();
     } catch (importError) {
-      // 批量导入是全表退回：把每一行的问题都列出来，用户改一轮就能过。
       if (importError instanceof ApiError && importError.details.length > 0) {
-        // 退回原因常常是「手上的模板是旧的、缺 TaxRateReason 列」。此时让人
-        // 关掉弹窗、重新走一遍导入菜单才能拿到新模板太绕，直接在这里给入口。
-        const staleTemplate = importError.details.some((detail) =>
-          detail.includes("TaxRateReason"),
-        );
         modal.error({
           title: t("wht.batchImportRejected"),
           width: 620,
           content: (
-            <>
-              <ul className="import-error-list">
-                {importError.details.map((detail) => (
-                  <li key={detail}>{detail}</li>
-                ))}
-              </ul>
-              {staleTemplate && (
-                <Alert
-                  className="import-intro"
-                  showIcon
-                  type="info"
-                  title={t("wht.batchTemplateStale")}
-                />
-              )}
-              <div className="import-actions">
-                <Button
-                  icon={<FileExcelOutlined />}
-                  onClick={() => void downloadTemplate()}
-                >
-                  {t("wht.batchTemplate")}
-                </Button>
-              </div>
-            </>
+            <ul className="import-error-list">
+              {importError.details.map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
           ),
         });
         return;
@@ -758,22 +934,6 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
       if (importError instanceof Error) message.error(importError.message);
     }
   };
-
-  const importSteps =
-    importKind === "history"
-      ? ([
-          "wht.historyImportStep1",
-          "wht.historyImportStep2",
-          "wht.historyImportStep3",
-          "wht.historyImportStep4",
-        ] as const)
-      : ([
-          "wht.batchImportStep1",
-          "wht.batchImportStep2",
-          "wht.batchImportStep3",
-          "wht.batchImportStep4",
-          "wht.batchImportStep5",
-        ] as const);
 
   const taskView = (
     <section className="workspace-main">
@@ -783,7 +943,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             <span>WHT</span>
             <small>{t("wht.title")}</small>
           </h1>
-          <ViewSwitch active="tasks" t={t} onChange={setView} />
+          <ViewSwitch active="tasks" t={t} onChange={changeView} />
         </div>
         <div className="page-actions">
           <Dropdown
@@ -799,7 +959,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                         {t("wht.importBatch")}
                         <Tag color="gold">{t("wht.importBatchTag")}</Tag>
                       </strong>
-                      <small>{t("wht.importBatchDesc")}</small>
+                      <small>{t("wht.modeBatchDesc")}</small>
                     </div>
                   ),
                 },
@@ -816,7 +976,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                     </div>
                   ),
                 },
-                // 模板不该只藏在批量开具弹窗里：模板加了列之后，手上拿旧模板的人
+                // 模板不该只藏在批量开具向导里：模板加了列之后，手上拿旧模板的人
                 // 需要能直接拿到新的，不必先假装要导入一次。
                 { key: "template-divider", type: "divider" },
                 {
@@ -835,8 +995,13 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                   void downloadTemplate();
                   return;
                 }
+                // 批量开具走分步向导，不再是"上传即落库"的那个弹窗。
+                if (key === "batch") {
+                  setView("batch");
+                  return;
+                }
                 setImportFile(null);
-                setImportKind(key as ImportKind);
+                setImportOpen(true);
               },
             }}
           >
@@ -844,7 +1009,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
               {t("wht.importMenu")} <DownOutlined />
             </Button>
           </Dropdown>
-          <Button icon={<PlusOutlined />} type="primary" onClick={() => setView("compose")}>
+          <Button icon={<PlusOutlined />} type="primary" onClick={() => setModeOpen(true)}>
             {t("wht.newTask")}
           </Button>
         </div>
@@ -1040,7 +1205,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             <span>WHT</span>
             <small>{t("wht.payeeMaster")}</small>
           </h1>
-          <ViewSwitch active="payees" t={t} onChange={setView} />
+          <ViewSwitch active="payees" t={t} onChange={changeView} />
         </div>
       </div>
       <PayeeDirectory
@@ -1066,9 +1231,21 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
       pending={mutationPending}
       periodOptions={periodOptions}
       t={t}
-      viewSwitch={<ViewSwitch active="compose" t={t} onChange={setView} />}
+      viewSwitch={<ViewSwitch active="compose" t={t} onChange={changeView} />}
       onCancel={() => setView("tasks")}
       onCreate={createFromConsole}
+    />
+  );
+
+  const batchView = (
+    <BatchIssuanceWizard
+      incomeTypes={incomeTypes}
+      pending={mutationPending}
+      t={t}
+      viewSwitch={<ViewSwitch active="batch" t={t} onChange={changeView} />}
+      onBackToLedger={() => setView("tasks")}
+      onCommit={commitBatch}
+      onPreview={previewBatch}
     />
   );
 
@@ -1078,7 +1255,13 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
 
   return (
     <div className={`workspace ${showInspector ? "with-inspector" : ""}`}>
-      {view === "tasks" ? taskView : view === "compose" ? composeView : payeeView}
+      {view === "tasks"
+        ? taskView
+        : view === "compose"
+          ? composeView
+          : view === "batch"
+            ? batchView
+            : payeeView}
 
       {showInspector && selectedTask && (
         <DetailPanel
@@ -1089,18 +1272,23 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           onAction={handleAction}
           onClose={() => setInspectorOpen(false)}
           onDownload={downloadDocument}
+          onEdit={openEditor}
           onGenerate={() => void openDocumentGenerator()}
+          onRevise={() => setReviseOpen(true)}
         />
       )}
 
+      <IssuanceModeChooser
+        open={modeOpen}
+        t={t}
+        onCancel={() => setModeOpen(false)}
+        onPick={pickMode}
+      />
+
       <Modal
         destroyOnHidden
-        open={importKind !== null}
-        title={
-          importKind === "history"
-            ? t("wht.historyImportTitle")
-            : t("wht.batchImportTitle")
-        }
+        open={importOpen}
+        title={t("wht.historyImportTitle")}
         okText={t("common.import")}
         cancelText={t("common.cancel")}
         okButtonProps={{ disabled: !importFile }}
@@ -1112,25 +1300,17 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         <Alert
           className="import-intro"
           showIcon
-          type={importKind === "history" ? "warning" : "info"}
-          title={
-            importKind === "history"
-              ? t("wht.historyImportIntro")
-              : t("wht.batchImportIntro")
-          }
+          type="warning"
+          title={t("wht.historyImportIntro")}
         />
         <h4 className="import-steps-title">{t("common.steps")}</h4>
         <ol className="import-steps">
-          {importSteps.map((key) => (
-            <li key={key}>{t(key)}</li>
-          ))}
+          <li>{t("wht.historyImportStep1")}</li>
+          <li>{t("wht.historyImportStep2")}</li>
+          <li>{t("wht.historyImportStep3")}</li>
+          <li>{t("wht.historyImportStep4")}</li>
         </ol>
         <div className="import-actions">
-          {importKind === "batch" && (
-            <Button icon={<FileExcelOutlined />} onClick={() => void downloadTemplate()}>
-              {t("wht.batchTemplate")}
-            </Button>
-          )}
           <Upload
             accept=".xlsx"
             beforeUpload={(file) => {
@@ -1146,9 +1326,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             onRemove={() => setImportFile(null)}
           >
             <Button icon={<UploadOutlined />} type="primary" ghost>
-              {importKind === "history"
-                ? t("wht.historyImportPick")
-                : t("wht.batchImportPick")}
+              {t("wht.historyImportPick")}
             </Button>
           </Upload>
         </div>
@@ -1197,6 +1375,131 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
               />
             </Form.Item>
           )}
+        </Form>
+      </Modal>
+
+      {/* 改草稿。收款方与期数不在这里改：换收款方等于换一张票，重建比改更清楚。 */}
+      <Modal
+        destroyOnHidden
+        open={editOpen}
+        title={t("wht.editTaskTitle", {
+          label: selectedTask?.taskNo ?? t("wht.pendingNumber"),
+        })}
+        okText={t("common.save")}
+        cancelText={t("common.cancel")}
+        confirmLoading={mutationPending}
+        onCancel={() => setEditOpen(false)}
+        onOk={() => void saveEdits()}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            name="incomeType"
+            label={t("wht.incomeType")}
+            rules={[{ required: true, whitespace: true }]}
+          >
+            <Input className="thai-input" maxLength={160} />
+          </Form.Item>
+          <Form.Item
+            name="paymentDate"
+            label={t("wht.paymentDate")}
+            rules={[{ required: true }]}
+          >
+            <Input type="date" />
+          </Form.Item>
+          <Form.Item
+            name="totalAmount"
+            label={t("wht.totalAmount")}
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={0.01} precision={2} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name="whtRate"
+            label={t("wht.ratePercent")}
+            extra={
+              editStatutoryRate === null ? undefined : (
+                <span className={`rate-note is-${editDeviates ? "warning" : "muted"}`}>
+                  {editDeviates
+                    ? t("wht.rateOverridden", {
+                        label: selectedTask?.incomeType ?? "",
+                        rate: `${Number(editWhtRate ?? 0).toFixed(2)}%`,
+                        statutory: `${(editStatutoryRate * 100).toFixed(2)}%`,
+                      })
+                    : t("wht.rateStatutory", {
+                        label: selectedTask?.incomeType ?? "",
+                        statutory: `${(editStatutoryRate * 100).toFixed(2)}%`,
+                      })}
+                </span>
+              )
+            }
+            rules={[{ required: true }]}
+          >
+            <InputNumber
+              max={100}
+              min={0.01}
+              precision={2}
+              style={{ width: "100%" }}
+              suffix="%"
+            />
+          </Form.Item>
+          {/* 只在真的偏离时才出现：法定税率下多问一句理由是纯噪音。 */}
+          {editDeviates && (
+            <Form.Item
+              name="rateOverrideNote"
+              label={t("wht.rateOverrideNote")}
+              extra={t("wht.rateOverrideNoteHint")}
+              rules={[
+                {
+                  required: true,
+                  whitespace: true,
+                  message: t("wht.rateOverrideNoteRequired"),
+                },
+              ]}
+            >
+              <Input.TextArea
+                autoSize={{ minRows: 2, maxRows: 4 }}
+                maxLength={1000}
+                placeholder={t("wht.rateOverrideNotePlaceholder")}
+                showCount
+              />
+            </Form.Item>
+          )}
+        </Form>
+      </Modal>
+
+      {/* 修订：把已批准/已开具的票退回草稿，票号不变，理由必填。 */}
+      <Modal
+        destroyOnHidden
+        open={reviseOpen}
+        title={t("wht.reviseTitle", { taskNo: selectedTask?.taskNo ?? "" })}
+        okText={t("wht.revise")}
+        cancelText={t("common.cancel")}
+        confirmLoading={mutationPending}
+        width={620}
+        onCancel={() => setReviseOpen(false)}
+        onOk={() => void submitRevision()}
+      >
+        <p className="wht-wizard-note is-emphasis">{t("wht.reviseIntro")}</p>
+        <Form className="wht-modal-form" form={reviseForm} layout="vertical">
+          <Form.Item
+            name="reason"
+            label={t("wht.reviseReason")}
+            extra={t("wht.reviseReasonHint")}
+            rules={[
+              {
+                required: true,
+                whitespace: true,
+                message: t("wht.reviseReasonRequired"),
+              },
+            ]}
+          >
+            <Input.TextArea
+              autoSize={{ minRows: 3, maxRows: 5 }}
+              maxLength={1000}
+              placeholder={t("wht.reviseReasonPlaceholder")}
+              showCount
+            />
+          </Form.Item>
         </Form>
       </Modal>
     </div>

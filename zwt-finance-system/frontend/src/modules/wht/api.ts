@@ -2,7 +2,9 @@ import { fileNameFromResponse, saveBlobAsFile } from "../../shared/download";
 import { ApiError, UnauthorizedError, apiFetch, apiRequest } from "../../shared/http";
 import { demoIncomeTypes, samplePayees, sampleWhtTasks } from "./sampleData";
 import type {
+  BatchCommitInput,
   BatchCreateResult,
+  BatchPreviewResult,
   BatchTransitionResult,
   ImportResult,
   IncomeTypeOption,
@@ -15,6 +17,7 @@ import type {
   WhtTask,
   WhtTaskCreateInput,
   WhtTaskEvent,
+  WhtTaskUpdateInput,
   WhtType,
 } from "./types";
 
@@ -145,6 +148,8 @@ export async function createWhtTask(input: WhtTaskCreateInput): Promise<WhtTask>
       amountTextThai: null,
       dateTextThai: null,
       sourceFileName: null,
+      // 单张开具只能从主数据里选已有收款方，永远不会欠主数据一笔。
+      payeePending: false,
       version: 1,
       createdByName: "系统管理员",
       updatedByName: "系统管理员",
@@ -324,16 +329,101 @@ export async function listIncomeTypes(whtType?: WhtType): Promise<IncomeTypeOpti
   return request<IncomeTypeOption[]>(`/v1/wht/income-types${query}`);
 }
 
-/** 批量开具：一张表建多条草稿。与 importHistoricalTasks 不同，这里不带正式编号。 */
-export async function batchCreateTasks(file: File): Promise<BatchCreateResult> {
+// 一步式的 POST /v1/wht/tasks/batch-create（上传即落库）在服务端仍然保留，供脚本和
+// 既有集成直接调用；界面已全部改走下面的 preview → commit 两步，所以这里不再包一层。
+
+/** 分步开票第一步：解析并配好收款方，交回前端核对。只读，不写库。 */
+export async function previewBatchTasks(file: File): Promise<BatchPreviewResult> {
   if (useDemoApi) {
-    return { sourceFileName: file.name, created: 0, taskIds: [] };
+    return {
+      sourceFileName: file.name,
+      rows: [],
+      ready: 0,
+      payeeMissing: 0,
+      needsInput: 0,
+    };
   }
   const body = new FormData();
   body.append("file", file);
-  return request<BatchCreateResult>("/v1/wht/tasks/batch-create", {
+  return request<BatchPreviewResult>("/v1/wht/tasks/batch-preview", {
     method: "POST",
     body,
+  });
+}
+
+/** 分步开票第二步：把核对（并补全）后的行落成草稿。 */
+export async function commitBatchTasks(
+  input: BatchCommitInput,
+): Promise<BatchCreateResult> {
+  if (useDemoApi) {
+    return {
+      sourceFileName: input.sourceFileName,
+      created: input.rows.length,
+      taskIds: [],
+      payeesPending: input.rows.filter((row) => !row.payee.payeeId).length,
+    };
+  }
+  return request<BatchCreateResult>("/v1/wht/tasks/batch-commit", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** 改草稿。version 是乐观锁：别人先改过就会 409，界面提示重新载入。 */
+export async function updateWhtTask(
+  task: WhtTask,
+  input: WhtTaskUpdateInput,
+): Promise<WhtTask> {
+  if (useDemoApi) {
+    const target = demoTasks.find((item) => item.id === task.id);
+    if (!target) throw new ApiError("WHT task was not found", 404);
+    // rateOverrideNote 落进服务端的事件流水，不是任务上的字段，别顺手贴到对象上。
+    const { rateOverrideNote: _note, ...fields } = input;
+    Object.assign(target, {
+      ...fields,
+      whtRate: input.whtRate === undefined ? target.whtRate : String(input.whtRate),
+      totalAmount:
+        input.totalAmount === undefined
+          ? target.totalAmount
+          : input.totalAmount.toFixed(2),
+      version: target.version + 1,
+      updatedAt: nowIso(),
+    });
+    target.whtAmount = (Number(target.totalAmount) * Number(target.whtRate)).toFixed(2);
+    return clone(target);
+  }
+  return request<WhtTask>(`/v1/wht/tasks/${task.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ...input, version: task.version }),
+  });
+}
+
+/**
+ * 把已批准/已开具的票据退回草稿以便更正。**票号保持不变**（业务口径 2026-08-01）：
+ * 改完重新批准、重新出具，文件版本号 +1，旧版本留档。
+ */
+export async function reviseWhtTask(task: WhtTask, reason: string): Promise<WhtTask> {
+  if (useDemoApi) {
+    const target = demoTasks.find((item) => item.id === task.id);
+    if (!target) throw new ApiError("WHT task was not found", 404);
+    const previous = target.status;
+    target.status = "draft";
+    target.version += 1;
+    target.updatedAt = nowIso();
+    target.events.push({
+      id: demoEventId++,
+      eventType: "revised",
+      fromStatus: previous,
+      toStatus: "draft",
+      actorName: "系统管理员",
+      note: reason,
+      createdAt: target.updatedAt,
+    });
+    return clone(target);
+  }
+  return request<WhtTask>(`/v1/wht/tasks/${task.id}/revise`, {
+    method: "POST",
+    body: JSON.stringify({ version: task.version, reason }),
   });
 }
 
