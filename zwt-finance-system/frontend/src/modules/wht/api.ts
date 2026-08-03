@@ -665,7 +665,7 @@ export async function restoreSignature(
 
 export async function updateSignature(
   signatureId: string,
-  input: Partial<Pick<SignatureAsset, "status" | "isDefault" | "usage">>,
+  input: Partial<Pick<SignatureAsset, "status" | "isDefault" | "usage" | "scalePercent">>,
 ): Promise<SignatureAsset> {
   if (useDemoApi) {
     if (input.isDefault) {

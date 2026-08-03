@@ -256,6 +256,8 @@ export interface SignatureAsset {
   usage: SignatureUsage[];
   /** 默认签名按适用范围各算各的：各模块可以各有一张默认。 */
   isDefault: boolean;
+  /** 用户选择的签名放大/缩小百分比比例（如 100 代表 100%，120 代表 120%）。 */
+  scalePercent?: number;
   createdByName: string;
   updatedByName: string;
   createdAt: string;
