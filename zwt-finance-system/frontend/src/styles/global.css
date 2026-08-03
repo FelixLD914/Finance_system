@@ -1,4 +1,4 @@
-﻿@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/400.css";
 @import "@fontsource/dm-sans/500.css";
 @import "@fontsource/dm-sans/600.css";
 @import "@fontsource/dm-sans/700.css";
@@ -2985,3 +2985,354 @@ select {
   background: var(--paper);
   padding: 24px;
 }
+
+/* --- 签名效果预览 Modal ------------------------------------------------ */
+.signature-preview-modal-header {
+  padding-bottom: 8px;
+}
+
+.signature-preview-modal-header .title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.signature-preview-modal-header .header-icon {
+  font-size: 20px;
+  color: var(--finance-primary, #8c6b3e);
+}
+
+.signature-preview-modal-header h2 {
+  margin: 0;
+  font-family: var(--font-title, "Cormorant Garamond", serif);
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.signature-preview-modal-header .subtitle {
+  margin: 4px 0 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.signature-preview-container {
+  display: grid;
+  grid-template-columns: 310px 1fr;
+  gap: 20px;
+  min-height: 480px;
+  padding-top: 12px;
+}
+
+.signature-source-panel,
+.signature-template-panel {
+  display: flex;
+  flex-direction: column;
+  background: #fcfcfd;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.signature-source-panel .panel-title,
+.signature-template-panel .panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #344054;
+  margin-bottom: 14px;
+}
+
+.signature-image-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 150px;
+  background-color: #ffffff;
+  background-image: linear-gradient(45deg, #f2f4f7 25%, transparent 25%),
+    linear-gradient(-45deg, #f2f4f7 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #f2f4f7 75%),
+    linear-gradient(-45deg, transparent 75%, #f2f4f7 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.source-signature-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.12));
+}
+
+.source-meta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #f2f4f7;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+}
+
+.source-meta-card .meta-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.source-meta-card .meta-label {
+  color: #667085;
+  white-space: nowrap;
+}
+
+.source-meta-card .meta-val {
+  color: #1d2939;
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+}
+
+.source-meta-card .tags-val {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.signature-template-panel .template-toolbar {
+  margin-bottom: 14px;
+}
+
+.template-segmented {
+  width: 100%;
+}
+
+.document-template-canvas {
+  flex: 1;
+  background: #ffffff;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.doc-mock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1d2939;
+}
+
+.doc-watermark {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-25deg);
+  font-size: 42px;
+  font-weight: 900;
+  color: rgba(16, 24, 40, 0.03);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.doc-header {
+  border-bottom: 2px double #344054;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+
+.doc-header .gov-badge,
+.doc-header .company-logo-text {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8c6b3e;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.doc-header .doc-title-th {
+  font-size: 14px;
+  font-weight: 700;
+  color: #101828;
+  margin-top: 2px;
+}
+
+.doc-header .doc-no-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #475467;
+  font-family: Consolas, monospace;
+  margin-top: 6px;
+}
+
+.doc-body-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.doc-field-row {
+  display: flex;
+  gap: 8px;
+}
+
+.doc-field-row .lbl {
+  color: #475467;
+  font-weight: 500;
+  width: 190px;
+  flex-shrink: 0;
+}
+
+.doc-field-row .val {
+  color: #101828;
+  font-weight: 600;
+}
+
+.font-mono {
+  font-family: Consolas, monospace;
+}
+
+.doc-table-mini {
+  margin-top: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 4px;
+  overflow: hidden;
+  font-size: 11px;
+}
+
+.doc-table-mini .tr {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  padding: 6px 10px;
+}
+
+.doc-table-mini .tr.th {
+  background: #f8fafc;
+  font-weight: 700;
+  color: #475467;
+  border-bottom: 1px solid #d0d5dd;
+}
+
+.doc-table-mini .tr.td {
+  color: #101828;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 盖章与签名区域 */
+.doc-signature-block {
+  position: relative;
+  margin-top: auto;
+  padding-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.doc-signature-block .seal-ring {
+  position: absolute;
+  right: 120px;
+  bottom: 18px;
+  width: 96px;
+  height: 96px;
+  border: 2px dashed #b42318;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #b42318;
+  opacity: 0.75;
+  transform: rotate(-12deg);
+  pointer-events: none;
+}
+
+.doc-signature-block .seal-ring.blue-seal {
+  border-color: #175cd3;
+  color: #175cd3;
+}
+
+.doc-signature-block .seal-ring.purple-seal {
+  border-color: #6941c6;
+  color: #6941c6;
+}
+
+.doc-signature-block .seal-text-top {
+  font-size: 8px;
+  font-weight: 800;
+  text-align: center;
+  padding: 0 4px;
+}
+
+.doc-signature-block .seal-star {
+  font-size: 12px;
+  line-height: 1;
+  margin: 2px 0;
+}
+
+.doc-signature-block .seal-text-bot {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.doc-signature-block .signature-overlay {
+  position: absolute;
+  right: 40px;
+  bottom: 22px;
+  width: 180px;
+  height: 70px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.doc-signature-block .signature-overlay img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+}
+
+.doc-signature-block .signature-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 220px;
+  z-index: 1;
+}
+
+.doc-signature-block .dots {
+  color: #98a2b3;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.doc-signature-block .signee-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #101828;
+  margin-top: 4px;
+}
+
+.doc-signature-block .signee-title {
+  font-size: 10px;
+  color: #667085;
+}
+

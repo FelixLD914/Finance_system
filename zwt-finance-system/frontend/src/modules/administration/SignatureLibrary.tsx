@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   CheckCircleOutlined,
   DeleteOutlined,
+  EyeOutlined,
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -35,6 +36,7 @@ import {
   uploadSignature,
 } from "../wht/api";
 import type { SignatureAsset, SignatureUsage } from "../wht/types";
+import { SignaturePreviewModal } from "./SignaturePreviewModal";
 
 interface SignatureLibraryProps {
   t: Translate;
@@ -55,6 +57,7 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
   const [error, setError] = useState<string | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [scopeTarget, setScopeTarget] = useState<SignatureAsset | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<SignatureAsset | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [form] = Form.useForm();
   const [scopeForm] = Form.useForm();
@@ -282,6 +285,14 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
           <div className="table-row-actions">
             <Button
               disabled={pending}
+              icon={<EyeOutlined />}
+              size="small"
+              onClick={() => setPreviewTarget(signature)}
+            >
+              {t("wht.previewSignature") || "预览效果"}
+            </Button>
+            <Button
+              disabled={pending}
               icon={<TagsOutlined />}
               size="small"
               onClick={() => {
@@ -480,6 +491,13 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
           </Form.Item>
         </Form>
       </Modal>
+
+      <SignaturePreviewModal
+        open={previewTarget !== null}
+        signature={previewTarget}
+        t={t}
+        onClose={() => setPreviewTarget(null)}
+      />
     </section>
   );
 }

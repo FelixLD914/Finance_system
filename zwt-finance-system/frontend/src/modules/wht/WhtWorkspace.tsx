@@ -18,6 +18,7 @@ import {
   Button,
   Checkbox,
   Descriptions,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -483,7 +484,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const editIncomeType = Form.useWatch("incomeType", editForm);
   const editWhtRate = Form.useWatch("whtRate", editForm);
   const [filters, setFilters] = useState<Filters>({
-    period: "2026-06",
+    period: "all",
     status: "all",
     bookNo: "all",
     query: "",
@@ -497,7 +498,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
 
   const periodOptions = useMemo(
     () =>
-      [...new Set(["2026-06", ...tasks.map((task) => task.period)])]
+      [...new Set(tasks.map((task) => task.period))]
         .sort()
         .reverse()
         .map((period) => ({ value: period, label: period })),
@@ -894,7 +895,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             <span>{t("wht.period")}</span>
             <Select
               value={filters.period}
-              options={[...periodOptions, { value: "all", label: t("wht.all") }]}
+              options={[{ value: "all", label: t("wht.all") }, ...periodOptions]}
               onChange={(period) => setFilters((current) => ({ ...current, period }))}
             />
           </label>
@@ -1094,7 +1095,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const showInspector = view === "tasks" && inspectorOpen && Boolean(selectedTask);
 
   return (
-    <div className={`workspace ${showInspector ? "with-inspector" : ""}`}>
+    <div className="workspace">
       {/* 四个工作区始终保持挂载，只切换可见性：跨页查看台账或主数据后，
           单张表单与批量核对结果都不会被卸载。 */}
       <div className="workspace-view-host" hidden={view !== "tasks"}>
@@ -1110,20 +1111,30 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         {payeeView}
       </div>
 
-      {showInspector && selectedTask && (
-        <DetailPanel
-          documents={documents}
-          pending={mutationPending || documentPending}
-          task={selectedTask}
-          t={t}
-          onAction={handleAction}
-          onClose={() => setInspectorOpen(false)}
-          onDownload={downloadDocument}
-          onEdit={openEditor}
-          onGenerate={() => void openDocumentGenerator()}
-          onRevise={() => setReviseOpen(true)}
-        />
-      )}
+      <Drawer
+        destroyOnClose={false}
+        open={showInspector}
+        placement="right"
+        styles={{ body: { padding: 0 } }}
+        title={null}
+        width={560}
+        onClose={() => setInspectorOpen(false)}
+      >
+        {selectedTask && (
+          <DetailPanel
+            documents={documents}
+            pending={mutationPending || documentPending}
+            task={selectedTask}
+            t={t}
+            onAction={handleAction}
+            onClose={() => setInspectorOpen(false)}
+            onDownload={downloadDocument}
+            onEdit={openEditor}
+            onGenerate={() => void openDocumentGenerator()}
+            onRevise={() => setReviseOpen(true)}
+          />
+        )}
+      </Drawer>
 
       <Modal
         destroyOnHidden

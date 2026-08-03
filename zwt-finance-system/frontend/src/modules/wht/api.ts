@@ -25,7 +25,25 @@ const useDemoApi = import.meta.env.VITE_USE_MOCK_API === "true";
 
 let demoTasks = structuredClone(sampleWhtTasks);
 let demoPayees = structuredClone(samplePayees);
-let demoSignatures: SignatureAsset[] = [];
+let demoSignatures: SignatureAsset[] = [
+  {
+    id: "sig-001",
+    name: "XINGLANHUI",
+    originalFileName: "XING.png",
+    mimeType: "image/png",
+    sha256: "demo-sha256-xinglanhui",
+    version: 1,
+    status: "active",
+    usage: ["wht"],
+    isDefault: true,
+    createdByName: "系统管理员",
+    updatedByName: "系统管理员",
+    createdAt: "2026-08-03T13:39:02Z",
+    updatedAt: "2026-08-03T13:39:02Z",
+    deletedAt: null,
+    deletedByName: null,
+  },
+];
 let demoDocuments: WhtDocument[] = [];
 let demoEventId = 1;
 
