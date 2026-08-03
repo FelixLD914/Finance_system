@@ -3342,4 +3342,27 @@ select {
   z-index: 1100 !important;
 }
 
+/* 期数面包屑导航与汇总台账样式 */
+.period-breadcrumb-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: var(--finance-surface, #ffffff);
+  border: 1px solid var(--finance-border, #eaecf0);
+  border-radius: var(--finance-radius-md, 8px);
+  margin-bottom: 12px;
+}
+
+.period-breadcrumb-title {
+  font-size: 13px;
+  color: #344054;
+}
+
+.period-breadcrumb-title strong {
+  color: var(--finance-primary, #8c6b3e);
+  font-size: 14px;
+}
+
+
 

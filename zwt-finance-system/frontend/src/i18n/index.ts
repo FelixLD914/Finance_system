@@ -46,6 +46,7 @@ const resources = {
     "common.dataView": "数据视图",
     "common.activeRecords": "在用记录",
     "common.recycleBin": "回收站",
+    "common.actions": "操作",
     "role.supervisor": "财务主管",
 
     "login.tagline": "财务管理系统",
@@ -190,6 +191,8 @@ const resources = {
     "wht.enableSignature": "启用",
     "wht.previewSignature": "预览效果",
     "wht.signaturePreviewTitle": "签名效果预览",
+    "wht.backToAllPeriods": "返回全部期数",
+    "wht.taskCountLabel": "任务数量",
     "wht.generateDocuments": "生成正式文件",
     "wht.generatedDocuments": "已生成文件",
     "wht.generateCompleted": "WHT 正式文件已生成",
@@ -939,6 +942,7 @@ const resources = {
     "common.dataView": "Data view",
     "common.activeRecords": "Active records",
     "common.recycleBin": "Recycle bin",
+    "common.actions": "Actions",
     "role.supervisor": "Finance Supervisor",
 
     "login.tagline": "Financial Management System",
@@ -1084,6 +1088,8 @@ const resources = {
     "wht.enableSignature": "Activate",
     "wht.previewSignature": "Preview effect",
     "wht.signaturePreviewTitle": "Signature Preview",
+    "wht.backToAllPeriods": "Back to all periods",
+    "wht.taskCountLabel": "Task count",
     "wht.generateDocuments": "Generate formal files",
     "wht.generatedDocuments": "Generated files",
     "wht.generateCompleted": "WHT formal files generated",
