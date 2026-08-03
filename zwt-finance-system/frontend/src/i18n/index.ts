@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type Locale = "zh-CN" | "en-US";
 export type TranslationKey = keyof typeof resources["zh-CN"];
@@ -188,6 +188,8 @@ const resources = {
     "wht.setDefault": "设为默认",
     "wht.disableSignature": "停用",
     "wht.enableSignature": "启用",
+    "wht.previewSignature": "预览效果",
+    "wht.signaturePreviewTitle": "签名效果预览",
     "wht.generateDocuments": "生成正式文件",
     "wht.generatedDocuments": "已生成文件",
     "wht.generateCompleted": "WHT 正式文件已生成",
@@ -1080,6 +1082,8 @@ const resources = {
     "wht.setDefault": "Set default",
     "wht.disableSignature": "Deactivate",
     "wht.enableSignature": "Activate",
+    "wht.previewSignature": "Preview effect",
+    "wht.signaturePreviewTitle": "Signature Preview",
     "wht.generateDocuments": "Generate formal files",
     "wht.generatedDocuments": "Generated files",
     "wht.generateCompleted": "WHT formal files generated",
