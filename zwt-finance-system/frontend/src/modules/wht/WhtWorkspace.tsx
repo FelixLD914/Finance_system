@@ -498,6 +498,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   const [pageSize, setPageSize] = useState<number>(8);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(true);
+  const [batchGenerateTasks, setBatchGenerateTasks] = useState<WhtTask[]>([]);
 
   const hasActiveFilters =
     filters.period !== "all" ||
@@ -585,6 +586,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   );
   const draftChecked = checkedTasks.filter((task) => task.status === "draft");
   const reviewChecked = checkedTasks.filter((task) => task.status === "pending_review");
+  const approvedChecked = checkedTasks.filter((task) => task.status === "approved");
 
   useEffect(() => {
     if (!selectedTask || !["approved", "issued"].includes(selectedTask.status)) {
@@ -640,6 +642,76 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
       dataIndex: "updatedAt",
       width: 142,
       render: (value: string) => <span className="date-value">{formatDateTime(value)}</span>,
+    },
+    {
+      title: t("common.actions") || "操作",
+      key: "actions",
+      width: 140,
+      render: (_, record) => {
+        if (record.status === "approved") {
+          return (
+            <Button
+              size="small"
+              type="primary"
+              icon={<FileDoneOutlined />}
+              style={{ background: "#8c6b3e", borderColor: "#8c6b3e" }}
+              onClick={(event) => {
+                event.stopPropagation();
+                void openDocumentGenerator([record]);
+              }}
+            >
+              生成正式文件
+            </Button>
+          );
+        }
+        if (record.status === "draft") {
+          return (
+            <Button
+              size="small"
+              type="primary"
+              onClick={(event) => {
+                event.stopPropagation();
+                void runBatch("submit-review", [record]);
+              }}
+            >
+              提交复核
+            </Button>
+          );
+        }
+        if (record.status === "pending_review") {
+          return (
+            <Button
+              size="small"
+              onClick={(event) => {
+                event.stopPropagation();
+                modal.confirm({
+                  title: t("wht.batchConfirmApprove", { count: 1 }),
+                  content: t("wht.batchConfirmApproveBody"),
+                  okText: t("wht.batchApprove"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => runBatch("approve", [record]),
+                });
+              }}
+            >
+              批准取号
+            </Button>
+          );
+        }
+        return (
+          <Button
+            size="small"
+            type="link"
+            onClick={(event) => {
+              event.stopPropagation();
+              setSelectedId(record.id);
+              setInspectorOpen(true);
+              void loadTaskDetail(record.id);
+            }}
+          >
+            查看明细
+          </Button>
+        );
+      },
     },
   ];
 
@@ -924,7 +996,13 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     });
   };
 
-  const openDocumentGenerator = async () => {
+  const openDocumentGenerator = async (targetTasks?: WhtTask[]) => {
+    const tasksToRun = targetTasks && targetTasks.length > 0
+      ? targetTasks
+      : (selectedTask ? [selectedTask] : []);
+    if (tasksToRun.length === 0) return;
+
+    setBatchGenerateTasks(tasksToRun);
     try {
       setDocumentPending(true);
       // 只列适用于 WHT 的（含 both）：TAX INV 专用的签名不能出现在这里。
@@ -945,18 +1023,35 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   };
 
   const generateDocuments = async () => {
-    if (!selectedTask) return;
+    const tasksToRun = batchGenerateTasks.length > 0
+      ? batchGenerateTasks
+      : (selectedTask ? [selectedTask] : []);
+    if (tasksToRun.length === 0) return;
+
     try {
       const values = await generateForm.validateFields();
       setDocumentPending(true);
-      const created = await generateWhtDocuments(selectedTask.id, {
-        includeSignature: Boolean(values.includeSignature),
-        signatureId: values.includeSignature ? values.signatureId : null,
-        formats: values.formats,
-      });
-      setDocuments((current) => [...created, ...current]);
+      let count = 0;
+      const createdDocs: WhtDocument[] = [];
+
+      for (const task of tasksToRun) {
+        const created = await generateWhtDocuments(task.id, {
+          includeSignature: Boolean(values.includeSignature),
+          signatureId: values.includeSignature ? values.signatureId : null,
+          formats: values.formats,
+        });
+        createdDocs.push(...created);
+        count += 1;
+      }
+
+      setDocuments((current) => [...createdDocs, ...current]);
       setGenerateOpen(false);
-      message.success(t("wht.generateCompleted"));
+      setCheckedIds([]);
+      message.success(
+        tasksToRun.length > 1
+          ? `成功批量为 ${count} 份已批准任务生成 WHT 正式开票文件！`
+          : t("wht.generateCompleted"),
+      );
       await reload();
     } catch (generationError) {
       if (generationError instanceof Error) message.error(generationError.message);
@@ -1250,33 +1345,47 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                   )}
                 </div>
                 <div className="batch-actions">
-                  <Button
-                    disabled={draftChecked.length === 0}
-                    loading={mutationPending}
-                    size="small"
-                    type="primary"
-                    onClick={() => void runBatch("submit-review", draftChecked)}
-                  >
-                    {t("wht.batchSubmitReview")}
-                    {draftChecked.length > 0 && ` (${draftChecked.length})`}
-                  </Button>
-                  <Button
-                    disabled={reviewChecked.length === 0}
-                    loading={mutationPending}
-                    size="small"
-                    onClick={confirmBatchApprove}
-                  >
-                    {t("wht.batchApprove")}
-                    {reviewChecked.length > 0 && ` (${reviewChecked.length})`}
-                  </Button>
-                  <Button
-                    disabled={reviewChecked.length === 0}
-                    loading={mutationPending}
-                    size="small"
-                    onClick={() => void runBatch("return-to-draft", reviewChecked)}
-                  >
-                    {t("wht.batchReturnDraft")}
-                  </Button>
+                  {draftChecked.length > 0 && (
+                    <Button
+                      loading={mutationPending}
+                      size="small"
+                      type="primary"
+                      onClick={() => void runBatch("submit-review", draftChecked)}
+                    >
+                      {t("wht.batchSubmitReview")} ({draftChecked.length})
+                    </Button>
+                  )}
+                  {reviewChecked.length > 0 && (
+                    <>
+                      <Button
+                        loading={mutationPending}
+                        size="small"
+                        type="primary"
+                        onClick={confirmBatchApprove}
+                      >
+                        {t("wht.batchApprove")} ({reviewChecked.length})
+                      </Button>
+                      <Button
+                        loading={mutationPending}
+                        size="small"
+                        onClick={() => void runBatch("return-to-draft", reviewChecked)}
+                      >
+                        {t("wht.batchReturnDraft")}
+                      </Button>
+                    </>
+                  )}
+                  {approvedChecked.length > 0 && (
+                    <Button
+                      loading={documentPending}
+                      size="small"
+                      type="primary"
+                      style={{ background: "#8c6b3e", borderColor: "#8c6b3e" }}
+                      onClick={() => void openDocumentGenerator(approvedChecked)}
+                    >
+                      <FileDoneOutlined />
+                      批量生成正式文件 ({approvedChecked.length})
+                    </Button>
+                  )}
                   <Button size="small" type="text" onClick={() => setCheckedIds([])}>
                     {t("common.clearSelection")}
                   </Button>
@@ -1517,9 +1626,17 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         destroyOnHidden
         forceRender
         open={generateOpen}
-        title={t("wht.generateDocuments")}
+        title={
+          batchGenerateTasks.length > 1
+            ? `批量生成正式开票文件 (共 ${batchGenerateTasks.length} 项任务)`
+            : t("wht.generateDocuments")
+        }
         zIndex={1100}
-        okText={t("wht.generateDocuments")}
+        okText={
+          batchGenerateTasks.length > 1
+            ? `确认批量生成 (${batchGenerateTasks.length} 份)`
+            : t("wht.generateDocuments")
+        }
         cancelText={t("common.cancel")}
         confirmLoading={documentPending}
         onCancel={() => setGenerateOpen(false)}
