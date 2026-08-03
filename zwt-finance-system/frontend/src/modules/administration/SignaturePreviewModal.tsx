@@ -28,6 +28,59 @@ const usageColors: Record<SignatureUsage, string> = {
 };
 
 /**
+ * 对应真实系统 PDF 开票模板底图的参数配置 (A4 页面比例 595.28 x 841.89 pt)
+ * 结合 backend/app/modules 各自的 SIGNATURE_BOX 坐标进行百分比定位，确保预览效果与后端 ReportLab 开票生成的 PDF 完全一致。
+ */
+const TEMPLATE_CONFIGS: Record<
+  SignatureUsage,
+  {
+    bgImage: string;
+    title: string;
+    // PDF 签名框在底板上的百分比坐标与基准宽高 (%)
+    sigBox: {
+      leftPercent: number; // 签名中心在底图中的 X 轴百分比
+      bottomPercent: number; // 签名中心在底图中的 Y 轴 (从底部算) 百分比
+      widthPercent: number; // 基准 100% 时的宽度百分比
+      heightPercent: number; // 基准 100% 时的高度百分比
+    };
+  }
+> = {
+  wht: {
+    bgImage: "/wht-template-bg.png",
+    title: "WHT 扣缴凭证 (P.N.D.53/3 正式文件底板)",
+    // ReportLab WHT 坐标: (201.5, 83.0, 95.0, 42.0) -> 中心 X = 201.5 + 47.5 = 249.0 (41.83%), Y = 83.0 + 21 = 104.0 (12.35%)
+    sigBox: {
+      leftPercent: 41.83,
+      bottomPercent: 12.35,
+      widthPercent: 18.5,
+      heightPercent: 5.8,
+    },
+  },
+  tax_inv: {
+    bgImage: "/tax-inv-template-bg.png",
+    title: "TAX INV 增值税发票 (正式文件底板)",
+    // ReportLab TAX INV 坐标: (398.0, 112.0, 150.0, 46.0) -> 中心 X = 398.0 + 75.0 = 473.0 (79.46%), Y = 112.0 + 23.0 = 135.0 (16.03%)
+    sigBox: {
+      leftPercent: 79.46,
+      bottomPercent: 16.03,
+      widthPercent: 25.2,
+      heightPercent: 6.2,
+    },
+  },
+  salary_advance: {
+    bgImage: "/salary-advance-template-bg.png",
+    title: "工资预支单凭证 (正式文件底板)",
+    // ReportLab Salary Advance 坐标: (328.37, 286.31, 90.0, 28.0) -> 中心 X = 328.37 + 45 = 373.37 (62.72%), Y = 286.31 + 14 = 300.31 (35.67%)
+    sigBox: {
+      leftPercent: 62.72,
+      bottomPercent: 35.67,
+      widthPercent: 18.0,
+      heightPercent: 4.8,
+    },
+  },
+};
+
+/**
  * 生成默认的演示签名 SVG Data URL (当无法读取服务端真实图片时作为优雅降级)
  */
 function createDemoSignatureDataUrl(name: string): string {
@@ -108,6 +161,7 @@ export function SignaturePreviewModal({
     }
   };
 
+  const currentCfg = TEMPLATE_CONFIGS[activeTemplate];
   const scaleRatio = scalePercent / 100;
 
   return (
@@ -156,7 +210,7 @@ export function SignaturePreviewModal({
           </p>
         </div>
       }
-      width={940}
+      width={960}
       onCancel={onClose}
     >
       <div className="signature-preview-container">
@@ -214,7 +268,7 @@ export function SignaturePreviewModal({
               </Button>
             </div>
             <small className="scale-hint">
-              拖动滑块或选择预设比例，右侧真实开票模板实时套印效果同步响应。
+              右侧使用系统开票正式文件底板（如 WHT/TAX INV/工资单），拖动滑块实时定位缩放签名套印效果。
             </small>
           </div>
 
@@ -236,11 +290,11 @@ export function SignaturePreviewModal({
           </div>
         </div>
 
-        {/* 右侧：按照不同文件模板显示的签名应用效果 */}
+        {/* 右侧：基于系统真实开票文件底图的套印预览 */}
         <div className="signature-template-panel">
           <div className="panel-title">
             <FileProtectOutlined />
-            <span>真实模板盖章效果 (Real Template Preview)</span>
+            <span>系统真实开票文件底板套印预览 (System PDF Template Preview)</span>
           </div>
 
           <div className="template-toolbar">
@@ -252,206 +306,69 @@ export function SignaturePreviewModal({
             />
           </div>
 
-          {/* 真实模板高保真渲染区域 */}
-          <div className="document-template-canvas">
-            {activeTemplate === "wht" && (
-              <div className="doc-mock wht-doc-mock real-template">
-                <div className="doc-watermark">P.N.D.53 / 3</div>
-                <div className="copy-notice">
-                  ฉบับที่ 1 (สำหรับผู้ถูกหักภาษี ณ ที่จ่าย ใช้แนบพร้อมกับแบบแสดงรายการภาษี)
-                </div>
-                <div className="doc-header">
-                  <div className="gov-badge">หนังสือรับรองการหักภาษี ณ ที่จ่าย</div>
-                  <div className="doc-title-th">WITHHOLDING TAX CERTIFICATE (ภ.ง.ด.53 / 3)</div>
-                  <div className="doc-no-row">
-                    <span>เล่มที่ / BOOK NO: 202607BK1</span>
-                    <span>เลขที่ / DOC NO: ZWT202607001</span>
-                  </div>
-                </div>
+          {/* 真实系统 PDF 模板底图 + 精确 ReportLab 坐标叠加渲染 */}
+          <div className="pdf-template-underlay-viewport">
+            <div className="pdf-page-container">
+              <img
+                alt={currentCfg.title}
+                className="pdf-underlay-image"
+                src={currentCfg.bgImage}
+              />
 
-                <div className="doc-body-fields">
-                  <div className="doc-field-row">
-                    <span className="lbl">PAYER (ผู้มีหน้าที่หักภาษี):</span>
-                    <span className="val">ZWT FINANCE (THAILAND) CO., LTD. (TAX ID: 0105562109841)</span>
-                  </div>
-                  <div className="doc-field-row">
-                    <span className="lbl">PAYEE (ผู้ถูกหักภาษี):</span>
-                    <span className="val">บริษัท จั่วป่าร์รีไซเคิลสหวรุ่งเรือง จำกัด (TAX ID: 0105540057561)</span>
-                  </div>
-                  <div className="doc-table-mini">
-                    <div className="tr th">
-                      <span>INCOME TYPE</span>
-                      <span>DATE</span>
-                      <span>AMOUNT (THB)</span>
-                      <span>TAX (THB)</span>
-                    </div>
-                    <div className="tr td">
-                      <span>ค่าบริการ (Services)</span>
-                      <span>2026/7/3</span>
-                      <span>150,000.00</span>
-                      <span>4,500.00</span>
-                    </div>
-                    <div className="tr td total-row">
-                      <span>รวมเงินที่จ่ายและภาษีที่นำส่ง (TOTAL)</span>
-                      <span>-</span>
-                      <span>150,000.00</span>
-                      <span>4,500.00</span>
-                    </div>
-                  </div>
-                  <div className="baht-text-line">
-                    <span>รวมเงินภาษีที่นำส่ง (ตัวอักษร): </span>
-                    <strong>-- หนึ่งแสนห้าหมื่นบาทถ้วน --</strong>
-                  </div>
+              {/* 在系统真实文件底板上叠加开票样例文字 (位置与 ReportLab 生成 PDF 完全对齐) */}
+              {activeTemplate === "wht" && (
+                <div className="overlay-sample-layer wht-sample-layer">
+                  <span className="pdf-field val-bookno" style={{ left: "75%", top: "4.5%" }}>202607BK1</span>
+                  <span className="pdf-field val-refno" style={{ left: "75%", top: "6.2%" }}>ZWT202607001</span>
+                  <span className="pdf-field val-payee" style={{ left: "10%", top: "21.0%" }}>บริษัท จั่วป่าร์รีไซเคิลสหวรุ่งเรือง จำกัด</span>
+                  <span className="pdf-field val-taxid" style={{ left: "80%", top: "21.1%" }}>0105540057561</span>
+                  <span className="pdf-field val-incometype" style={{ left: "30%", top: "69.5%" }}>ค่าบริการ (Services)</span>
+                  <span className="pdf-field val-date" style={{ left: "62%", top: "69.5%" }}>2026/7/3</span>
+                  <span className="pdf-field val-amount" style={{ left: "78%", top: "69.5%" }}>150,000.00</span>
+                  <span className="pdf-field val-tax" style={{ left: "91%", top: "69.5%" }}>4,500.00</span>
+                  <span className="pdf-field val-total-amount" style={{ left: "78%", top: "73.2%" }}>150,000.00</span>
+                  <span className="pdf-field val-total-tax" style={{ left: "91%", top: "73.2%" }}>4,500.00</span>
+                  <span className="pdf-field val-bahttext" style={{ left: "45%", top: "76.5%" }}>-- หนึ่งแสนห้าหมื่นบาทถ้วน --</span>
+                  <span className="pdf-field val-date-thai" style={{ left: "38%", top: "90.8%" }}>3 กรกฎาคม 2569</span>
                 </div>
+              )}
 
-                {/* 签名盖章处：支持由 scalePercent 驱动的实效尺寸渲染 */}
-                <div className="doc-signature-block">
-                  <div className="seal-ring">
-                    <span className="seal-text-top">ZWT FINANCE CO., LTD.</span>
-                    <span className="seal-star">★</span>
-                    <span className="seal-text-bot">OFFICIAL STAMP</span>
-                  </div>
-                  <div
-                    className="signature-overlay"
-                    style={{
-                      width: `${140 * scaleRatio}px`,
-                      height: `${55 * scaleRatio}px`,
-                    }}
-                  >
-                    <img alt="Applied Signature" src={signatureSrc} />
-                  </div>
-                  <div className="signature-line">
-                    <div className="dots">
-                      ลงชื่อ .................................................................... ผู้มีหน้าที่หักภาษี
-                    </div>
-                    <div className="signee-name">({signature.name})</div>
-                    <div className="signee-title">Authorized Financial Officer</div>
-                  </div>
+              {activeTemplate === "tax_inv" && (
+                <div className="overlay-sample-layer tax-inv-sample-layer">
+                  <span className="pdf-field val-invno" style={{ left: "80%", top: "12.0%" }}>INV202607089</span>
+                  <span className="pdf-field val-invdate" style={{ left: "80%", top: "13.8%" }}>2026-07-15</span>
+                  <span className="pdf-field val-customer" style={{ left: "18%", top: "21.5%" }}>SIAM LOGISTICS GROUP CO., LTD.</span>
+                  <span className="pdf-field val-declno" style={{ left: "18%", top: "24.0%" }}>A019-06907-00381</span>
+                  <span className="pdf-field val-itemdesc" style={{ left: "12%", top: "35.5%" }}>EXPORT FREIGHT SERVICES</span>
+                  <span className="pdf-field val-itemfob" style={{ left: "65%", top: "35.5%" }}>480,000.00</span>
+                  <span className="pdf-field val-itemvat" style={{ left: "78%", top: "35.5%" }}>33,600.00</span>
+                  <span className="pdf-field val-itemtotal" style={{ left: "90%", top: "35.5%" }}>513,600.00</span>
                 </div>
+              )}
+
+              {activeTemplate === "salary_advance" && (
+                <div className="overlay-sample-layer salary-advance-sample-layer">
+                  <span className="pdf-field val-batchno" style={{ left: "75%", top: "8.5%" }}>SA20260701</span>
+                  <span className="pdf-field val-empname" style={{ left: "20%", top: "18.5%" }}>Somchai Jaidee (EMP08821)</span>
+                  <span className="pdf-field val-dept" style={{ left: "20%", top: "21.5%" }}>Logistics Operations Dept</span>
+                  <span className="pdf-field val-advamt" style={{ left: "20%", top: "32.0%" }}>25,000.00 THB</span>
+                  <span className="pdf-field val-repay" style={{ left: "55%", top: "32.0%" }}>2026-08 (次月扣还)</span>
+                </div>
+              )}
+
+              {/* 核心套印签名图层：基于 ReportLab 官方坐标百分比与动态 scalePercent 精准定位 */}
+              <div
+                className="exact-signature-overlay-box"
+                style={{
+                  left: `${currentCfg.sigBox.leftPercent}%`,
+                  bottom: `${currentCfg.sigBox.bottomPercent}%`,
+                  width: `${currentCfg.sigBox.widthPercent * scaleRatio}%`,
+                  height: `${currentCfg.sigBox.heightPercent * scaleRatio}%`,
+                }}
+              >
+                <img alt="Applied Signature" src={signatureSrc} />
               </div>
-            )}
-
-            {activeTemplate === "tax_inv" && (
-              <div className="doc-mock tax-inv-doc-mock real-template">
-                <div className="doc-watermark">TAX INVOICE</div>
-                <div className="doc-header">
-                  <div className="company-logo-text">ZWT LOGISTICS & TAX SERVICES</div>
-                  <div className="doc-title-th">ใบกำกับภาษี / TAX INVOICE</div>
-                  <div className="doc-no-row">
-                    <span>INV NO: INV202607089</span>
-                    <span>DATE: 2026-07-15</span>
-                  </div>
-                </div>
-
-                <div className="doc-body-fields">
-                  <div className="doc-field-row">
-                    <span className="lbl">CUSTOMER:</span>
-                    <span className="val">SIAM LOGISTICS GROUP CO., LTD.</span>
-                  </div>
-                  <div className="doc-field-row">
-                    <span className="lbl">DECLARATION NO:</span>
-                    <span className="val font-mono">A019-06907-00381</span>
-                  </div>
-                  <div className="doc-table-mini">
-                    <div className="tr th">
-                      <span>ITEM DESCRIPTION</span>
-                      <span>FOB THB</span>
-                      <span>VAT 7%</span>
-                      <span>TOTAL</span>
-                    </div>
-                    <div className="tr td">
-                      <span>EXPORT FREIGHT SERVICES</span>
-                      <span>480,000.00</span>
-                      <span>33,600.00</span>
-                      <span>513,600.00</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 签名盖章处 */}
-                <div className="doc-signature-block">
-                  <div className="seal-ring blue-seal">
-                    <span className="seal-text-top">ZWT TAX INVOICE DEPT</span>
-                    <span className="seal-star">★</span>
-                    <span className="seal-text-bot">AUTHORIZED ISSUER</span>
-                  </div>
-                  <div
-                    className="signature-overlay"
-                    style={{
-                      width: `${150 * scaleRatio}px`,
-                      height: `${60 * scaleRatio}px`,
-                    }}
-                  >
-                    <img alt="Applied Signature" src={signatureSrc} />
-                  </div>
-                  <div className="signature-line">
-                    <div className="dots">....................................................................</div>
-                    <div className="signee-name">({signature.name})</div>
-                    <div className="signee-title">Authorized Tax Officer</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTemplate === "salary_advance" && (
-              <div className="doc-mock salary-advance-doc-mock real-template">
-                <div className="doc-watermark">SALARY ADVANCE</div>
-                <div className="doc-header">
-                  <div className="company-logo-text">ZWT FINANCE & HUMAN RESOURCES</div>
-                  <div className="doc-title-th">工资预支单凭证 / SALARY ADVANCE VOUCHER</div>
-                  <div className="doc-no-row">
-                    <span>BATCH NO: SA20260701</span>
-                    <span>DATE: 2026-07-01</span>
-                  </div>
-                </div>
-
-                <div className="doc-body-fields">
-                  <div className="doc-field-row">
-                    <span className="lbl">EMPLOYEE (员工姓名):</span>
-                    <span className="val">Somchai Jaidee (EMP08821)</span>
-                  </div>
-                  <div className="doc-field-row">
-                    <span className="lbl">DEPARTMENT (部门):</span>
-                    <span className="val">Logistics Operations Dept</span>
-                  </div>
-                  <div className="doc-table-mini">
-                    <div className="tr th">
-                      <span>ADVANCE AMOUNT</span>
-                      <span>REPAYMENT PERIOD</span>
-                      <span>APPROVAL STATUS</span>
-                    </div>
-                    <div className="tr td">
-                      <span>25,000.00 THB</span>
-                      <span>2026-08 (次月扣还)</span>
-                      <span>APPROVED (已批准)</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 签名盖章处 */}
-                <div className="doc-signature-block">
-                  <div className="seal-ring purple-seal">
-                    <span className="seal-text-top">ZWT HR & FINANCE</span>
-                    <span className="seal-star">★</span>
-                    <span className="seal-text-bot">PAYROLL APPROVED</span>
-                  </div>
-                  <div
-                    className="signature-overlay"
-                    style={{
-                      width: `${135 * scaleRatio}px`,
-                      height: `${50 * scaleRatio}px`,
-                    }}
-                  >
-                    <img alt="Applied Signature" src={signatureSrc} />
-                  </div>
-                  <div className="signature-line">
-                    <div className="dots">....................................................................</div>
-                    <div className="signee-name">({signature.name})</div>
-                    <div className="signee-title">Payroll Finance Manager</div>
-                  </div>
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         </div>
       </div>

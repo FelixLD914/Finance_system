@@ -3129,6 +3129,76 @@ select {
   border-top: 1px solid #eaecf0;
 }
 
+/* 系统真实 PDF 文件模板视口与全真图层定位 */
+.pdf-template-underlay-viewport {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: #f2f4f7;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 540px;
+  overflow-y: auto;
+}
+
+.pdf-page-container {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  aspect-ratio: 595.28 / 841.89;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pdf-underlay-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.overlay-sample-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.pdf-field {
+  position: absolute;
+  font-family: Sarabun, Helvetica, Arial, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  color: #101828;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+/* 核心签名套印图层：与后端 ReportLab PDF 坐标 100% 同比例定位 */
+.exact-signature-overlay-box {
+  position: absolute;
+  transform: translate(-50%, 50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+  transition: width 0.12s ease, height 0.12s ease;
+}
+
+.exact-signature-overlay-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.25));
+}
+
 .signature-source-panel .panel-title,
 .signature-template-panel .panel-title {
   display: flex;
