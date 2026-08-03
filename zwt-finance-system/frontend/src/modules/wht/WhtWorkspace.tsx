@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeftOutlined,
   CheckCircleFilled,
   CloseOutlined,
   DownloadOutlined,
@@ -9,6 +10,7 @@ import {
   HistoryOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RightOutlined,
   UndoOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
@@ -619,6 +621,129 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     },
   ];
 
+  interface PeriodSummaryRow {
+    period: string;
+    totalCount: number;
+    draftCount: number;
+    pendingReviewCount: number;
+    approvedCount: number;
+    issuedCount: number;
+    totalAmount: number;
+    totalWhtAmount: number;
+  }
+
+  const periodSummaryRows = useMemo(() => {
+    const query = filters.query.trim().toLocaleLowerCase();
+    const phaseTasks = tasks.filter((task) => {
+      const matchesPhase = isTaskInPhase(task, phase);
+      const matchesStatus = filters.status === "all" || task.status === filters.status;
+      const matchesBook = filters.bookNo === "all" || task.bookNo === filters.bookNo;
+      const matchesQuery =
+        !query ||
+        task.companyName.toLocaleLowerCase().includes(query) ||
+        task.companyNameEn?.toLocaleLowerCase().includes(query) ||
+        task.taxId?.includes(query) ||
+        task.taskNo?.toLocaleLowerCase().includes(query);
+      return matchesPhase && matchesStatus && matchesBook && matchesQuery;
+    });
+
+    const map = new Map<string, PeriodSummaryRow>();
+    for (const task of phaseTasks) {
+      const period = task.period;
+      let entry = map.get(period);
+      if (!entry) {
+        entry = {
+          period,
+          totalCount: 0,
+          draftCount: 0,
+          pendingReviewCount: 0,
+          approvedCount: 0,
+          issuedCount: 0,
+          totalAmount: 0,
+          totalWhtAmount: 0,
+        };
+        map.set(period, entry);
+      }
+      entry.totalCount += 1;
+      if (task.status === "draft") entry.draftCount += 1;
+      if (task.status === "pending_review") entry.pendingReviewCount += 1;
+      if (task.status === "approved") entry.approvedCount += 1;
+      if (task.status === "issued") entry.issuedCount += 1;
+      entry.totalAmount += Number(task.totalAmount) || 0;
+      entry.totalWhtAmount += Number(task.whtAmount) || 0;
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.period.localeCompare(a.period));
+  }, [filters.bookNo, filters.query, filters.status, phase, tasks]);
+
+  const periodColumns: ColumnsType<PeriodSummaryRow> = [
+    {
+      title: t("wht.period"),
+      dataIndex: "period",
+      width: 140,
+      render: (period: string) => (
+        <span className="period-badge-cell">
+          <Tag color="gold" style={{ fontSize: "13px", fontWeight: "bold", padding: "2px 10px" }}>
+            {period}
+          </Tag>
+        </span>
+      ),
+    },
+    {
+      title: t("wht.taskCountLabel") || "任务数量",
+      dataIndex: "totalCount",
+      width: 130,
+      render: (count: number) => <strong>{count} 项任务</strong>,
+    },
+    {
+      title: t("status.pendingReview"),
+      dataIndex: "pendingReviewCount",
+      width: 110,
+      render: (count: number) =>
+        count > 0 ? <Tag color="gold">{count} 待复核</Tag> : <span className="date-value">0</span>,
+    },
+    {
+      title: t("status.draft"),
+      dataIndex: "draftCount",
+      width: 100,
+      render: (count: number) =>
+        count > 0 ? <Tag color="blue">{count} 草稿</Tag> : <span className="date-value">0</span>,
+    },
+    {
+      title: t("status.approved"),
+      dataIndex: "approvedCount",
+      width: 110,
+      render: (count: number) =>
+        count > 0 ? <Tag color="green">{count} 已批准</Tag> : <span className="date-value">0</span>,
+    },
+    {
+      title: t("wht.totalAmount"),
+      dataIndex: "totalAmount",
+      width: 140,
+      render: (val: number) => formatMoney(String(val)),
+    },
+    {
+      title: t("wht.whtAmount"),
+      dataIndex: "totalWhtAmount",
+      width: 130,
+      render: (val: number) => formatMoney(String(val)),
+    },
+    {
+      title: t("common.actions") || "操作",
+      key: "actions",
+      width: 160,
+      render: (_, record) => (
+        <Button
+          type="link"
+          icon={<RightOutlined />}
+          onClick={() => setFilters((current) => ({ ...current, period: record.period }))}
+        >
+          查看该期明细
+        </Button>
+      ),
+    },
+  ];
+
   /**
    * 建完直接回台账并选中新草稿：操作页是「录一条」的入口，不是停留的地方，
    * 留在原地反而让人以为还要再点一次保存。
@@ -941,98 +1066,140 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           </Button>
         </div>
 
-        {checkedTasks.length > 0 ? (
-          <div className="table-toolbar batch-toolbar">
-            <strong>{t("common.selected", { count: checkedTasks.length })}</strong>
-            <div className="batch-actions">
+        {filters.period === "all" ? (
+          <>
+            <div className="table-toolbar">
+              <strong>共 {periodSummaryRows.length} 个期数汇总台账</strong>
               <Button
-                disabled={draftChecked.length === 0}
-                loading={mutationPending}
-                size="small"
-                type="primary"
-                onClick={() => void runBatch("submit-review", draftChecked)}
-              >
-                {t("wht.batchSubmitReview")}
-                {draftChecked.length > 0 && ` (${draftChecked.length})`}
-              </Button>
-              <Button
-                disabled={reviewChecked.length === 0}
-                loading={mutationPending}
-                size="small"
-                onClick={confirmBatchApprove}
-              >
-                {t("wht.batchApprove")}
-                {reviewChecked.length > 0 && ` (${reviewChecked.length})`}
-              </Button>
-              <Button
-                disabled={reviewChecked.length === 0}
-                loading={mutationPending}
-                size="small"
-                onClick={() => void runBatch("return-to-draft", reviewChecked)}
-              >
-                {t("wht.batchReturnDraft")}
-              </Button>
-              <Button size="small" type="text" onClick={() => setCheckedIds([])}>
-                {t("common.clearSelection")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="table-toolbar">
-            <strong>{t("wht.taskCount", { count: filteredTasks.length })}</strong>
-            <Button
-              aria-label={t("common.reload")}
-              icon={<ReloadOutlined />}
-              loading={loading}
-              type="text"
-              onClick={() => void reload()}
-            />
-          </div>
-        )}
-
-        <Table<WhtTask>
-          columns={columns}
-          dataSource={filteredTasks}
-          loading={loading}
-          locale={{
-            emptyText: (
-              <Empty
-                description={
-                  <div className="table-empty">
-                    <strong>
-                      {tasks.length === 0 ? t("wht.emptyTasks") : t("wht.emptyFiltered")}
-                    </strong>
-                    <span>
-                      {tasks.length === 0
-                        ? t("wht.emptyTasksHint")
-                        : t("wht.emptyFilteredHint")}
-                    </span>
-                  </div>
-                }
+                aria-label={t("common.reload")}
+                icon={<ReloadOutlined />}
+                loading={loading}
+                type="text"
+                onClick={() => void reload()}
               />
-            ),
-          }}
-          pagination={{ pageSize: 8, hideOnSinglePage: true }}
-          rowKey="id"
-          rowSelection={{
-            selectedRowKeys: checkedIds,
-            onChange: (keys) => setCheckedIds(keys as string[]),
-          }}
-          scroll={{ x: 900 }}
-          tableLayout="fixed"
-          rowClassName={(record) => (record.id === selectedId ? "selected-row" : "")}
-          onRow={(record) => ({
-            onClick: (event) => {
-              // 勾选框也在行内：点它只应改变选择，不该顺带打开右侧明细。
-              if ((event.target as HTMLElement).closest(".ant-table-selection-column")) {
-                return;
-              }
-              setSelectedId(record.id);
-              setInspectorOpen(true);
-              void loadTaskDetail(record.id);
-            },
-          })}
-        />
+            </div>
+            <Table<PeriodSummaryRow>
+              columns={periodColumns}
+              dataSource={periodSummaryRows}
+              loading={loading}
+              pagination={{ pageSize: 8, hideOnSinglePage: true }}
+              rowKey="period"
+              onRow={(record) => ({
+                onClick: () => {
+                  setFilters((current) => ({ ...current, period: record.period }));
+                },
+              })}
+            />
+          </>
+        ) : (
+          <>
+            <div className="period-breadcrumb-bar">
+              <Button
+                icon={<ArrowLeftOutlined />}
+                size="small"
+                onClick={() => setFilters((current) => ({ ...current, period: "all" }))}
+              >
+                {t("wht.backToAllPeriods") || "返回全部期数"}
+              </Button>
+              <span className="period-breadcrumb-title">
+                当前查看期数：<strong>{filters.period}</strong>（共 {filteredTasks.length} 项任务）
+              </span>
+            </div>
+
+            {checkedTasks.length > 0 ? (
+              <div className="table-toolbar batch-toolbar">
+                <strong>{t("common.selected", { count: checkedTasks.length })}</strong>
+                <div className="batch-actions">
+                  <Button
+                    disabled={draftChecked.length === 0}
+                    loading={mutationPending}
+                    size="small"
+                    type="primary"
+                    onClick={() => void runBatch("submit-review", draftChecked)}
+                  >
+                    {t("wht.batchSubmitReview")}
+                    {draftChecked.length > 0 && ` (${draftChecked.length})`}
+                  </Button>
+                  <Button
+                    disabled={reviewChecked.length === 0}
+                    loading={mutationPending}
+                    size="small"
+                    onClick={confirmBatchApprove}
+                  >
+                    {t("wht.batchApprove")}
+                    {reviewChecked.length > 0 && ` (${reviewChecked.length})`}
+                  </Button>
+                  <Button
+                    disabled={reviewChecked.length === 0}
+                    loading={mutationPending}
+                    size="small"
+                    onClick={() => void runBatch("return-to-draft", reviewChecked)}
+                  >
+                    {t("wht.batchReturnDraft")}
+                  </Button>
+                  <Button size="small" type="text" onClick={() => setCheckedIds([])}>
+                    {t("common.clearSelection")}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="table-toolbar">
+                <strong>{t("wht.taskCount", { count: filteredTasks.length })}</strong>
+                <Button
+                  aria-label={t("common.reload")}
+                  icon={<ReloadOutlined />}
+                  loading={loading}
+                  type="text"
+                  onClick={() => void reload()}
+                />
+              </div>
+            )}
+
+            <Table<WhtTask>
+              columns={columns}
+              dataSource={filteredTasks}
+              loading={loading}
+              locale={{
+                emptyText: (
+                  <Empty
+                    description={
+                      <div className="table-empty">
+                        <strong>
+                          {tasks.length === 0 ? t("wht.emptyTasks") : t("wht.emptyFiltered")}
+                        </strong>
+                        <span>
+                          {tasks.length === 0
+                            ? t("wht.emptyTasksHint")
+                            : t("wht.emptyFilteredHint")}
+                        </span>
+                      </div>
+                    }
+                  />
+                ),
+              }}
+              pagination={{ pageSize: 8, hideOnSinglePage: true }}
+              rowKey="id"
+              rowSelection={{
+                selectedRowKeys: checkedIds,
+                onChange: (keys) => setCheckedIds(keys as string[]),
+              }}
+              scroll={{ x: 900 }}
+              tableLayout="fixed"
+              rowClassName={(record) => (record.id === selectedId ? "selected-row" : "")}
+              onRow={(record) => ({
+                onClick: (event) => {
+                  // 勾选框也在行内：点它只应改变选择，不该顺带打开右侧明细。
+                  if ((event.target as HTMLElement).closest(".ant-table-selection-column")) {
+                    return;
+                  }
+                  setSelectedId(record.id);
+                  setInspectorOpen(true);
+                  void loadTaskDetail(record.id);
+                },
+              })}
+            />
+          </>
+        )}
       </section>
     </section>
   );
