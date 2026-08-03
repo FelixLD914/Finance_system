@@ -312,6 +312,7 @@ def export_pdf_from_template(
     task: WhtTask,
     thai_font_path: Path,
     signature_source_path: Path | None,
+    signature_scale_percent: int = 100,
 ) -> None:
     """Create a four-copy WHT PDF without automating Microsoft Office."""
     if not pdf_template_path.is_file():
@@ -437,12 +438,17 @@ def export_pdf_from_template(
         if prepared_signature.exists():
             image = ImageReader(str(prepared_signature))
             signature_x, signature_y, signature_width, signature_height = PDF_SIGNATURE_BOX
+            scale_ratio = (signature_scale_percent or 100) / 100.0
+            scaled_w = signature_width * scale_ratio
+            scaled_h = signature_height * scale_ratio
+            scaled_x = signature_x + (signature_width - scaled_w) / 2.0
+            scaled_y = signature_y + (signature_height - scaled_h) / 2.0
             overlay.drawImage(
                 image,
-                signature_x,
-                signature_y,
-                width=signature_width,
-                height=signature_height,
+                scaled_x,
+                scaled_y,
+                width=scaled_w,
+                height=scaled_h,
                 preserveAspectRatio=True,
                 anchor="c",
                 mask="auto",

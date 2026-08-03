@@ -108,7 +108,7 @@ export function SignaturePreviewModal({
     if (signature) {
       setScalePercent(signature.scalePercent ?? 100);
     }
-  }, [signature]);
+  }, [signature, open]);
 
   if (!signature) return null;
 

@@ -503,8 +503,12 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         onClose={() => setPreviewTarget(null)}
         onSaveScale={async (signatureId, scalePercent) => {
           try {
-            await updateSignature(signatureId, { scalePercent });
+            const updated = await updateSignature(signatureId, { scalePercent });
             message.success(`已成功将签名缩放效果 (${scalePercent}%) 应用保存至系统开票！`);
+            setPreviewTarget(updated);
+            setSignatures((current) =>
+              current.map((item) => (item.id === signatureId ? updated : item)),
+            );
             await reload();
           } catch (err) {
             message.error(err instanceof Error ? err.message : String(err));

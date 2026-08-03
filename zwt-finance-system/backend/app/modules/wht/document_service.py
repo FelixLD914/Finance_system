@@ -146,6 +146,8 @@ class WhtDocumentService:
                 signature.is_default = False
         if payload.usage is not None:
             signature.usage = format_signature_usage(payload.usage)
+        if payload.scale_percent is not None:
+            signature.scale_percent = payload.scale_percent
         if payload.is_default is True:
             if signature.status != "active":
                 raise WhtStateError("an inactive signature cannot be the default")
@@ -290,6 +292,7 @@ class WhtDocumentService:
                         task,
                         self.settings.thai_font_path,
                         signature_file,
+                        signature.scale_percent if signature else 100,
                     )
                 except DocumentGenerationError as exc:
                     raise WhtStateError(str(exc)) from exc
