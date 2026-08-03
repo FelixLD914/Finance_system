@@ -3364,5 +3364,31 @@ select {
   font-size: 14px;
 }
 
+/* 折叠式高级筛选栏样式 */
+.filter-bar-collapsed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--finance-surface, #ffffff);
+  border: 1px solid var(--finance-border, #eaecf0);
+  border-radius: var(--finance-radius-md, 8px);
+  margin-bottom: 12px;
+}
+
+.collapsed-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.active-dot {
+  color: var(--finance-primary, #8c6b3e);
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+
 
 

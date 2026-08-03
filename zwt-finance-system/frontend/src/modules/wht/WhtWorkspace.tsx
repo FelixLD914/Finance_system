@@ -3,6 +3,7 @@ import {
   ArrowLeftOutlined,
   CheckCircleFilled,
   CloseOutlined,
+  DownOutlined,
   DownloadOutlined,
   EditOutlined,
   FileDoneOutlined,
@@ -12,6 +13,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   UndoOutlined,
+  UpOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import {
@@ -495,6 +497,17 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
   });
   const [pageSize, setPageSize] = useState<number>(8);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(true);
+
+  const hasActiveFilters =
+    filters.period !== "all" ||
+    filters.status !== "all" ||
+    filters.bookNo !== "all" ||
+    filters.query.trim() !== "";
+
+  const resetFilters = () => {
+    setFilters({ period: "all", status: "all", bookNo: "all", query: "" });
+  };
 
   // 切换筛选或业务阶段时，自动重置分页到第 1 页
   useEffect(() => {
@@ -1061,56 +1074,116 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
       />
 
       <section className="work-surface">
-        <div className="filter-bar">
-          <label>
-            <span>{t("wht.period")}</span>
-            <Select
-              value={filters.period}
-              options={[{ value: "all", label: t("wht.all") }, ...periodOptions]}
-              onChange={(period) => setFilters((current) => ({ ...current, period }))}
-            />
-          </label>
-          <label>
-            <span>{t("wht.status")}</span>
-            <Select
-              value={filters.status}
-              options={[
-                { value: "all", label: t("wht.all") },
-                { value: "draft", label: t("status.draft") },
-                { value: "pending_review", label: t("status.pendingReview") },
-                { value: "approved", label: t("status.approved") },
-                { value: "issued", label: t("status.issued") },
-                { value: "voided", label: t("status.voided") },
-              ]}
-              onChange={(status) => setFilters((current) => ({ ...current, status }))}
-            />
-          </label>
-          <label>
-            <span>{t("wht.bookNo")}</span>
-            <Select
-              value={filters.bookNo}
-              options={[
-                { value: "all", label: t("wht.selectBook") },
-                ...bookOptions,
-              ]}
-              onChange={(bookNo) => setFilters((current) => ({ ...current, bookNo }))}
-            />
-          </label>
-          <label className="company-search">
-            <span>{t("wht.company")}</span>
-            <Input
-              allowClear
-              placeholder={t("wht.searchPlaceholder")}
-              value={filters.query}
-              onChange={(event) =>
-                setFilters((current) => ({ ...current, query: event.target.value }))
-              }
-            />
-          </label>
-          <Button className="more-filter-button" icon={<FilterOutlined />}>
-            {t("wht.moreFilters")}
-          </Button>
-        </div>
+        {filtersCollapsed ? (
+          <div className="filter-bar-collapsed">
+            <div className="collapsed-left">
+              <Input
+                allowClear
+                placeholder={t("wht.searchPlaceholder")}
+                style={{ width: 280 }}
+                value={filters.query}
+                onChange={(e) =>
+                  setFilters((current) => ({ ...current, query: e.target.value }))
+                }
+              />
+              {filters.period !== "all" && (
+                <Tag
+                  color="gold"
+                  closable
+                  onClose={() => setFilters((c) => ({ ...c, period: "all" }))}
+                >
+                  期数: {filters.period}
+                </Tag>
+              )}
+              {filters.status !== "all" && (
+                <Tag
+                  color="blue"
+                  closable
+                  onClose={() => setFilters((c) => ({ ...c, status: "all" }))}
+                >
+                  状态: {statusLabel(filters.status, t)}
+                </Tag>
+              )}
+              {filters.bookNo !== "all" && (
+                <Tag
+                  color="purple"
+                  closable
+                  onClose={() => setFilters((c) => ({ ...c, bookNo: "all" }))}
+                >
+                  册码: {filters.bookNo}
+                </Tag>
+              )}
+              {hasActiveFilters && (
+                <Button size="small" type="link" onClick={resetFilters}>
+                  重置筛选
+                </Button>
+              )}
+            </div>
+            <Button
+              icon={<FilterOutlined />}
+              onClick={() => setFiltersCollapsed(false)}
+            >
+              高级筛选 {hasActiveFilters && <span className="active-dot">•</span>}
+              <DownOutlined />
+            </Button>
+          </div>
+        ) : (
+          <div className="filter-bar">
+            <label>
+              <span>{t("wht.period")}</span>
+              <Select
+                value={filters.period}
+                options={[{ value: "all", label: t("wht.all") }, ...periodOptions]}
+                onChange={(period) => setFilters((current) => ({ ...current, period }))}
+              />
+            </label>
+            <label>
+              <span>{t("wht.status")}</span>
+              <Select
+                value={filters.status}
+                options={[
+                  { value: "all", label: t("wht.all") },
+                  { value: "draft", label: t("status.draft") },
+                  { value: "pending_review", label: t("status.pendingReview") },
+                  { value: "approved", label: t("status.approved") },
+                  { value: "issued", label: t("status.issued") },
+                  { value: "voided", label: t("status.voided") },
+                ]}
+                onChange={(status) => setFilters((current) => ({ ...current, status }))}
+              />
+            </label>
+            <label>
+              <span>{t("wht.bookNo")}</span>
+              <Select
+                value={filters.bookNo}
+                options={[
+                  { value: "all", label: t("wht.selectBook") },
+                  ...bookOptions,
+                ]}
+                onChange={(bookNo) => setFilters((current) => ({ ...current, bookNo }))}
+              />
+            </label>
+            <label className="company-search">
+              <span>{t("wht.company")}</span>
+              <Input
+                allowClear
+                placeholder={t("wht.searchPlaceholder")}
+                value={filters.query}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, query: event.target.value }))
+                }
+              />
+            </label>
+            {hasActiveFilters && (
+              <Button size="small" onClick={resetFilters}>
+                重置筛选
+              </Button>
+            )}
+            <Button icon={<UpOutlined />} onClick={() => setFiltersCollapsed(true)}>
+              收起筛选
+            </Button>
+          </div>
+        )}
 
         {filters.period === "all" ? (
           <>
