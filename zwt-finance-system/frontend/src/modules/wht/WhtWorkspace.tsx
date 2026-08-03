@@ -493,6 +493,13 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     bookNo: "all",
     query: "",
   });
+  const [pageSize, setPageSize] = useState<number>(8);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  // 切换筛选或业务阶段时，自动重置分页到第 1 页
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filters, phase]);
 
   useEffect(() => {
     if (selectedId && !tasks.some((task) => task.id === selectedId)) {
@@ -1121,7 +1128,17 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
               columns={periodColumns}
               dataSource={periodSummaryRows}
               loading={loading}
-              pagination={{ pageSize: 8, hideOnSinglePage: true }}
+              pagination={{
+                pageSize: pageSize,
+                pageSizeOptions: [8, 10, 20, 50, 100],
+                showSizeChanger: true,
+                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${total} 条`,
+                onChange: (_, newSize) => {
+                  if (newSize && newSize !== pageSize) {
+                    setPageSize(newSize);
+                  }
+                },
+              }}
               rowKey="period"
               onRow={(record) => ({
                 onClick: () => {
@@ -1147,7 +1164,18 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
 
             {checkedTasks.length > 0 ? (
               <div className="table-toolbar batch-toolbar">
-                <strong>{t("common.selected", { count: checkedTasks.length })}</strong>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <strong>{t("common.selected", { count: checkedTasks.length })}</strong>
+                  {checkedTasks.length < filteredTasks.length && (
+                    <Button
+                      size="small"
+                      type="link"
+                      onClick={() => setCheckedIds(filteredTasks.map((t) => t.id))}
+                    >
+                      全选所有 {filteredTasks.length} 项
+                    </Button>
+                  )}
+                </div>
                 <div className="batch-actions">
                   <Button
                     disabled={draftChecked.length === 0}
@@ -1216,11 +1244,32 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                   />
                 ),
               }}
-              pagination={{ pageSize: 8, hideOnSinglePage: true }}
+              pagination={{
+                current: currentPage,
+                pageSize: pageSize,
+                pageSizeOptions: [8, 10, 20, 50, 100],
+                showSizeChanger: true,
+                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${total} 条`,
+                onChange: (page, newSize) => {
+                  setCurrentPage(page);
+                  if (newSize && newSize !== pageSize) {
+                    setPageSize(newSize);
+                    setCurrentPage(1);
+                  }
+                },
+              }}
               rowKey="id"
               rowSelection={{
                 selectedRowKeys: checkedIds,
                 onChange: (keys) => setCheckedIds(keys as string[]),
+                onSelectAll: (selected) => {
+                  if (selected) {
+                    // 点击表头全选框：选中所有匹配筛选条件的数据（跨页选全量）
+                    setCheckedIds(filteredTasks.map((t) => t.id));
+                  } else {
+                    setCheckedIds([]);
+                  }
+                },
               }}
               scroll={{ x: 900 }}
               tableLayout="fixed"

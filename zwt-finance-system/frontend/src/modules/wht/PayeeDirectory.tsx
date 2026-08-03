@@ -406,7 +406,11 @@ export function PayeeDirectory({
         columns={columns}
         dataSource={filtered}
         loading={view === "deleted" ? recycleLoading : loading}
-        pagination={{ pageSize: 10, hideOnSinglePage: true }}
+        pagination={{
+          pageSizeOptions: [10, 20, 50, 100],
+          showSizeChanger: true,
+          defaultPageSize: 10,
+        }}
         rowKey="id"
         scroll={{ x: 900 }}
       />

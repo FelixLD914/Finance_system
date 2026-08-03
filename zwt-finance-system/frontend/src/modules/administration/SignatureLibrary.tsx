@@ -415,7 +415,11 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         columns={columns}
         dataSource={signatures}
         loading={loading}
-        pagination={{ pageSize: 8, hideOnSinglePage: true }}
+        pagination={{
+          pageSizeOptions: [8, 10, 20, 50, 100],
+          showSizeChanger: true,
+          defaultPageSize: 8,
+        }}
         rowKey="id"
       />
 
