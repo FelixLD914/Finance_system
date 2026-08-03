@@ -409,19 +409,19 @@ def export_pdf_from_template(
         overlay.line(check_x - 5, check_y - 1.25, check_x - 1.5, check_y - 4.75)
         overlay.line(check_x - 1.5, check_y - 4.75, check_x + 5, check_y + 4.75)
 
-        # 基线避开单元格顶底实线与虚线，居中位于 y=238.6..256.5 的行框内（y=245.5，距离顶边 4.5pt，距离底边 5.4pt）。
-        draw_text(values["IncomeType"], 181, 245.5, font="ZwtSarabun", size=9)
+        # 校准基线在第 5 行框内（y=255.5），保持收入类型、日期、金额在同一水平线上，彻底解决错位与第 2,3,4 页金额顶线压线 BUG。
+        draw_text(values["IncomeType"], 181, 255.5, font="ZwtSarabun", size=9)
         payment_date = task.payment_date
         if payment_date:
             draw_text(
                 f"{payment_date.year}/{payment_date.month}/{payment_date.day}",
                 368,
-                245.5,
+                255.5,
             )
         amount = f"{task.total_amount:,.2f}"
         tax_amount = f"{task.wht_amount:,.2f}"
-        draw_right(amount, 499, 245.5)
-        draw_right(tax_amount, 571, 245.5)
+        draw_right(amount, 499, 255.5)
+        draw_right(tax_amount, 571, 255.5)
         # 汇总行上下边界为 y=222.5..238.6；使用居中基线避开边框。
         draw_right(amount, 499, 227)
         draw_right(tax_amount, 571, 227)
