@@ -409,19 +409,25 @@ def export_pdf_from_template(
         overlay.line(check_x - 5, check_y - 1.25, check_x - 1.5, check_y - 4.75)
         overlay.line(check_x - 1.5, check_y - 4.75, check_x + 5, check_y + 4.75)
 
-        # 校准基线在第 5 行框内（y=255.5），保持收入类型、日期、金额在同一水平线上，彻底解决错位与第 2,3,4 页金额顶线压线 BUG。
-        draw_text(values["IncomeType"], 181, 255.5, font="ZwtSarabun", size=9)
+        # 遮盖模板第 2, 3, 4 页第 5 行金额列中预印的 '-' 减号符号，彻底消除金额上方小横线
+        overlay.setFillColorRGB(1, 1, 1)
+        overlay.rect(440, 260, 65, 13, fill=1, stroke=0)
+        overlay.rect(515, 260, 65, 13, fill=1, stroke=0)
+        overlay.setFillColorRGB(0, 0, 0)
+
+        # 第 6 行 (6. อื่นๆ(ระบุ)) 绘图基线校准至 y=248.5pt：泰语收入类型恰好紧贴位于虚线上方，金额数字整齐对齐且无小横线
+        draw_text(values["IncomeType"], 181, 248.5, font="ZwtSarabun", size=9)
         payment_date = task.payment_date
         if payment_date:
             draw_text(
                 f"{payment_date.year}/{payment_date.month}/{payment_date.day}",
                 368,
-                255.5,
+                248.5,
             )
         amount = f"{task.total_amount:,.2f}"
         tax_amount = f"{task.wht_amount:,.2f}"
-        draw_right(amount, 499, 255.5)
-        draw_right(tax_amount, 571, 255.5)
+        draw_right(amount, 499, 248.5)
+        draw_right(tax_amount, 571, 248.5)
         # 汇总行上下边界为 y=222.5..238.6；使用居中基线避开边框。
         draw_right(amount, 499, 227)
         draw_right(tax_amount, 571, 227)
