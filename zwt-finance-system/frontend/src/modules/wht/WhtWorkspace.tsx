@@ -230,7 +230,9 @@ function DetailPanel({
           },
           ...(task.status !== "draft" ? [{ title: t("status.pendingReview") }] : []),
           ...(isFormal ? [{ title: t("status.approved") }] : []),
+          ...(task.status === "issued" ? [{ title: t("status.issued") }] : []),
         ];
+  const currentStep = Math.max(0, workflow.length - 1);
 
   return (
     <aside className="task-inspector" aria-label={t("wht.basicInfo")}>
@@ -352,7 +354,7 @@ function DetailPanel({
 
       <section className="inspector-section workflow-section">
         <h3>{t("wht.workflow")}</h3>
-        <Steps orientation="vertical" size="small" items={workflow} />
+        <Steps current={currentStep} orientation="vertical" size="small" items={workflow} />
       </section>
 
       {isFormal && (
