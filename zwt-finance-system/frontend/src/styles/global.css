@@ -3034,6 +3034,101 @@ select {
   padding: 16px;
 }
 
+.signature-source-panel .panel-title.doc-signature-block .signature-overlay {
+  position: absolute;
+  right: 40px;
+  bottom: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+  transition: width 0.15s ease, height 0.15s ease;
+}
+
+.doc-signature-block .signature-overlay img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+}
+
+/* 签名缩放调节控制卡片与弹窗底部 */
+.signature-scale-control-card {
+  background: #ffffff;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.signature-scale-control-card .control-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #344054;
+  margin-bottom: 8px;
+}
+
+.scale-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.preset-buttons {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.scale-hint {
+  display: block;
+  font-size: 11px;
+  color: #667085;
+  line-height: 1.4;
+}
+
+.signature-preview-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.doc-mock.real-template {
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  padding: 16px;
+  background: #ffffff;
+  min-height: 380px;
+}
+
+.copy-notice {
+  font-size: 10px;
+  color: #667085;
+  margin-bottom: 6px;
+  font-style: italic;
+}
+
+.baht-text-line {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #eaecf0;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #344054;
+}
+
+.doc-table-mini .tr.td.total-row {
+  font-weight: 700;
+  background: #fdfcfb;
+  border-top: 1px solid #eaecf0;
+}
+
 .signature-source-panel .panel-title,
 .signature-template-panel .panel-title {
   display: flex;

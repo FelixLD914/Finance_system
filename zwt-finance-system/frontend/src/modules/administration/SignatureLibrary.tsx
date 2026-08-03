@@ -501,6 +501,15 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         signature={previewTarget}
         t={t}
         onClose={() => setPreviewTarget(null)}
+        onSaveScale={async (signatureId, scalePercent) => {
+          try {
+            await updateSignature(signatureId, { scalePercent });
+            message.success(`已成功将签名缩放效果 (${scalePercent}%) 应用保存至系统开票！`);
+            await reload();
+          } catch (err) {
+            message.error(err instanceof Error ? err.message : String(err));
+          }
+        }}
       />
     </section>
   );

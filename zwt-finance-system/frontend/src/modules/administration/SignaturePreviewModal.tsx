@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  CheckOutlined,
   EyeOutlined,
   FileProtectOutlined,
   FileTextOutlined,
+  ReloadOutlined,
   SafetyCertificateOutlined,
+  ZoomInOutlined,
 } from "@ant-design/icons";
-import { Modal, Segmented, Space, Tag } from "antd";
+import { Button, InputNumber, Modal, Segmented, Slider, Space, Tag } from "antd";
 
 import type { Translate } from "../../i18n";
 import type { SignatureAsset, SignatureUsage } from "../wht/types";
@@ -15,6 +18,7 @@ interface SignaturePreviewModalProps {
   open: boolean;
   t: Translate;
   onClose: () => void;
+  onSaveScale?: (signatureId: string, scalePercent: number) => Promise<void> | void;
 }
 
 const usageColors: Record<SignatureUsage, string> = {
@@ -41,12 +45,20 @@ export function SignaturePreviewModal({
   open,
   t,
   onClose,
+  onSaveScale,
 }: SignaturePreviewModalProps) {
   const [activeTemplate, setActiveTemplate] = useState<SignatureUsage>("wht");
+  const [scalePercent, setScalePercent] = useState<number>(100);
+  const [saving, setSaving] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (signature) {
+      setScalePercent(signature.scalePercent ?? 100);
+    }
+  }, [signature]);
 
   if (!signature) return null;
 
-  // 如果 signature 有对应服务端 Content URL，可以直接用；在 Mock/演示环境下使用 Data URL
   const isDemo = import.meta.env.VITE_USE_MOCK_API === "true" || signature.sha256.startsWith("demo");
   const signatureSrc = isDemo
     ? createDemoSignatureDataUrl(signature.name)
@@ -82,17 +94,56 @@ export function SignaturePreviewModal({
     },
   ];
 
+  const handleConfirmSave = async () => {
+    if (!signature || !onSaveScale) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSaveScale(signature.id, scalePercent);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const scaleRatio = scalePercent / 100;
+
   return (
     <Modal
       centered
       destroyOnClose
-      footer={null}
+      footer={
+        <div className="signature-preview-footer">
+          <div className="footer-left">
+            <Button
+              icon={<ReloadOutlined />}
+              size="small"
+              onClick={() => setScalePercent(100)}
+            >
+              还原默认尺寸 (100%)
+            </Button>
+          </div>
+          <div className="footer-right">
+            <Button onClick={onClose}>{t("common.cancel")}</Button>
+            <Button
+              icon={<CheckOutlined />}
+              loading={saving}
+              type="primary"
+              onClick={() => void handleConfirmSave()}
+            >
+              确认应用签名尺寸到系统开票
+            </Button>
+          </div>
+        </div>
+      }
       open={open}
       title={
         <div className="signature-preview-modal-header">
           <div className="title-row">
             <EyeOutlined className="header-icon" />
-            <h2>{t("wht.signaturePreviewTitle") || "签名效果预览"}</h2>
+            <h2>{t("wht.signaturePreviewTitle") || "签名效果与尺寸预览"}</h2>
             <Tag color={signature.status === "active" ? "green" : "default"}>
               {signature.status === "active" ? t("wht.enabled") : t("wht.disabled")}
             </Tag>
@@ -105,11 +156,11 @@ export function SignaturePreviewModal({
           </p>
         </div>
       }
-      width={920}
+      width={940}
       onCancel={onClose}
     >
       <div className="signature-preview-container">
-        {/* 左侧：导入签名的原始图片信息 */}
+        {/* 左侧：签名原图与实时缩放控制 */}
         <div className="signature-source-panel">
           <div className="panel-title">
             <EyeOutlined />
@@ -124,18 +175,53 @@ export function SignaturePreviewModal({
             />
           </div>
 
+          {/* 交互式签名大小调节器 */}
+          <div className="signature-scale-control-card">
+            <div className="control-header">
+              <ZoomInOutlined />
+              <strong>调节签名大小 (Scale Control)</strong>
+            </div>
+            <div className="scale-slider-row">
+              <Slider
+                max={200}
+                min={50}
+                step={5}
+                style={{ flex: 1 }}
+                value={scalePercent}
+                onChange={setScalePercent}
+              />
+              <InputNumber
+                addonAfter="%"
+                max={200}
+                min={50}
+                style={{ width: 85 }}
+                value={scalePercent}
+                onChange={(val) => val && setScalePercent(val)}
+              />
+            </div>
+            <div className="preset-buttons">
+              <Button size="small" onClick={() => setScalePercent(80)}>
+                80%
+              </Button>
+              <Button size="small" onClick={() => setScalePercent(100)}>
+                100% (默认)
+              </Button>
+              <Button size="small" onClick={() => setScalePercent(120)}>
+                120%
+              </Button>
+              <Button size="small" onClick={() => setScalePercent(150)}>
+                150%
+              </Button>
+            </div>
+            <small className="scale-hint">
+              拖动滑块或选择预设比例，右侧真实开票模板实时套印效果同步响应。
+            </small>
+          </div>
+
           <div className="source-meta-card">
             <div className="meta-item">
               <span className="meta-label">签名名称</span>
               <span className="meta-val">{signature.name}</span>
-            </div>
-            <div className="meta-item">
-              <span className="meta-label">文件名</span>
-              <span className="meta-val">{signature.originalFileName}</span>
-            </div>
-            <div className="meta-item">
-              <span className="meta-label">格式类型</span>
-              <span className="meta-val">{signature.mimeType || "image/png"}</span>
             </div>
             <div className="meta-item">
               <span className="meta-label">适用范围</span>
@@ -147,14 +233,6 @@ export function SignaturePreviewModal({
                 ))}
               </div>
             </div>
-            <div className="meta-item">
-              <span className="meta-label">更新时间</span>
-              <span className="meta-val">
-                {new Date(signature.updatedAt).toLocaleString("zh-CN", {
-                  hour12: false,
-                })}
-              </span>
-            </div>
           </div>
         </div>
 
@@ -162,7 +240,7 @@ export function SignaturePreviewModal({
         <div className="signature-template-panel">
           <div className="panel-title">
             <FileProtectOutlined />
-            <span>模板盖章效果 (Applied Preview)</span>
+            <span>真实模板盖章效果 (Real Template Preview)</span>
           </div>
 
           <div className="template-toolbar">
@@ -174,32 +252,31 @@ export function SignaturePreviewModal({
             />
           </div>
 
-          {/* 模板模拟渲染区域 */}
+          {/* 真实模板高保真渲染区域 */}
           <div className="document-template-canvas">
             {activeTemplate === "wht" && (
-              <div className="doc-mock wht-doc-mock">
+              <div className="doc-mock wht-doc-mock real-template">
                 <div className="doc-watermark">P.N.D.53 / 3</div>
+                <div className="copy-notice">
+                  ฉบับที่ 1 (สำหรับผู้ถูกหักภาษี ณ ที่จ่าย ใช้แนบพร้อมกับแบบแสดงรายการภาษี)
+                </div>
                 <div className="doc-header">
                   <div className="gov-badge">หนังสือรับรองการหักภาษี ณ ที่จ่าย</div>
-                  <div className="doc-title-th">WITHHOLDING TAX CERTIFICATE (ภ.ง.ด.53)</div>
+                  <div className="doc-title-th">WITHHOLDING TAX CERTIFICATE (ภ.ง.ด.53 / 3)</div>
                   <div className="doc-no-row">
-                    <span>BOOK NO: 202607BK1</span>
-                    <span>DOC NO: ZWT202607001</span>
+                    <span>เล่มที่ / BOOK NO: 202607BK1</span>
+                    <span>เลขที่ / DOC NO: ZWT202607001</span>
                   </div>
                 </div>
 
                 <div className="doc-body-fields">
                   <div className="doc-field-row">
                     <span className="lbl">PAYER (ผู้มีหน้าที่หักภาษี):</span>
-                    <span className="val">ZWT FINANCE (THAILAND) CO., LTD.</span>
-                  </div>
-                  <div className="doc-field-row">
-                    <span className="lbl">TAX ID (เลขประจำตัวผู้เสียภาษี):</span>
-                    <span className="val font-mono">0105562109841</span>
+                    <span className="val">ZWT FINANCE (THAILAND) CO., LTD. (TAX ID: 0105562109841)</span>
                   </div>
                   <div className="doc-field-row">
                     <span className="lbl">PAYEE (ผู้ถูกหักภาษี):</span>
-                    <span className="val">บริษัท จั่วป่าร์รีไซเคิลสหวรุ่งเรือง จำกัด</span>
+                    <span className="val">บริษัท จั่วป่าร์รีไซเคิลสหวรุ่งเรือง จำกัด (TAX ID: 0105540057561)</span>
                   </div>
                   <div className="doc-table-mini">
                     <div className="tr th">
@@ -210,25 +287,43 @@ export function SignaturePreviewModal({
                     </div>
                     <div className="tr td">
                       <span>ค่าบริการ (Services)</span>
-                      <span>2026-07-03</span>
+                      <span>2026/7/3</span>
+                      <span>150,000.00</span>
+                      <span>4,500.00</span>
+                    </div>
+                    <div className="tr td total-row">
+                      <span>รวมเงินที่จ่ายและภาษีที่นำส่ง (TOTAL)</span>
+                      <span>-</span>
                       <span>150,000.00</span>
                       <span>4,500.00</span>
                     </div>
                   </div>
+                  <div className="baht-text-line">
+                    <span>รวมเงินภาษีที่นำส่ง (ตัวอักษร): </span>
+                    <strong>-- หนึ่งแสนห้าหมื่นบาทถ้วน --</strong>
+                  </div>
                 </div>
 
-                {/* 签名盖章处 */}
+                {/* 签名盖章处：支持由 scalePercent 驱动的实效尺寸渲染 */}
                 <div className="doc-signature-block">
                   <div className="seal-ring">
                     <span className="seal-text-top">ZWT FINANCE CO., LTD.</span>
                     <span className="seal-star">★</span>
                     <span className="seal-text-bot">OFFICIAL STAMP</span>
                   </div>
-                  <div className="signature-overlay">
+                  <div
+                    className="signature-overlay"
+                    style={{
+                      width: `${140 * scaleRatio}px`,
+                      height: `${55 * scaleRatio}px`,
+                    }}
+                  >
                     <img alt="Applied Signature" src={signatureSrc} />
                   </div>
                   <div className="signature-line">
-                    <div className="dots">....................................................................</div>
+                    <div className="dots">
+                      ลงชื่อ .................................................................... ผู้มีหน้าที่หักภาษี
+                    </div>
                     <div className="signee-name">({signature.name})</div>
                     <div className="signee-title">Authorized Financial Officer</div>
                   </div>
@@ -237,10 +332,10 @@ export function SignaturePreviewModal({
             )}
 
             {activeTemplate === "tax_inv" && (
-              <div className="doc-mock tax-inv-doc-mock">
+              <div className="doc-mock tax-inv-doc-mock real-template">
                 <div className="doc-watermark">TAX INVOICE</div>
                 <div className="doc-header">
-                  <div className="company-logo-text">ZWT LOGISTICS & TAX</div>
+                  <div className="company-logo-text">ZWT LOGISTICS & TAX SERVICES</div>
                   <div className="doc-title-th">ใบกำกับภาษี / TAX INVOICE</div>
                   <div className="doc-no-row">
                     <span>INV NO: INV202607089</span>
@@ -278,61 +373,81 @@ export function SignaturePreviewModal({
                   <div className="seal-ring blue-seal">
                     <span className="seal-text-top">ZWT TAX INVOICE DEPT</span>
                     <span className="seal-star">★</span>
-                    <span className="seal-text-bot">APPROVED SEAL</span>
+                    <span className="seal-text-bot">AUTHORIZED ISSUER</span>
                   </div>
-                  <div className="signature-overlay">
+                  <div
+                    className="signature-overlay"
+                    style={{
+                      width: `${150 * scaleRatio}px`,
+                      height: `${60 * scaleRatio}px`,
+                    }}
+                  >
                     <img alt="Applied Signature" src={signatureSrc} />
                   </div>
                   <div className="signature-line">
                     <div className="dots">....................................................................</div>
                     <div className="signee-name">({signature.name})</div>
-                    <div className="signee-title">Authorized Issuer / 发票签发人</div>
+                    <div className="signee-title">Authorized Tax Officer</div>
                   </div>
                 </div>
               </div>
             )}
 
             {activeTemplate === "salary_advance" && (
-              <div className="doc-mock salary-doc-mock">
+              <div className="doc-mock salary-advance-doc-mock real-template">
                 <div className="doc-watermark">SALARY ADVANCE</div>
                 <div className="doc-header">
-                  <div className="company-logo-text">ZWT HUMAN RESOURCES</div>
-                  <div className="doc-title-th">ใบขอเบิกเงินล่วงหน้า / SALARY ADVANCE VOUCHER</div>
+                  <div className="company-logo-text">ZWT FINANCE & HUMAN RESOURCES</div>
+                  <div className="doc-title-th">工资预支单凭证 / SALARY ADVANCE VOUCHER</div>
                   <div className="doc-no-row">
-                    <span>BATCH NO: SA202607-01</span>
-                    <span>PERIOD: 202607</span>
+                    <span>BATCH NO: SA20260701</span>
+                    <span>DATE: 2026-07-01</span>
                   </div>
                 </div>
 
                 <div className="doc-body-fields">
                   <div className="doc-field-row">
-                    <span className="lbl">EMPLOYEE NAME:</span>
-                    <span className="val">SOMCHAI PRASERT (สมชาย ประเสริฐ)</span>
+                    <span className="lbl">EMPLOYEE (员工姓名):</span>
+                    <span className="val">Somchai Jaidee (EMP08821)</span>
                   </div>
                   <div className="doc-field-row">
-                    <span className="lbl">DEPARTMENT:</span>
-                    <span className="val">OPERATIONS / LOGISTICS</span>
+                    <span className="lbl">DEPARTMENT (部门):</span>
+                    <span className="val">Logistics Operations Dept</span>
                   </div>
-                  <div className="doc-field-row">
-                    <span className="lbl">ADVANCE AMOUNT:</span>
-                    <span className="val font-mono">12,000.00 THB</span>
+                  <div className="doc-table-mini">
+                    <div className="tr th">
+                      <span>ADVANCE AMOUNT</span>
+                      <span>REPAYMENT PERIOD</span>
+                      <span>APPROVAL STATUS</span>
+                    </div>
+                    <div className="tr td">
+                      <span>25,000.00 THB</span>
+                      <span>2026-08 (次月扣还)</span>
+                      <span>APPROVED (已批准)</span>
+                    </div>
                   </div>
                 </div>
 
                 {/* 签名盖章处 */}
                 <div className="doc-signature-block">
                   <div className="seal-ring purple-seal">
-                    <span className="seal-text-top">ZWT HR & PAYROLL</span>
+                    <span className="seal-text-top">ZWT HR & FINANCE</span>
                     <span className="seal-star">★</span>
-                    <span className="seal-text-bot">VERIFIED</span>
+                    <span className="seal-text-bot">PAYROLL APPROVED</span>
                   </div>
-                  <div className="signature-overlay">
+                  <div
+                    className="signature-overlay"
+                    style={{
+                      width: `${135 * scaleRatio}px`,
+                      height: `${50 * scaleRatio}px`,
+                    }}
+                  >
                     <img alt="Applied Signature" src={signatureSrc} />
                   </div>
                   <div className="signature-line">
                     <div className="dots">....................................................................</div>
                     <div className="signee-name">({signature.name})</div>
-                    <div className="signee-title">Payroll Approver / 工资审批人</div>
+                    <div className="signee-title">Payroll Finance Manager</div>
                   </div>
                 </div>
               </div>
