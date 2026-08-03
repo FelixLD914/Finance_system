@@ -630,6 +630,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     pendingReviewCount: number;
     approvedCount: number;
     issuedCount: number;
+    voidedCount: number;
     totalAmount: number;
     totalWhtAmount: number;
   }
@@ -661,6 +662,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           pendingReviewCount: 0,
           approvedCount: 0,
           issuedCount: 0,
+          voidedCount: 0,
           totalAmount: 0,
           totalWhtAmount: 0,
         };
@@ -671,6 +673,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
       if (task.status === "pending_review") entry.pendingReviewCount += 1;
       if (task.status === "approved") entry.approvedCount += 1;
       if (task.status === "issued") entry.issuedCount += 1;
+      if (task.status === "voided") entry.voidedCount += 1;
       entry.totalAmount += Number(task.totalAmount) || 0;
       entry.totalWhtAmount += Number(task.whtAmount) || 0;
     }
@@ -678,73 +681,107 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
     return Array.from(map.values()).sort((a, b) => b.period.localeCompare(a.period));
   }, [filters.bookNo, filters.query, filters.status, phase, tasks]);
 
-  const periodColumns: ColumnsType<PeriodSummaryRow> = [
-    {
-      title: t("wht.period"),
-      dataIndex: "period",
-      width: 140,
-      render: (period: string) => (
-        <span className="period-badge-cell">
-          <Tag color="gold" style={{ fontSize: "13px", fontWeight: "bold", padding: "2px 10px" }}>
-            {period}
-          </Tag>
-        </span>
-      ),
-    },
-    {
-      title: t("wht.taskCountLabel") || "任务数量",
-      dataIndex: "totalCount",
-      width: 130,
-      render: (count: number) => <strong>{count} 项任务</strong>,
-    },
-    {
-      title: t("status.pendingReview"),
-      dataIndex: "pendingReviewCount",
-      width: 110,
-      render: (count: number) =>
-        count > 0 ? <Tag color="gold">{count} 待复核</Tag> : <span className="date-value">0</span>,
-    },
-    {
-      title: t("status.draft"),
-      dataIndex: "draftCount",
-      width: 100,
-      render: (count: number) =>
-        count > 0 ? <Tag color="blue">{count} 草稿</Tag> : <span className="date-value">0</span>,
-    },
-    {
-      title: t("status.approved"),
-      dataIndex: "approvedCount",
-      width: 110,
-      render: (count: number) =>
-        count > 0 ? <Tag color="green">{count} 已批准</Tag> : <span className="date-value">0</span>,
-    },
-    {
-      title: t("wht.totalAmount"),
-      dataIndex: "totalAmount",
-      width: 140,
-      render: (val: number) => formatMoney(String(val)),
-    },
-    {
-      title: t("wht.whtAmount"),
-      dataIndex: "totalWhtAmount",
-      width: 130,
-      render: (val: number) => formatMoney(String(val)),
-    },
-    {
-      title: t("common.actions") || "操作",
-      key: "actions",
-      width: 160,
-      render: (_, record) => (
-        <Button
-          type="link"
-          icon={<RightOutlined />}
-          onClick={() => setFilters((current) => ({ ...current, period: record.period }))}
-        >
-          查看该期明细
-        </Button>
-      ),
-    },
-  ];
+  const periodColumns = useMemo<ColumnsType<PeriodSummaryRow>>(() => {
+    const cols: ColumnsType<PeriodSummaryRow> = [
+      {
+        title: t("wht.period"),
+        dataIndex: "period",
+        width: 140,
+        render: (period: string) => (
+          <span className="period-badge-cell">
+            <Tag color="gold" style={{ fontSize: "13px", fontWeight: "bold", padding: "2px 10px" }}>
+              {period}
+            </Tag>
+          </span>
+        ),
+      },
+      {
+        title: t("wht.taskCountLabel") || "任务数量",
+        dataIndex: "totalCount",
+        width: 130,
+        render: (count: number) => <strong>{count} 项任务</strong>,
+      },
+    ];
+
+    if (phase === "pending" || phase === "all") {
+      cols.push(
+        {
+          title: t("status.pendingReview"),
+          dataIndex: "pendingReviewCount",
+          width: 110,
+          render: (count: number) =>
+            count > 0 ? <Tag color="gold">{count} 待复核</Tag> : <span className="date-value">0</span>,
+        },
+        {
+          title: t("status.draft"),
+          dataIndex: "draftCount",
+          width: 100,
+          render: (count: number) =>
+            count > 0 ? <Tag color="blue">{count} 草稿</Tag> : <span className="date-value">0</span>,
+        },
+      );
+    }
+
+    if (phase === "issuing" || phase === "all") {
+      cols.push({
+        title: t("status.approved"),
+        dataIndex: "approvedCount",
+        width: 110,
+        render: (count: number) =>
+          count > 0 ? <Tag color="green">{count} 已批准</Tag> : <span className="date-value">0</span>,
+      });
+    }
+
+    if (phase === "history" || phase === "all") {
+      cols.push(
+        {
+          title: t("status.issued"),
+          dataIndex: "issuedCount",
+          width: 110,
+          render: (count: number) =>
+            count > 0 ? <Tag color="cyan">{count} 已出具</Tag> : <span className="date-value">0</span>,
+        },
+        {
+          title: t("status.voided"),
+          dataIndex: "voidedCount",
+          width: 100,
+          render: (count: number) =>
+            count > 0 ? <Tag color="default">{count} 已作废</Tag> : <span className="date-value">0</span>,
+        },
+      );
+    }
+
+    cols.push(
+      {
+        title: t("wht.totalAmount"),
+        dataIndex: "totalAmount",
+        width: 140,
+        render: (val: number) => formatMoney(String(val)),
+      },
+      {
+        title: t("wht.whtAmount"),
+        dataIndex: "totalWhtAmount",
+        width: 130,
+        render: (val: number) => formatMoney(String(val)),
+      },
+      {
+        title: t("common.actions") || "操作",
+        key: "actions",
+        width: 160,
+        render: (_, record) => (
+          <Button
+            type="link"
+            icon={<RightOutlined />}
+            onClick={() => setFilters((current) => ({ ...current, period: record.period }))}
+          >
+            查看该期明细
+          </Button>
+        ),
+      },
+    );
+
+    return cols;
+  }, [phase, t]);
 
   /**
    * 建完直接回台账并选中新草稿：操作页是「录一条」的入口，不是停留的地方，
