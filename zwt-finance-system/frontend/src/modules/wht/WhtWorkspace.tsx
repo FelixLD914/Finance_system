@@ -1118,6 +1118,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         styles={{ body: { padding: 0 } }}
         title={null}
         width={560}
+        zIndex={1000}
         onClose={() => setInspectorOpen(false)}
       >
         {selectedTask && (
@@ -1140,6 +1141,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         destroyOnHidden
         open={importOpen}
         title={t("wht.historyImportTitle")}
+        zIndex={1100}
         okText={t("common.import")}
         cancelText={t("common.cancel")}
         okButtonProps={{ disabled: !importFile }}
@@ -1188,6 +1190,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         forceRender
         open={generateOpen}
         title={t("wht.generateDocuments")}
+        zIndex={1100}
         okText={t("wht.generateDocuments")}
         cancelText={t("common.cancel")}
         confirmLoading={documentPending}
@@ -1236,6 +1239,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         title={t("wht.editTaskTitle", {
           label: selectedTask?.taskNo ?? t("wht.pendingNumber"),
         })}
+        zIndex={1100}
         okText={t("common.save")}
         cancelText={t("common.cancel")}
         confirmLoading={mutationPending}
@@ -1323,6 +1327,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         destroyOnHidden
         open={reviseOpen}
         title={t("wht.reviseTitle", { taskNo: selectedTask?.taskNo ?? "" })}
+        zIndex={1100}
         okText={t("wht.revise")}
         cancelText={t("common.cancel")}
         confirmLoading={mutationPending}
