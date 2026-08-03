@@ -407,6 +407,7 @@ class SignatureAssetUpdate(ApiSchema):
     status: Literal["active", "inactive"] | None = None
     is_default: bool | None = None
     usage: list[SignatureUsage] | None = Field(default=None, min_length=1)
+    scale_percent: int | None = Field(default=None, ge=50, le=200)
 
 
 class SignatureAssetResponse(ApiSchema):
@@ -419,6 +420,7 @@ class SignatureAssetResponse(ApiSchema):
     status: Literal["active", "inactive"]
     usage: list[SignatureUsage]
     is_default: bool
+    scale_percent: int = 100
     created_by_name: str
     updated_by_name: str
     created_at: datetime

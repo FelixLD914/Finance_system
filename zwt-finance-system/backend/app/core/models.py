@@ -104,6 +104,8 @@ class SignatureAsset(Base, SoftDeleteMixin):
     usage: Mapped[str] = mapped_column(String(60), nullable=False, default="wht")
     # 默认签名是"按适用范围"的：WHT 的默认和 TAX INV 的默认可以是两张不同的图。
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 签名套印缩放比例 (%)，范围 50..200，默认 100
+    scale_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("core.users.id", name="fk_signature_assets_created_by_users"),
