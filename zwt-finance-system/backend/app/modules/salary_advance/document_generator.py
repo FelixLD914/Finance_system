@@ -428,9 +428,10 @@ def export_pdf_from_template(
         )
         overlay.setFont(font, size)
         if field in TOP_ALIGNED_FIELDS:
-            # 顶部基线对齐：第 0 行锚在 anchor.y（与左侧 Name / Surname 顶行水平对齐），后续行向下向下排列
+            # 顶部基线对齐：第 0 行锚在 first_name.y（与左侧 Name / Surname 顶行水平线 100% 精准齐平），后续行向下排列
+            top_y = pdf_layout.TEXT_ANCHORS.get("first_name", anchor).y
             for offset, line in enumerate(lines):
-                line_y = anchor.y - offset * size * LINE_SPACING
+                line_y = top_y - offset * size * LINE_SPACING
                 if anchor.align == "right":
                     overlay.drawRightString(anchor.x, line_y, line)
                 elif anchor.align == "center":

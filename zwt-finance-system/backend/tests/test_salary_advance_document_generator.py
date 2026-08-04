@@ -164,7 +164,7 @@ def _position_lines(pdf: Path) -> list[tuple[float, float, float, str]]:
         rows: dict[float, list] = {}
         for word in page.extract_words():
             baseline = round(height - float(word["bottom"]), 1)
-            if float(word["x0"]) >= left and anchor.y - 40 <= baseline <= anchor.y + 4:
+            if float(word["x0"]) >= left and 595.0 <= baseline <= 638.0:
                 rows.setdefault(baseline, []).append(word)
     lines = []
     for baseline in sorted(rows, reverse=True):
