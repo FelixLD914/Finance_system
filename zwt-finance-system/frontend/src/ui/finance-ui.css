@@ -988,12 +988,17 @@
    列数必须等于筛选栏里的控件数：期数 / 状态 / 搜索 / 按月分组 / 刷新 / 导出＝6。
    少一列最后那个按钮会掉到第二行，白白多占 40px 首屏高度。 */
 .tax-filter-bar {
-  grid-template-columns: 136px 144px minmax(220px, 1fr) auto auto auto;
+  grid-template-columns: 136px 144px minmax(220px, 1fr) auto auto auto auto auto;
   gap: 8px;
   padding: 10px;
   background: var(--finance-surface);
   border-color: var(--finance-border);
   border-radius: var(--finance-radius-md) var(--finance-radius-md) 0 0;
+}
+
+.tax-filter-collapsed {
+  padding: 5px 10px;
+  background: var(--finance-surface);
 }
 
 /* 三个计数压成一条细横杠。原来是 58px 高的三宫格大数字，可它讲的就是上面

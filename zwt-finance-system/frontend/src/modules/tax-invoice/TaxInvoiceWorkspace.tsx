@@ -12,7 +12,9 @@ import {
   DatabaseOutlined,
   DeleteOutlined,
   DownloadOutlined,
+  DownOutlined,
   EditOutlined,
+  FilterOutlined,
   ProfileOutlined,
   FileDoneOutlined,
   FileExcelOutlined,
@@ -26,6 +28,7 @@ import {
   ShrinkOutlined,
   TableOutlined,
   SafetyCertificateOutlined,
+  UpOutlined,
   UploadOutlined,
   PlusOutlined,
   WarningOutlined,
@@ -1093,6 +1096,8 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
   const [generateInvoiceTarget, setGenerateInvoiceTarget] = useState<TaxInvoice | null>(null);
   const [generateForm] = Form.useForm();
+  const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(true);
+  const hasActiveFilters = period !== "all" || status !== "all" || query.trim() !== "";
 
   const refreshInvoices = useCallback(async () => {
     setLoading(true);
@@ -2392,75 +2397,118 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                 setSelectedMonth(null);
               }}
             />
-            <div className="tax-filter-bar">
-              <Select
-                options={[
-                  { value: "all", label: t("tax.allPeriods") },
-                  ...periods.map((value) => ({
-                    value,
-                    label: `${value.slice(0, 4)}-${value.slice(4)}`,
-                  })),
-                ]}
-                value={period}
-                onChange={setPeriod}
-              />
-              <Select
-                options={[
-                  { value: "all", label: t("tax.allStatuses") },
-                  ...STATUS_ORDER.map((value) => ({
-                    value,
-                    label: statusLabel(value, t),
-                  })),
-                ]}
-                value={status}
-                onChange={setStatus}
-              />
-              <Input.Search
-                allowClear
-                placeholder={t("tax.searchPlaceholder")}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <Tooltip title={t("tax.groupByMonthTip")}>
-                <Button
-                  icon={<CalendarOutlined />}
-                  type={groupByMonth ? "primary" : "default"}
-                  onClick={() => {
-                    setGroupByMonth((on) => !on);
-                    setSelectedMonth(null);
-                  }}
-                >
-                  {t("tax.groupByMonth")}
+            {filtersCollapsed ? (
+              <div className="tax-filter-bar tax-filter-collapsed">
+                <div className="collapsed-left">
+                  <Input.Search
+                    allowClear
+                    placeholder={t("tax.searchPlaceholder")}
+                    style={{ width: 260 }}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                  {period !== "all" && (
+                    <Tag color="gold" closable onClose={() => setPeriod("all")}>
+                      期数: {`${period.slice(0, 4)}-${period.slice(4)}`}
+                    </Tag>
+                  )}
+                  {status !== "all" && (
+                    <Tag color="blue" closable onClose={() => setStatus("all")}>
+                      状态: {statusLabel(status, t)}
+                    </Tag>
+                  )}
+                  {hasActiveFilters && (
+                    <Button size="small" type="link" onClick={() => { setPeriod("all"); setStatus("all"); setQuery(""); }}>
+                      重置筛选
+                    </Button>
+                  )}
+                </div>
+                <Space size="small">
+                  <Tooltip title={t("tax.groupByMonthTip")}>
+                    <Button
+                      icon={<CalendarOutlined />}
+                      size="small"
+                      type={groupByMonth ? "primary" : "default"}
+                      onClick={() => { setGroupByMonth((on) => !on); setSelectedMonth(null); }}
+                    />
+                  </Tooltip>
+                  <Button icon={<ReloadOutlined />} size="small" loading={loading} onClick={() => void refreshInvoices()} />
+                  <Tooltip title={t("tax.exportLedgerTip")}>
+                    <Button icon={<DownloadOutlined />} size="small" loading={busy} onClick={() => void runLedgerExport()} />
+                  </Tooltip>
+                  <Tooltip title="打包导出整期正式文件 ZIP">
+                    <Button icon={<FileZipOutlined />} size="small" loading={busy} type="primary" onClick={() => void handleExportPeriodZip()} />
+                  </Tooltip>
+                  <Button
+                    icon={<FilterOutlined />}
+                    size="small"
+                    onClick={() => setFiltersCollapsed(false)}
+                  >
+                    筛选 {hasActiveFilters && <span className="active-dot">•</span>}
+                    <DownOutlined />
+                  </Button>
+                </Space>
+              </div>
+            ) : (
+              <div className="tax-filter-bar">
+                <Select
+                  options={[
+                    { value: "all", label: t("tax.allPeriods") },
+                    ...periods.map((value) => ({
+                      value,
+                      label: `${value.slice(0, 4)}-${value.slice(4)}`,
+                    })),
+                  ]}
+                  value={period}
+                  onChange={setPeriod}
+                />
+                <Select
+                  options={[
+                    { value: "all", label: t("tax.allStatuses") },
+                    ...STATUS_ORDER.map((value) => ({
+                      value,
+                      label: statusLabel(value, t),
+                    })),
+                  ]}
+                  value={status}
+                  onChange={setStatus}
+                />
+                <Input.Search
+                  allowClear
+                  placeholder={t("tax.searchPlaceholder")}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+                <Tooltip title={t("tax.groupByMonthTip")}>
+                  <Button
+                    icon={<CalendarOutlined />}
+                    type={groupByMonth ? "primary" : "default"}
+                    onClick={() => { setGroupByMonth((on) => !on); setSelectedMonth(null); }}
+                  >
+                    {t("tax.groupByMonth")}
+                  </Button>
+                </Tooltip>
+                <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void refreshInvoices()}>
+                  {t("common.refresh")}
                 </Button>
-              </Tooltip>
-              <Button
-                icon={<ReloadOutlined />}
-                loading={loading}
-                onClick={() => void refreshInvoices()}
-              >
-                {t("common.refresh")}
-              </Button>
-              {/* 导出跟着筛选条件走：看到的是哪一批，导出的就是哪一批。 */}
-              <Tooltip title={t("tax.exportLedgerTip")}>
+                <Tooltip title={t("tax.exportLedgerTip")}>
+                  <Button icon={<DownloadOutlined />} loading={busy} onClick={() => void runLedgerExport()}>
+                    {t("tax.exportLedger")}
+                  </Button>
+                </Tooltip>
+                <Tooltip title="按报关单为一份，以递增序号 (1. 2. ) 打包导出所选整期正式文件 ZIP">
+                  <Button icon={<FileZipOutlined />} loading={busy} type="primary" onClick={() => void handleExportPeriodZip()}>
+                    打包导出 (ZIP)
+                  </Button>
+                </Tooltip>
                 <Button
-                  icon={<DownloadOutlined />}
-                  loading={busy}
-                  onClick={() => void runLedgerExport()}
+                  icon={<UpOutlined />}
+                  onClick={() => setFiltersCollapsed(true)}
                 >
-                  {t("tax.exportLedger")}
+                  收起
                 </Button>
-              </Tooltip>
-              <Tooltip title="按报关单为一份，以递增序号 (1. 2. ) 打包导出所选整期正式文件 ZIP">
-                <Button
-                  icon={<FileZipOutlined />}
-                  loading={busy}
-                  type="primary"
-                  onClick={() => void handleExportPeriodZip()}
-                >
-                  打包导出整期正式文件 (ZIP)
-                </Button>
-              </Tooltip>
-            </div>
+              </div>
+            )}
             {/* 三个计数压成一行细条：原来是 58px 高的三宫格，跟上面生命周期页签
                 的角标讲的是同一批数字，占着首屏却不多给一点信息。
                 台账只负责「看」，批准要去批次复核，所以待复核数后面挂条明路。 */}

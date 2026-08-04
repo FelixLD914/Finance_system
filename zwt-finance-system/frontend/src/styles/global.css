@@ -1362,13 +1362,37 @@ select {
 /* 末尾两列是「刷新」和「导出台账」两个按钮，各占一格，别让导出掉到第二行。 */
 .tax-filter-bar {
   display: grid;
-  grid-template-columns: 150px 150px minmax(220px, 1fr) auto auto auto;
+  /* 期数 / 状态 / 搜索 / 按月分组 / 刷新 / 导出 / ZIP / 收起 = 8 */
+  grid-template-columns: 150px 150px minmax(220px, 1fr) auto auto auto auto auto;
   gap: 10px;
   padding: 14px;
   background: rgba(255, 253, 249, 0.9);
   border: 1px solid var(--line);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
+}
+
+/* ── 折叠态筛选栏 ── */
+.tax-filter-collapsed {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+}
+
+.tax-filter-collapsed .collapsed-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tax-filter-collapsed .active-dot {
+  color: #ff4d4f;
+  font-size: 16px;
+  line-height: 1;
+  margin-left: 2px;
 }
 
 .tax-ledger-summary {
