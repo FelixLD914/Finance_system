@@ -193,7 +193,7 @@ def test_workbook_rejects_more_than_eighteen_items(tmp_path):
 def test_file_stem_uses_invoice_date_and_document_number():
     assert (
         tax_invoice_file_stem(_invoice())
-        == "20260608-TAX INV(ZWT-IV20260608-01)-THB3245.67"
+        == "20260608-TAX INV(ZWT-IV20260608-01)-THB3,245.67"
     )
 
 

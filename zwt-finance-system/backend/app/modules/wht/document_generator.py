@@ -479,7 +479,7 @@ def document_file_stem(task: WhtTask) -> str:
     payment = task.payment_date.strftime("%Y%m%d") if task.payment_date else "NoDate"
     tax_amount = f"{task.wht_amount:,.2f}"
     raw = f"{task.task_no}-{payment}-THB-{tax_amount}"
-    return re.sub(r'[\\/:*?"<>|,]', "", raw)
+    return re.sub(r'[\\/:*?"<>|]', "", raw)
 
 
 def signature_path(root: Path, storage_key: str) -> Path:

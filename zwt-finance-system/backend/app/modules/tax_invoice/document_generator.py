@@ -475,4 +475,4 @@ def tax_invoice_file_stem(invoice: TaxInvoice) -> str:
         f"{invoice.invoice_date:%Y%m%d}-TAX INV"
         f"({invoice.document_no})-THB{amount}"
     )
-    return re.sub(r'[\\/:*?"<>|,]', "", raw)
+    return re.sub(r'[\\/:*?"<>|]', "", raw)
