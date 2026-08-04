@@ -321,6 +321,27 @@ async def export_ledger(
     )
 
 
+@router.get("/invoices/export-zip")
+async def export_period_zip(
+    document_service: DocumentServiceDependency,
+    period: str | None = None,
+    invoice_status: Literal["approved", "issued"] | None = Query(default=None, alias="status"),
+    include_signature: bool = Query(default=True, alias="includeSignature"),
+    signature_id: Annotated[uuid.UUID | None, Query(alias="signatureId")] = None,
+):
+    zip_bytes, filename = await document_service.export_period_zip(
+        period=period,
+        status=invoice_status,
+        include_signature=include_signature,
+        signature_id=signature_id,
+    )
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/invoices/{invoice_id}", response_model=TaxInvoiceResponse)
 async def get_invoice(
     invoice_id: uuid.UUID,

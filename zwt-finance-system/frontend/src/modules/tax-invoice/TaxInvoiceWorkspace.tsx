@@ -18,6 +18,7 @@ import {
   FileExcelOutlined,
   FilePdfOutlined,
   FileSearchOutlined,
+  FileZipOutlined,
   ImportOutlined,
   InfoCircleOutlined,
   ReloadOutlined,
@@ -89,6 +90,7 @@ import {
   restoreTaxInvoice,
   updateTaxInvoice,
   voidTaxInvoice,
+  exportTaxInvoicePeriodZip,
 } from "./api";
 import {
   classifyDualFile,
@@ -115,6 +117,7 @@ import type {
   TaxInvoiceItem,
   TaxInvoiceStatus,
 } from "./types";
+import type { SignatureAsset } from "../wht/types";
 import { ExchangeRateDirectory } from "./ExchangeRateDirectory";
 
 // 三个平级入口：台账（看）、开票（做）、汇率中心（查/维护）。原来的五个平铺
@@ -543,6 +546,46 @@ export function InvoiceInspector({
           <Descriptions.Item label={t("tax.incoterms")}>
             {invoice.incoterms ?? "—"}
             {invoice.isDap && <Tag color="orange">{t("tax.dapNeedsReview")}</Tag>}
+          </Descriptions.Item>
+        </Descriptions>
+      </section>
+
+      {/* 海关单据核对与留痕快照：全量展示落库的海关自印数据与对账快照 */}
+      <section className="inspector-section">
+        <h3>海关单据与对账核对快照</h3>
+        <Descriptions className="task-descriptions" column={1} colon={false}>
+          <Descriptions.Item label="Declaration Ref No.">
+            {invoice.declarationRefNo ?? invoice.cdn ?? "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="海关自印折算汇率">
+            {invoice.customsExchangeRate ? Number(invoice.customsExchangeRate).toFixed(4) : "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="报关行/货代公司">
+            {invoice.forwarderName ?? "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="货代 13 位税号">
+            {invoice.forwarderTaxNo ?? "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="报关单自印 FOB USD">
+            {invoice.customsFobUsdTotal ? `$${Number(invoice.customsFobUsdTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="发票 FOB USD 总额">
+            {`$${Number(invoice.fobRevenueUsdTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          </Descriptions.Item>
+          <Descriptions.Item label="报关单自印 THB 总额">
+            {invoice.customsFobThbPrintedTotal ? `฿${Number(invoice.customsFobThbPrintedTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="报关单行级 THB 汇总">
+            {invoice.customsFobThbLineTotal ? `฿${Number(invoice.customsFobThbLineTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="发票折算 THB 总额">
+            {`฿${Number(invoice.fobRevenueThbTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          </Descriptions.Item>
+          <Descriptions.Item label="发票源文件">
+            {invoice.sourceInvoiceFileName ?? "—"}
+          </Descriptions.Item>
+          <Descriptions.Item label="报关单源文件">
+            {invoice.sourceCustomsFileName ?? "—"}
           </Descriptions.Item>
         </Descriptions>
       </section>
@@ -1046,6 +1089,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     startDate: "",
     endDate: "",
   });
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
+  const [generateInvoiceTarget, setGenerateInvoiceTarget] = useState<TaxInvoice | null>(null);
+  const [generateForm] = Form.useForm();
 
   const refreshInvoices = useCallback(async () => {
     setLoading(true);
@@ -1522,27 +1569,71 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     if (selected) approveInvoice(selected);
   };
 
-  const generateSelected = async () => {
-    if (!selected) return;
-    setBusy(true);
+  const openGenerateModal = async (target?: TaxInvoice) => {
+    const invoiceToGenerate = target ?? selected;
+    if (!invoiceToGenerate) return;
+    setGenerateInvoiceTarget(invoiceToGenerate);
     try {
-      // 取适用于 TAX INV 的默认签名（usage 为 tax_inv 或 both）。
-      // 一张都没有就出不带签名的文件，而不是报错挡住出票。
-      const signatures = await listSignatures(false, "tax_inv").catch(() => []);
-      const signature = signatures.find((item) => item.isDefault) ?? signatures[0];
+      setBusy(true);
+      const items = await listSignatures(false, "tax_inv").catch(() => []);
+      setSignatures(items);
+      const defaultSig = items.find((sig) => sig.isDefault) ?? items[0];
+      generateForm.setFieldsValue({
+        includeSignature: Boolean(defaultSig),
+        signatureId: defaultSig?.id,
+        formats: ["xlsx", "pdf"],
+      });
+      setGenerateOpen(true);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "获取签名资产配置失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmGenerate = async () => {
+    if (!generateInvoiceTarget) return;
+    try {
+      const values = await generateForm.validateFields();
+      setBusy(true);
       const created = await generateTaxInvoiceDocuments(
-        selected.id,
-        signature?.id ?? null,
+        generateInvoiceTarget.id,
+        values.includeSignature ? values.signatureId : null,
       );
       setDocuments((current) => [...created, ...current]);
-      const detail = await getTaxInvoice(selected.id);
+      const detail = await getTaxInvoice(generateInvoiceTarget.id);
       setSelected(detail);
       setInvoices((current) =>
-        current.map((invoice) => (invoice.id === detail.id ? detail : invoice)),
+        current.map((inv) => (inv.id === detail.id ? detail : inv)),
       );
+      setGenerateOpen(false);
       message.success(t("tax.documentsGenerated"));
     } catch (error) {
       message.error(error instanceof Error ? error.message : t("tax.generateFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const generateSelected = async () => {
+    if (selected) await openGenerateModal(selected);
+  };
+
+  const handleExportPeriodZip = async () => {
+    try {
+      setBusy(true);
+      const periodLabel = selectedMonth && selectedMonth !== "none" ? selectedMonth : undefined;
+      const items = await listSignatures(false, "tax_inv").catch(() => []);
+      const defaultSig = items.find((sig) => sig.isDefault) ?? items[0];
+      await exportTaxInvoicePeriodZip(
+        periodLabel,
+        undefined,
+        Boolean(defaultSig),
+        defaultSig?.id ?? null,
+      );
+      message.success("整期正式文件 (ZIP) 打包导出成功，已为您开始下载");
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "整期打包导出失败");
     } finally {
       setBusy(false);
     }
@@ -2357,6 +2448,16 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   onClick={() => void runLedgerExport()}
                 >
                   {t("tax.exportLedger")}
+                </Button>
+              </Tooltip>
+              <Tooltip title="按报关单为一份，以递增序号 (1. 2. ) 打包导出所选整期正式文件 ZIP">
+                <Button
+                  icon={<FileZipOutlined />}
+                  loading={busy}
+                  type="primary"
+                  onClick={() => void handleExportPeriodZip()}
+                >
+                  打包导出整期正式文件 (ZIP)
                 </Button>
               </Tooltip>
             </div>
@@ -3426,6 +3527,58 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
           />
         )}
       </Drawer>
+
+      <Modal
+        cancelText={t("common.cancel")}
+        confirmLoading={busy}
+        okText="出具生成"
+        open={generateOpen}
+        title="生成 TAX INV 正式出具文件"
+        onCancel={() => setGenerateOpen(false)}
+        onOk={() => void handleConfirmGenerate()}
+      >
+        <Form form={generateForm} layout="vertical">
+          <Form.Item
+            name="includeSignature"
+            valuePropName="checked"
+          >
+            <Checkbox>加盖电子签名 (Include Electronic Signature)</Checkbox>
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) => prev.includeSignature !== curr.includeSignature}
+          >
+            {({ getFieldValue }) =>
+              getFieldValue("includeSignature") ? (
+                <Form.Item
+                  label="选择签名资产"
+                  name="signatureId"
+                  rules={[{ required: true, message: "请选择盖章所用的签名资产" }]}
+                >
+                  <Select
+                    options={signatures.map((sig) => ({
+                      value: sig.id,
+                      label: `${sig.name} ${sig.isDefault ? "[默认]" : ""} [缩放 ${sig.scalePercent ?? 100}%]`,
+                    }))}
+                  />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
+          <Form.Item
+            label="生成的导出格式"
+            name="formats"
+            rules={[{ required: true, message: "请至少选择一种导出格式" }]}
+          >
+            <Checkbox.Group
+              options={[
+                { label: "PDF 三联单 (PDF)", value: "pdf" },
+                { label: "Excel 台账 (XLSX)", value: "xlsx" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         className="tax-conflict-modal"

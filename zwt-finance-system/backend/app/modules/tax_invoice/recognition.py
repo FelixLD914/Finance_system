@@ -622,17 +622,15 @@ def combine_invoice_and_customs(
         unit_price = source.get("ci_unit_price")
         fob_unit_price: Decimal | None = None
         if unit_price is not None:
-            if incoterms == "FOB":
+            if incoterms.startswith("FOB") or "FOB" in incoterms:
                 fob_unit_price = unit_price.quantize(PRICE, rounding=ROUND_HALF_UP)
-            elif incoterms == "DAP" and quantity_total:
+            elif incoterms.startswith("DAP") and quantity_total:
                 fob_unit_price = (
                     unit_price - ((freight + insurance) / quantity_total)
                 ).quantize(PRICE, rounding=ROUND_HALF_UP)
             else:
-                fob_unit_price = (unit_price * Decimal("1.03")).quantize(
-                    PRICE,
-                    rounding=ROUND_HALF_UP,
-                )
+                # 常规默认单价直接取发票单价，不硬编码乘以 1.03，避免虚高误触发告警。
+                fob_unit_price = unit_price.quantize(PRICE, rounding=ROUND_HALF_UP)
         fob_usd = (
             (fob_unit_price * quantity).quantize(MONEY, rounding=ROUND_HALF_UP)
             if fob_unit_price is not None and quantity is not None
@@ -665,9 +663,15 @@ def combine_invoice_and_customs(
     ).quantize(MONEY)
     invoice_total = invoice.get("fob_amount_usd")
     customs_total = customs.get("customs_fob_usd_total")
+
+    def _diff_exceeds(a: Decimal | None, b: Decimal | None, tolerance: Decimal = Decimal("0.01")) -> bool:
+        if a is None or b is None:
+            return False
+        return abs(a.quantize(MONEY) - b.quantize(MONEY)) > tolerance
+
     verification_failed = (
-        (invoice_total is not None and calculated_total != invoice_total)
-        or (customs_total is not None and calculated_total != customs_total)
+        _diff_exceeds(calculated_total, invoice_total)
+        or _diff_exceeds(calculated_total, customs_total)
     )
     line_warnings = _check_customs_lines(items, customs.get("customs_items") or [])
     return {

@@ -268,3 +268,60 @@ class TaxInvoiceDocumentService:
                 "attachment path escaped the configured root"
             ) from exc
         return path
+
+    async def export_period_zip(
+        self,
+        *,
+        period: str | None = None,
+        status: str | None = None,
+        include_signature: bool = True,
+        signature_id: uuid.UUID | None = None,
+    ) -> tuple[bytes, str]:
+        """打包导出整期正式文件（ZIP 归档）。
+
+        按报关单/发票（CDN）为一份递增分配序号前缀（`1. `, `2. `），
+        同一报关单号对应的 Excel 和 PDF 拥有完全一致的序号前缀。
+        """
+        import io
+        import zipfile
+
+        query_stmt = select(TaxInvoice).order_by(
+            TaxInvoice.cdn, TaxInvoice.document_no, TaxInvoice.created_at
+        )
+        if period:
+            query_stmt = query_stmt.where(TaxInvoice.revenue_period == period.replace("-", ""))
+        if status:
+            query_stmt = query_stmt.where(TaxInvoice.status == status)
+        else:
+            query_stmt = query_stmt.where(TaxInvoice.status.in_(("approved", "issued")))
+
+        invoices = list((await self.session.scalars(query_stmt)).all())
+        if not invoices:
+            raise TaxInvoiceNotFoundError("no matching approved/issued invoices found for period export")
+
+        zip_buffer = io.BytesIO()
+        seen_names: set[str] = set()
+
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for idx, invoice in enumerate(invoices, start=1):
+                docs = await self.list_documents(invoice.id)
+                if not docs:
+                    docs = await self.generate_documents(
+                        invoice.id,
+                        TaxInvoiceDocumentGenerateRequest(
+                            include_signature=include_signature,
+                            signature_id=signature_id,
+                            formats=["xlsx", "pdf"],
+                        ),
+                    )
+                for doc in docs:
+                    doc_obj, file_path = await self.document_content(doc.id)
+                    arcname = f"{idx}. {file_path.name}"
+                    if arcname not in seen_names:
+                        seen_names.add(arcname)
+                        zip_file.writestr(arcname, file_path.read_bytes())
+
+        zip_buffer.seek(0)
+        period_label = period.replace("-", "") if period else "ALL"
+        filename = f"TAX-INV-Period-{period_label}-Documents.zip"
+        return zip_buffer.getvalue(), filename

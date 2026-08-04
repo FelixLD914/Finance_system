@@ -410,3 +410,27 @@ export async function downloadTaxInvoiceDocument(
   anchor.click();
   URL.revokeObjectURL(url);
 }
+
+export async function exportTaxInvoicePeriodZip(
+  period?: string,
+  status?: string,
+  includeSignature: boolean = true,
+  signatureId?: string | null,
+): Promise<void> {
+  const query = new URLSearchParams();
+  if (period) query.set("period", period);
+  if (status) query.set("status", status);
+  if (!includeSignature) query.set("includeSignature", "false");
+  if (signatureId) query.set("signatureId", signatureId);
+
+  const response = await apiFetch(`/v1/tax-invoice/invoices/export-zip?${query.toString()}`);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = window.document.createElement("a");
+  anchor.href = url;
+  const header = response.headers.get("content-disposition");
+  const match = header?.match(/filename="(.+?)"/);
+  anchor.download = match ? match[1] : `TAX-INV-Period-${period || "ALL"}-Documents.zip`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

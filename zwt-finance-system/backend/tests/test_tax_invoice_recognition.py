@@ -113,11 +113,11 @@ def test_bot_parser_and_weekend_lookback() -> None:
 
 def test_combination_separates_invoice_and_matched_exchange_dates() -> None:
     invoice = parse_invoice_workbook(_invoice_workbook(), "invoice.xlsx")
-    invoice["fob_amount_usd"] = Decimal("309.00")
+    invoice["fob_amount_usd"] = Decimal("300.00")
     customs = {
         "cdn": "A001234567890",
         "submission_date": date(2026, 6, 7),
-        "customs_fob_usd_total": Decimal("309.00"),
+        "customs_fob_usd_total": Decimal("300.00"),
         "submission_date_low_confidence": False,
     }
     combined = combine_invoice_and_customs(
@@ -129,7 +129,7 @@ def test_combination_separates_invoice_and_matched_exchange_dates() -> None:
     assert combined["invoice_date"] == date(2026, 6, 7)
     assert combined["exchange_target_date"] == date(2026, 6, 7)
     assert combined["exchange_rate_date"] == date(2026, 6, 5)
-    assert combined["fob_revenue_usd_total"] == Decimal("309.00")
+    assert combined["fob_revenue_usd_total"] == Decimal("300.00")
     assert combined["fob_verification_failed"] is False
 
 
@@ -140,7 +140,7 @@ def test_combination_attaches_customs_line_fob_usd_by_position() -> None:
     所以行级值必须落库、能在复核台并排看到，不能只留一个 fob_verification_failed。
     """
     invoice = parse_invoice_workbook(_invoice_workbook(), "invoice.xlsx")
-    invoice["fob_amount_usd"] = Decimal("309.00")
+    invoice["fob_amount_usd"] = Decimal("300.00")
     customs = {
         "cdn": "A001234567890",
         "submission_date": date(2026, 6, 7),
