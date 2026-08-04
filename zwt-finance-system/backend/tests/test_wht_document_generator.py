@@ -205,12 +205,13 @@ def test_generates_four_copy_pdf_without_office(
         payee_tax_id = next(word for word in words if word["text"] == "0105540057561")
         assert payee_tax_id["bottom"] - payee_tax_id["top"] >= 10
 
-        sequence = next(
+        # ลำดับที่ [   ] ในแบบ 框内部按最新合规要求留空 (这里不用填写)
+        sequence = [
             word
             for word in words
-            if word["text"] == "1" and 50 <= word["x0"] <= 114 and 229 <= word["top"] <= 245
-        )
-        assert sequence["bottom"] <= 245
+            if 50 <= word["x0"] <= 114 and 229 <= word["top"] <= 245
+        ]
+        assert len(sequence) == 0
 
         totals = [
             word
