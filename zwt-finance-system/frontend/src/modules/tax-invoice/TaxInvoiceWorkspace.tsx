@@ -1097,6 +1097,10 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
   const [generateInvoiceTarget, setGenerateInvoiceTarget] = useState<TaxInvoice | null>(null);
   const [generateForm] = Form.useForm();
   const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(true);
+  const [exportZipModalOpen, setExportZipModalOpen] = useState(false);
+  const [exportZipPeriod, setExportZipPeriod] = useState<string>("all");
+  const [exportZipIncludeSig, setExportZipIncludeSig] = useState(true);
+  const [exportZipSigId, setExportZipSigId] = useState<string | null>(null);
   const hasActiveFilters = period !== "all" || status !== "all" || query.trim() !== "";
 
   const refreshInvoices = useCallback(async () => {
@@ -1624,19 +1628,80 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     if (selected) await openGenerateModal(selected);
   };
 
-  const handleExportPeriodZip = async () => {
+  const openExportZipModal = async () => {
+    const initialPeriod =
+      selectedMonth && selectedMonth !== "none"
+        ? selectedMonth
+        : period !== "all"
+        ? period
+        : periods[0] ?? "all";
+    setExportZipPeriod(initialPeriod);
+    setExportZipIncludeSig(true);
     try {
       setBusy(true);
-      const periodLabel = selectedMonth && selectedMonth !== "none" ? selectedMonth : undefined;
       const items = await listSignatures(false, "tax_inv").catch(() => []);
+      setSignatures(items);
       const defaultSig = items.find((sig) => sig.isDefault) ?? items[0];
+      setExportZipSigId(defaultSig?.id ?? null);
+    } catch {
+      // signature load fail fallback
+    } finally {
+      setBusy(false);
+    }
+    setExportZipModalOpen(true);
+  };
+
+  const exportZipMatchingInvoices = useMemo(() => {
+    return invoices.filter(
+      (inv) =>
+        exportZipPeriod === "all" ||
+        inv.revenuePeriod === exportZipPeriod.replace("-", "")
+    );
+  }, [invoices, exportZipPeriod]);
+
+  const exportZipReadyInvoices = useMemo(() => {
+    return exportZipMatchingInvoices.filter(
+      (inv) => inv.status === "approved" || inv.status === "issued"
+    );
+  }, [exportZipMatchingInvoices]);
+
+  const exportZipApprovedCount = useMemo(
+    () => exportZipMatchingInvoices.filter((inv) => inv.status === "approved").length,
+    [exportZipMatchingInvoices]
+  );
+
+  const exportZipIssuedCount = useMemo(
+    () => exportZipMatchingInvoices.filter((inv) => inv.status === "issued").length,
+    [exportZipMatchingInvoices]
+  );
+
+  const exportZipPendingCount = useMemo(
+    () =>
+      exportZipMatchingInvoices.filter(
+        (inv) => inv.status !== "approved" && inv.status !== "issued"
+      ).length,
+    [exportZipMatchingInvoices]
+  );
+
+  const confirmExportZip = async () => {
+    const periodLabel = exportZipPeriod !== "all" ? exportZipPeriod : undefined;
+    if (exportZipReadyInvoices.length === 0) {
+      message.warning("当前所选期数暂无可导出开具的已批准/已出具发票");
+      return;
+    }
+
+    try {
+      setBusy(true);
       await exportTaxInvoicePeriodZip(
         periodLabel,
         undefined,
-        Boolean(defaultSig),
-        defaultSig?.id ?? null,
+        exportZipIncludeSig,
+        exportZipIncludeSig ? exportZipSigId : null
       );
-      message.success("整期正式文件 (ZIP) 打包导出成功，已为您开始下载");
+      message.success(
+        `整期正式文件 (ZIP) 打包导出成功，已开始下载共 ${exportZipReadyInvoices.length} 份文件`
+      );
+      setExportZipModalOpen(false);
     } catch (err) {
       message.error(err instanceof Error ? err.message : "整期打包导出失败");
     } finally {
@@ -2437,7 +2502,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                     <Button icon={<DownloadOutlined />} size="small" loading={busy} onClick={() => void runLedgerExport()} />
                   </Tooltip>
                   <Tooltip title="打包导出整期正式文件 ZIP">
-                    <Button icon={<FileZipOutlined />} size="small" loading={busy} type="primary" onClick={() => void handleExportPeriodZip()} />
+                    <Button icon={<FileZipOutlined />} size="small" loading={busy} type="primary" onClick={() => void openExportZipModal()} />
                   </Tooltip>
                   <Button
                     icon={<FilterOutlined />}
@@ -2497,7 +2562,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   </Button>
                 </Tooltip>
                 <Tooltip title="按报关单为一份，以递增序号 (1. 2. ) 打包导出所选整期正式文件 ZIP">
-                  <Button icon={<FileZipOutlined />} loading={busy} type="primary" onClick={() => void handleExportPeriodZip()}>
+                  <Button icon={<FileZipOutlined />} loading={busy} type="primary" onClick={() => void openExportZipModal()}>
                     打包导出 (ZIP)
                   </Button>
                 </Tooltip>
@@ -3648,7 +3713,138 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               <span>{conflictText(issue, t)}</span>
             </li>
           ))}
-        </ol>
+      </Modal>
+
+      <Modal
+        cancelText={t("common.cancel")}
+        confirmLoading={busy}
+        okButtonProps={{ disabled: exportZipReadyInvoices.length === 0 }}
+        okText={`确认打包导出 (${exportZipReadyInvoices.length} 份)`}
+        open={exportZipModalOpen}
+        title="打包导出整期正式文件 (ZIP)"
+        width={720}
+        onCancel={() => setExportZipModalOpen(false)}
+        onOk={() => void confirmExportZip()}
+      >
+        <Space direction="vertical" style={{ width: "100%" }} size="middle">
+          <div>
+            <label style={{ fontWeight: 600, display: "block", marginBottom: 6 }}>
+              选择需要打包导出的收入期数：
+            </label>
+            <Select
+              style={{ width: "100%" }}
+              value={exportZipPeriod}
+              onChange={setExportZipPeriod}
+              options={[
+                { value: "all", label: "整期全部 (All Periods)" },
+                ...periods.map((value) => ({
+                  value,
+                  label: `期数 ${value.slice(0, 4)}-${value.slice(4)}`,
+                })),
+              ]}
+            />
+          </div>
+
+          {exportZipReadyInvoices.length === 0 ? (
+            <Alert
+              type="warning"
+              showIcon
+              message={`所选期数【${exportZipPeriod === "all" ? "全部" : exportZipPeriod}】暂无可导出的正式发票`}
+              description={`当前期数下共有 ${exportZipMatchingInvoices.length} 份发票，其中 ${exportZipPendingCount} 份尚未完成批复。系统仅会将【已批准】或【已出具】的正式发票打包导出。请先在复核集中完成批准。`}
+            />
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message={`所选期数【${exportZipPeriod === "all" ? "全部" : exportZipPeriod}】共有 ${exportZipReadyInvoices.length} 份正式发票可打包开具导出`}
+              description={`其中包含已批准待出具 ${exportZipApprovedCount} 份，已出具 ${exportZipIssuedCount} 份（另有 ${exportZipPendingCount} 份未批复将自动跳过）。导出的 Excel 与 PDF 将共享统一序号前缀 (如 1. 2. )。`}
+            />
+          )}
+
+          {exportZipReadyInvoices.length > 0 && (
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                当期已批可开/可导出的发票明细 ({exportZipReadyInvoices.length} 份)：
+              </div>
+              <Table
+                dataSource={exportZipReadyInvoices}
+                rowKey="id"
+                pagination={false}
+                size="small"
+                scroll={{ y: 180 }}
+                columns={[
+                  {
+                    title: "序号",
+                    key: "index",
+                    width: 60,
+                    render: (_, __, idx) => `${idx + 1}.`,
+                  },
+                  {
+                    title: "报关单号 (CDN)",
+                    dataIndex: "cdn",
+                    key: "cdn",
+                    render: (val, record) => val || record.declarationRefNo || "—",
+                  },
+                  {
+                    title: "发票/文档号",
+                    dataIndex: "documentNo",
+                    key: "documentNo",
+                    render: (val, record) => val || record.invoiceNo || "—",
+                  },
+                  {
+                    title: "客户名称",
+                    dataIndex: "customerName",
+                    key: "customerName",
+                  },
+                  {
+                    title: "FOB 金额 (THB)",
+                    dataIndex: "fobAmountThb",
+                    key: "fobAmountThb",
+                    align: "right",
+                    render: (val) =>
+                      val
+                        ? Number(val).toLocaleString("en-US", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        : "—",
+                  },
+                  {
+                    title: "状态",
+                    dataIndex: "status",
+                    key: "status",
+                    render: (val) => statusLabel(val, t),
+                  },
+                ]}
+              />
+            </div>
+          )}
+
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+            <Checkbox
+              checked={exportZipIncludeSig}
+              onChange={(e) => setExportZipIncludeSig(e.target.checked)}
+            >
+              在导出的文件上加盖电子签名 (Include Electronic Signature)
+            </Checkbox>
+            {exportZipIncludeSig && (
+              <div style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 12, color: "#666", display: "block", marginBottom: 4 }}>
+                  选择盖章签名资产：
+                </label>
+                <Select
+                  style={{ width: "100%" }}
+                  value={exportZipSigId}
+                  onChange={setExportZipSigId}
+                  options={signatures.map((sig) => ({
+                    value: sig.id,
+                    label: `${sig.name} ${sig.isDefault ? "[默认]" : ""} [缩放 ${sig.scalePercent ?? 100}%]`,
+                  }))}
+                />
+              </div>
+            )}
+          </div>
+        </Space>
       </Modal>
 
       <Modal

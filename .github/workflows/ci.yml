@@ -55,7 +55,32 @@ jobs:
       # 必须是 `python -m pytest` 而不是 `pytest`：CI 不安装 app 包，靠 -m 把当前
       # 目录放进 sys.path 才能 import app。改成 `pytest` 会全体 ImportError。
       - name: Test
-        run: python -m pytest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          python -m pytest --junit-xml=results.xml
+          if (-not (Test-Path results.xml)) {
+            Write-Error "pytest failed to produce results.xml"
+            exit 1
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Check test results
+        shell: pwsh
+        run: |
+          [xml]$r = Get-Content results.xml
+          $nodes = $r.SelectNodes("//testsuite")
+          $failures = 0
+          $errors = 0
+          foreach ($n in $nodes) {
+            if ($n.failures) { $failures += [int]$n.failures }
+            if ($n.errors) { $errors += [int]$n.errors }
+          }
+          if ($failures -gt 0 -or $errors -gt 0) {
+            Write-Error "Tests failed: $failures failures, $errors errors"
+            exit 1
+          }
+          Write-Host "All tests passed ($failures failures, $errors errors)"
 
   frontend:
     name: Frontend (vitest + build)

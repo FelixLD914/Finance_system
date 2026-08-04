@@ -288,7 +288,7 @@ class TaxInvoiceDocumentService:
         query_stmt = select(TaxInvoice).order_by(
             TaxInvoice.cdn, TaxInvoice.document_no, TaxInvoice.created_at
         )
-        if period:
+        if period and period.strip() and period.lower() != "all":
             query_stmt = query_stmt.where(TaxInvoice.revenue_period == period.replace("-", ""))
         if status:
             query_stmt = query_stmt.where(TaxInvoice.status == status)

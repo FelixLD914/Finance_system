@@ -327,13 +327,20 @@ async def export_period_zip(
     period: str | None = None,
     invoice_status: Literal["approved", "issued"] | None = Query(default=None, alias="status"),
     include_signature: bool = Query(default=True, alias="includeSignature"),
-    signature_id: Annotated[uuid.UUID | None, Query(alias="signatureId")] = None,
+    signature_id: str | None = Query(default=None, alias="signatureId"),
 ):
+    parsed_sig_id: uuid.UUID | None = None
+    if signature_id and signature_id.strip() and signature_id != "null":
+        try:
+            parsed_sig_id = uuid.UUID(signature_id.strip())
+        except ValueError:
+            parsed_sig_id = None
+
     zip_bytes, filename = await document_service.export_period_zip(
         period=period,
         status=invoice_status,
         include_signature=include_signature,
-        signature_id=signature_id,
+        signature_id=parsed_sig_id,
     )
     return Response(
         content=zip_bytes,

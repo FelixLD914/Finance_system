@@ -58,3 +58,6 @@ Thumbs.db
 # Manual Windows releases are built outside source control
 **/releases/
 **/current/
+results.xml
+*pytest_tmp/
+
