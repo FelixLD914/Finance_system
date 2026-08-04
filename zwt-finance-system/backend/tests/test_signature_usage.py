@@ -53,11 +53,35 @@ def test_multi_module_signature_usage_formatting() -> None:
     assert not signature_allows(formatted, "salary_advance")
 
 
-@pytest.mark.parametrize("module", SIGNATURE_MODULES)
+@pytest.mark.parametrize("module", ["wht", "tax_inv"])
 def test_single_module_signature_only_allows_that_module(module: str) -> None:
     stored = format_signature_usage([module])
     for other in SIGNATURE_MODULES:
         assert signature_allows(stored, other) is (other == module)
+
+
+def test_salary_advance_signature_roles() -> None:
+    # 纯 salary_advance 通用签名：同时支持财务负责人与董事
+    general = format_signature_usage(["salary_advance"])
+    assert signature_allows(general, "salary_advance")
+    assert signature_allows(general, "salary_advance_finance")
+    assert signature_allows(general, "salary_advance_md")
+    assert not signature_allows(general, "wht")
+    assert not signature_allows(general, "tax_inv")
+
+    # 专门设立的财务负责人签名
+    fin = format_signature_usage(["salary_advance_finance"])
+    assert signature_allows(fin, "salary_advance_finance")
+    assert signature_allows(fin, "salary_advance")
+    assert not signature_allows(fin, "salary_advance_md")
+    assert not signature_allows(fin, "wht")
+
+    # 专门设立的董事签名
+    md = format_signature_usage(["salary_advance_md"])
+    assert signature_allows(md, "salary_advance_md")
+    assert signature_allows(md, "salary_advance")
+    assert not signature_allows(md, "salary_advance_finance")
+    assert not signature_allows(md, "wht")
 
 
 def test_defaults_only_clear_each_other_when_scopes_overlap() -> None:

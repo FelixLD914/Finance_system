@@ -25,10 +25,12 @@ const usageColors: Record<SignatureUsage, string> = {
   wht: "cyan",
   tax_inv: "blue",
   salary_advance: "purple",
+  salary_advance_finance: "purple",
+  salary_advance_md: "magenta",
 };
 
 /**
- * 对应真实系统 PDF 开票模板底图的参数配置 (A4 页面比例 595.28 x 841.89 pt)
+ * 对应真实系统 PDF 开票模板底图的参数配置 (A4 页面比例 595.25 x 841.85 pt)
  * 结合 backend/app/modules 各自的 SIGNATURE_BOX 坐标进行百分比定位，确保预览效果与后端 ReportLab 开票生成的 PDF 完全一致。
  */
 const TEMPLATE_CONFIGS: Record<
@@ -38,8 +40,8 @@ const TEMPLATE_CONFIGS: Record<
     title: string;
     // PDF 签名框在底板上的百分比坐标与基准宽高 (%)
     sigBox: {
-      leftPercent: number; // 签名中心在底图中的 X 轴百分比
-      bottomPercent: number; // 签名中心在底图中的 Y 轴 (从底部算) 百分比
+      leftPercent: number; // 签名左侧在底图中的 X 轴百分比
+      bottomPercent: number; // 签名底部在底图中的 Y 轴 (从底部算) 百分比
       widthPercent: number; // 基准 100% 时的宽度百分比
       heightPercent: number; // 基准 100% 时的高度百分比
     };
@@ -48,34 +50,51 @@ const TEMPLATE_CONFIGS: Record<
   wht: {
     bgImage: "/wht-template-bg.png",
     title: "WHT 扣缴凭证 (P.N.D.53/3 正式文件底板)",
-    // ReportLab WHT 坐标: (201.5, 83.0, 95.0, 42.0) -> 中心 X = 201.5 + 47.5 = 249.0 (41.83%), Y = 83.0 + 21 = 104.0 (12.35%)
     sigBox: {
-      leftPercent: 41.83,
-      bottomPercent: 12.35,
-      widthPercent: 18.5,
-      heightPercent: 5.8,
+      leftPercent: 33.85,
+      bottomPercent: 9.86,
+      widthPercent: 15.96,
+      heightPercent: 4.99,
     },
   },
   tax_inv: {
     bgImage: "/tax-inv-template-bg.png",
     title: "TAX INV 增值税发票 (正式文件底板)",
-    // ReportLab TAX INV 坐标: (398.0, 112.0, 150.0, 46.0) -> 中心 X = 398.0 + 75.0 = 473.0 (79.46%), Y = 112.0 + 23.0 = 135.0 (16.03%)
     sigBox: {
-      leftPercent: 79.46,
-      bottomPercent: 16.03,
-      widthPercent: 25.2,
-      heightPercent: 6.2,
+      leftPercent: 66.86,
+      bottomPercent: 13.30,
+      widthPercent: 25.20,
+      heightPercent: 5.46,
     },
   },
   salary_advance: {
     bgImage: "/salary-advance-template-bg.png",
-    title: "工资预支单凭证 (正式文件底板)",
-    // ReportLab Salary Advance 坐标: (328.37, 286.31, 90.0, 28.0) -> 中心 X = 328.37 + 45 = 373.37 (62.72%), Y = 286.31 + 14 = 300.31 (35.67%)
+    title: "工资预支单凭证 (财务负责人签名位置)",
     sigBox: {
-      leftPercent: 62.72,
-      bottomPercent: 35.67,
-      widthPercent: 18.0,
-      heightPercent: 4.8,
+      leftPercent: 49.54,
+      bottomPercent: 34.69,
+      widthPercent: 15.12,
+      heightPercent: 3.33,
+    },
+  },
+  salary_advance_finance: {
+    bgImage: "/salary-advance-template-bg.png",
+    title: "工资预支单凭证 (财务负责人签名位置)",
+    sigBox: {
+      leftPercent: 49.54,
+      bottomPercent: 34.69,
+      widthPercent: 15.12,
+      heightPercent: 3.33,
+    },
+  },
+  salary_advance_md: {
+    bgImage: "/salary-advance-template-bg.png",
+    title: "工资预支单凭证 (董事/总经理签名位置)",
+    sigBox: {
+      leftPercent: 49.53,
+      bottomPercent: 22.49,
+      widthPercent: 15.12,
+      heightPercent: 3.33,
     },
   },
 };

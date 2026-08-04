@@ -79,6 +79,8 @@ class SalaryAdvanceDocumentService:
         batch_id: uuid.UUID,
         *,
         retry_job_id: uuid.UUID | None = None,
+        finance_signature_id: uuid.UUID | None = None,
+        md_signature_id: uuid.UUID | None = None,
     ) -> SalaryAdvanceGenerationJob:
         batch = await self.session.scalar(
             select(SalaryAdvanceImportBatch)
@@ -112,22 +114,26 @@ class SalaryAdvanceDocumentService:
                 ).all()
             )
         else:
-            source_job = await self.session.scalar(
+            failed_job = await self.session.scalar(
                 select(SalaryAdvanceGenerationJob).where(
                     SalaryAdvanceGenerationJob.id == retry_job_id,
                     SalaryAdvanceGenerationJob.batch_id == batch.id,
                 )
             )
-            if source_job is None:
-                raise SalaryAdvanceNotFoundError("原生成任务不存在")
-            # 只挑当前仍是 failed 的记录：某记录在更晚的重试里已成功的话，
-            # 它还留在旧任务的失败文档清单里，不能再被拉回来重复生成。
-            failed_document_ids = select(
-                SalaryAdvanceGeneratedDocument.record_id
-            ).where(
-                SalaryAdvanceGeneratedDocument.job_id == source_job.id,
-                SalaryAdvanceGeneratedDocument.status == "failed",
-            )
+            if failed_job is None:
+                raise SalaryAdvanceNotFoundError("要重试的任务不存在")
+            if finance_signature_id is None:
+                finance_signature_id = failed_job.finance_signature_id
+            if md_signature_id is None:
+                md_signature_id = failed_job.md_signature_id
+            failed_document_ids = (
+                await self.session.scalars(
+                    select(SalaryAdvanceGeneratedDocument.record_id).where(
+                        SalaryAdvanceGeneratedDocument.job_id == retry_job_id,
+                        SalaryAdvanceGeneratedDocument.status == "failed",
+                    )
+                )
+            ).all()
             target_ids = list(
                 (
                     await self.session.scalars(
@@ -156,6 +162,8 @@ class SalaryAdvanceDocumentService:
             success_count=0,
             failed_count=0,
             requested_by_name=self.actor_name,
+            finance_signature_id=finance_signature_id,
+            md_signature_id=md_signature_id,
         )
         self.session.add(job)
         records = list(
@@ -415,9 +423,17 @@ class SalaryAdvanceDocumentService:
         workbook.close()
         return f"{batch.batch_no}-validation-report.xlsx", buffer.getvalue()
 
-    async def _snapshot(self, record: SalaryAdvanceRecord) -> GenerationSnapshot:
-        finance = await self._resolve_signature(record, "finance")
-        managing_director = await self._resolve_signature(record, "md")
+    async def _snapshot(
+        self,
+        record: SalaryAdvanceRecord,
+        job: SalaryAdvanceGenerationJob | None = None,
+        finance_signature_id: uuid.UUID | None = None,
+        md_signature_id: uuid.UUID | None = None,
+    ) -> GenerationSnapshot:
+        fin_id = finance_signature_id or (job.finance_signature_id if job else None)
+        md_id = md_signature_id or (job.md_signature_id if job else None)
+        finance = await self._resolve_signature(record, "finance", signature_id=fin_id)
+        managing_director = await self._resolve_signature(record, "md", signature_id=md_id)
         return GenerationSnapshot(
             normalized_data=dict(record.normalized_data),
             finance_signature_path=finance.path,
@@ -430,45 +446,87 @@ class SalaryAdvanceDocumentService:
         self,
         record: SalaryAdvanceRecord,
         role: str,
+        signature_id: uuid.UUID | None = None,
     ) -> ResolvedSignature:
-        code_key = "finance_signature_code" if role == "finance" else "md_signature_code"
-        code = str(record.normalized_data.get(code_key) or "").strip().upper()
-        if not code:
-            raise SalaryAdvanceStateError(f"记录缺少 {role} 签名代码")
-        # 签名代码 = 共享签名库里的名称；同名重传会自动升版本，
-        # 这里取最新的 active 版本，与签名库自身的版本语义一致。
-        # 适用范围必须包含 salary_advance——只批给 WHT 的签名不能盖到预支单上。
-        candidates = (
-            await self.session.scalars(
-                select(SignatureAsset)
-                .where(
-                    func.upper(SignatureAsset.name) == code,
+        role_usage = "salary_advance_finance" if role == "finance" else "salary_advance_md"
+        asset: SignatureAsset | None = None
+
+        if signature_id is not None:
+            asset = await self.session.scalar(
+                select(SignatureAsset).where(
+                    SignatureAsset.id == signature_id,
+                    SignatureAsset.deleted_at.is_(None),
                     SignatureAsset.status == "active",
                 )
-                .order_by(SignatureAsset.version.desc())
             )
-        ).all()
-        asset = next(
-            (
-                candidate
-                for candidate in candidates
-                if signature_allows(candidate.usage, "salary_advance")
-            ),
-            None,
-        )
+            if asset and not signature_allows(asset.usage, role_usage):
+                asset = None
+
         if asset is None:
-            detail = (
-                "，该签名未勾选「工资预支单」适用范围"
-                if candidates
-                else ""
+            # 1. 尝试以指定角色或工资预支单的默认签名提取
+            default_assets = (
+                await self.session.scalars(
+                    select(SignatureAsset)
+                    .where(
+                        SignatureAsset.deleted_at.is_(None),
+                        SignatureAsset.status == "active",
+                        SignatureAsset.is_default.is_(True),
+                    )
+                    .order_by(SignatureAsset.created_at.desc())
+                )
+            ).all()
+            asset = next(
+                (a for a in default_assets if signature_allows(a.usage, role_usage)),
+                None,
             )
+
+        if asset is None:
+            # 2. 按数据记录里的 finance_signature_code / md_signature_code 字符编码在签名库中提取
+            code_key = "finance_signature_code" if role == "finance" else "md_signature_code"
+            code = str(record.normalized_data.get(code_key) or "").strip().upper()
+            if code:
+                candidates = (
+                    await self.session.scalars(
+                        select(SignatureAsset)
+                        .where(
+                            func.upper(SignatureAsset.name) == code,
+                            SignatureAsset.deleted_at.is_(None),
+                            SignatureAsset.status == "active",
+                        )
+                        .order_by(SignatureAsset.version.desc())
+                    )
+                ).all()
+                asset = next(
+                    (c for c in candidates if signature_allows(c.usage, role_usage)),
+                    None,
+                )
+
+        if asset is None:
+            # 3. 兜底提取：取全库该角色/预支单可用的最新 active 签名
+            all_actives = (
+                await self.session.scalars(
+                    select(SignatureAsset)
+                    .where(
+                        SignatureAsset.deleted_at.is_(None),
+                        SignatureAsset.status == "active",
+                    )
+                    .order_by(SignatureAsset.created_at.desc())
+                )
+            ).all()
+            asset = next(
+                (a for a in all_actives if signature_allows(a.usage, role_usage)),
+                None,
+            )
+
+        if asset is None:
+            role_label = "财务负责人" if role == "finance" else "董事"
             raise SalaryAdvanceStateError(
-                f"签名库中没有可用于工资预支的签名 {code}{detail}，"
-                "请在系统管理 → 签名库维护"
+                f"签名库中没有可用于工资预支【{role_label}】的签名，请在系统管理 → 签名库维护中上传或选择设置"
             )
+
         path = self._storage_path(asset.storage_key)
         if not path.is_file():
-            raise SalaryAdvanceStateError(f"签名资产文件不存在：{code}")
+            raise SalaryAdvanceStateError(f"签名资产文件不存在：{asset.name}")
         return ResolvedSignature(asset=asset, path=path)
 
     def _storage_path(self, storage_key: str) -> Path:
@@ -616,7 +674,7 @@ async def run_salary_advance_job(job_id: uuid.UUID) -> None:
             xlsx_path = output_root / f"{stem}.xlsx"
             pdf_path = output_root / f"{stem}.pdf"
             try:
-                snapshot = await service._snapshot(record)
+                snapshot = await service._snapshot(record, job=job)
                 workbook_content = await to_thread.run_sync(
                     render_salary_advance_workbook,
                     settings.salary_advance_template_path,

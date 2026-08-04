@@ -176,6 +176,22 @@ class SalaryAdvanceGenerationJob(Base):
     success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     requested_by_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    finance_signature_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "core.signature_assets.id",
+            name="fk_salary_advance_jobs_finance_sig_asset",
+        ),
+        nullable=True,
+    )
+    md_signature_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "core.signature_assets.id",
+            name="fk_salary_advance_jobs_md_sig_asset",
+        ),
+        nullable=True,
+    )
     git_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

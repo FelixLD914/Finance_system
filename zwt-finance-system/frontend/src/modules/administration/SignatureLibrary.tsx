@@ -46,6 +46,8 @@ const usageColors: Record<SignatureUsage, string> = {
   wht: "cyan",
   tax_inv: "blue",
   salary_advance: "purple",
+  salary_advance_finance: "purple",
+  salary_advance_md: "magenta",
 };
 
 export function SignatureLibrary({ t }: SignatureLibraryProps) {
@@ -65,7 +67,8 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
   const usageOptions = [
     { value: "wht", label: t("wht.usage.wht") },
     { value: "tax_inv", label: t("wht.usage.tax_inv") },
-    { value: "salary_advance", label: t("wht.usage.salary_advance") },
+    { value: "salary_advance_finance", label: t("wht.usage.salary_advance_finance") },
+    { value: "salary_advance_md", label: t("wht.usage.salary_advance_md") },
   ];
 
   const reload = useCallback(async () => {

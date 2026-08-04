@@ -105,6 +105,13 @@ class SalaryAdvanceDocumentResponse(ApiSchema):
     created_at: datetime
 
 
+class CreateSalaryAdvanceJobRequest(ApiSchema):
+    finance_signature_id: uuid.UUID | None = None
+    md_signature_id: uuid.UUID | None = None
+    finance_signature_code: str | None = None
+    md_signature_code: str | None = None
+
+
 class SalaryAdvanceJobResponse(ApiSchema):
     id: uuid.UUID
     batch_id: uuid.UUID
@@ -114,6 +121,8 @@ class SalaryAdvanceJobResponse(ApiSchema):
     success_count: int
     failed_count: int
     requested_by_name: str
+    finance_signature_id: uuid.UUID | None = None
+    md_signature_id: uuid.UUID | None = None
     started_at: datetime | None
     finished_at: datetime | None
     error_summary: str | None
@@ -122,3 +131,4 @@ class SalaryAdvanceJobResponse(ApiSchema):
 class SalaryAdvanceJobDetail(ApiSchema):
     job: SalaryAdvanceJobResponse
     documents: list[SalaryAdvanceDocumentResponse]
+

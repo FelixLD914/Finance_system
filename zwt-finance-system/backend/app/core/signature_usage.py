@@ -13,16 +13,32 @@ from collections.abc import Iterable
 from typing import Final
 
 # 顺序即序列化顺序，保证同一集合始终得到同一个字符串。
-SIGNATURE_MODULES: Final[tuple[str, ...]] = ("wht", "tax_inv", "salary_advance")
+SIGNATURE_MODULES: Final[tuple[str, ...]] = (
+    "wht",
+    "tax_inv",
+    "salary_advance",
+    "salary_advance_finance",
+    "salary_advance_md",
+)
 
 
 def parse_signature_usage(value: str | None) -> set[str]:
-    """把库里的字符串解析成模块集合，顺带兼容迁移前的 both。"""
+    """把库里的字符串解析成模块集合，顺带兼容迁移前的 both 及预支单细分角色。"""
     modules = {item.strip() for item in (value or "").split(",") if item.strip()}
     if "both" in modules:
         modules.discard("both")
         modules.update({"wht", "tax_inv"})
-    return {module for module in modules if module in SIGNATURE_MODULES}
+    result = {module for module in modules if module in SIGNATURE_MODULES}
+
+    # 展开通用与细分角色的双向兼容：
+    # 1. 声明为 salary_advance 的通用签名自动覆盖财务负责人 (salary_advance_finance) 与董事 (salary_advance_md)
+    if "salary_advance" in result:
+        result.update({"salary_advance_finance", "salary_advance_md"})
+    # 2. 声明了细分角色 (salary_advance_finance 或 salary_advance_md) 的签名，其模块归属包含 salary_advance
+    if "salary_advance_finance" in result or "salary_advance_md" in result:
+        result.add("salary_advance")
+
+    return result
 
 
 def format_signature_usage(modules: Iterable[str]) -> str:
@@ -34,10 +50,11 @@ def format_signature_usage(modules: Iterable[str]) -> str:
 
 
 def signature_allows(value: str | None, module: str) -> bool:
-    """这张签名能不能盖在 module 的单据上。"""
+    """这张签名能不能盖在 module 的单据或指定角色位置上。"""
     return module in parse_signature_usage(value)
 
 
 def signature_usages_overlap(left: str | None, right: str | None) -> bool:
     """两张签名的适用范围是否有交集——默认签名互斥就按这个判定。"""
     return bool(parse_signature_usage(left) & parse_signature_usage(right))
+

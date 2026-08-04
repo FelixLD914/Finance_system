@@ -243,7 +243,12 @@ export interface BatchTransitionResult {
  * 一张签名图能盖在哪些单据上。各模块的签字人可能不同，所以是集合而不是单选。
  * 旧的 "both"（WHT + TAX INV）已在 migration 0011 展开成具体模块。
  */
-export type SignatureUsage = "wht" | "tax_inv" | "salary_advance";
+export type SignatureUsage =
+  | "wht"
+  | "tax_inv"
+  | "salary_advance"
+  | "salary_advance_finance"
+  | "salary_advance_md";
 
 export interface SignatureAsset {
   id: string;

@@ -64,6 +64,8 @@ import {
   revalidateSalaryAdvanceBatch,
   updateSalaryAdvanceRecord,
 } from "./api";
+import { listSignatures } from "../wht/api";
+import type { SignatureAsset } from "../wht/types";
 import type {
   BatchStatus,
   SalaryAdvanceBatch,
@@ -371,9 +373,60 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const [statusFilter, setStatusFilter] = useState<string>();
   const [importOpen, setImportOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
+  const [selectedFinanceSigId, setSelectedFinanceSigId] = useState<string | undefined>(undefined);
+  const [selectedMdSigId, setSelectedMdSigId] = useState<string | undefined>(undefined);
   const [importFiles, setImportFiles] = useState<UploadFile[]>([]);
   const [importForm] = Form.useForm();
   const [editForm] = Form.useForm();
+
+  const loadActiveSignatures = useCallback(async () => {
+    try {
+      const sigs = await listSignatures(true, "salary_advance");
+      setSignatures(sigs);
+      const finDefault =
+        sigs.find(
+          (s) =>
+            s.isDefault &&
+            (s.usage.includes("salary_advance_finance") || s.usage.includes("salary_advance")),
+        ) || sigs.find((s) => s.usage.includes("salary_advance_finance") || s.usage.includes("salary_advance"));
+      const mdDefault =
+        sigs.find(
+          (s) =>
+            s.isDefault &&
+            (s.usage.includes("salary_advance_md") || s.usage.includes("salary_advance")),
+        ) || sigs.find((s) => s.usage.includes("salary_advance_md") || s.usage.includes("salary_advance"));
+      if (finDefault) setSelectedFinanceSigId(finDefault.id);
+      if (mdDefault) setSelectedMdSigId(mdDefault.id);
+    } catch {
+      // Ignore fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadActiveSignatures();
+  }, [loadActiveSignatures]);
+
+  const financeSignatures = useMemo(
+    () =>
+      signatures.filter(
+        (s) =>
+          s.usage.includes("salary_advance_finance") ||
+          s.usage.includes("salary_advance"),
+      ),
+    [signatures],
+  );
+
+  const mdSignatures = useMemo(
+    () =>
+      signatures.filter(
+        (s) =>
+          s.usage.includes("salary_advance_md") ||
+          s.usage.includes("salary_advance"),
+      ),
+    [signatures],
+  );
 
   const loadBatch = useCallback(async (batchId: string) => {
     const [detail, jobs] = await Promise.all([
@@ -559,13 +612,22 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     }
   };
 
-  const startGeneration = async () => {
+  const startGeneration = () => {
+    if (!selected) return;
+    setGenerateOpen(true);
+  };
+
+  const submitGeneration = async () => {
     if (!selected) return;
     setBusy(true);
     try {
-      const job = await createSalaryAdvanceJob(selected.batch.id);
+      const job = await createSalaryAdvanceJob(selected.batch.id, {
+        finance_signature_id: selectedFinanceSigId,
+        md_signature_id: selectedMdSigId,
+      });
       setJobDetail(await getSalaryAdvanceJob(job.id));
       message.success(t("salary.generateQueued"));
+      setGenerateOpen(false);
       await loadBatch(selected.batch.id);
     } catch (error) {
       message.error(error instanceof Error ? error.message : String(error));
@@ -1155,14 +1217,28 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
             name="finance_signature_code"
             rules={[{ required: true }]}
           >
-            <Input />
+            <Select
+              showSearch
+              placeholder="选择财务负责人签名"
+              options={financeSignatures.map((s) => ({
+                value: s.name,
+                label: `${s.name} ${s.isDefault ? "(默认)" : ""}`,
+              }))}
+            />
           </Form.Item>
           <Form.Item
             label={t("salary.mdCode")}
             name="md_signature_code"
             rules={[{ required: true }]}
           >
-            <Input />
+            <Select
+              showSearch
+              placeholder="选择董事签名"
+              options={mdSignatures.map((s) => ({
+                value: s.name,
+                label: `${s.name} ${s.isDefault ? "(默认)" : ""}`,
+              }))}
+            />
           </Form.Item>
           <Form.Item
             className="salary-edit-wide"
@@ -1172,6 +1248,49 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        destroyOnHidden
+        open={generateOpen}
+        title="选择盖章签名并批量生成凭证"
+        okText="确认生成"
+        cancelText={t("common.cancel")}
+        confirmLoading={busy}
+        onCancel={() => setGenerateOpen(false)}
+        onOk={() => void submitGeneration()}
+      >
+        <Space direction="vertical" style={{ width: "100%", marginTop: 8 }} size="large">
+          <div>
+            <div style={{ marginBottom: 6, fontWeight: 500 }}>
+              财务负责人签名 (Finance Director Signature):
+            </div>
+            <Select
+              style={{ width: "100%" }}
+              value={selectedFinanceSigId}
+              onChange={(val) => setSelectedFinanceSigId(val)}
+              options={financeSignatures.map((s) => ({
+                value: s.id,
+                label: `${s.name} (${s.originalFileName}) ${s.isDefault ? "【默认签名】" : ""}`,
+              }))}
+            />
+          </div>
+
+          <div>
+            <div style={{ marginBottom: 6, fontWeight: 500 }}>
+              董事/总经理签名 (Managing Director Signature):
+            </div>
+            <Select
+              style={{ width: "100%" }}
+              value={selectedMdSigId}
+              onChange={(val) => setSelectedMdSigId(val)}
+              options={mdSignatures.map((s) => ({
+                value: s.id,
+                label: `${s.name} (${s.originalFileName}) ${s.isDefault ? "【默认签名】" : ""}`,
+              }))}
+            />
+          </div>
+        </Space>
       </Modal>
 
     </section>

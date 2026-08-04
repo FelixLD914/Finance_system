@@ -28,6 +28,7 @@ from app.modules.salary_advance.document_service import (
 )
 from app.modules.salary_advance.importer import build_import_template_workbook
 from app.modules.salary_advance.schemas import (
+    CreateSalaryAdvanceJobRequest,
     SalaryAdvanceBatchDetail,
     SalaryAdvanceBatchResponse,
     SalaryAdvanceDocumentResponse,
@@ -296,8 +297,13 @@ async def create_generation_job(
     batch_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     service: SalaryAdvanceDocumentServiceDependency,
+    payload: CreateSalaryAdvanceJobRequest | None = None,
 ) -> SalaryAdvanceJobResponse:
-    job = await service.create_job(batch_id)
+    job = await service.create_job(
+        batch_id,
+        finance_signature_id=payload.finance_signature_id if payload else None,
+        md_signature_id=payload.md_signature_id if payload else None,
+    )
     background_tasks.add_task(run_salary_advance_job, job.id)
     return SalaryAdvanceJobResponse.model_validate(job)
 

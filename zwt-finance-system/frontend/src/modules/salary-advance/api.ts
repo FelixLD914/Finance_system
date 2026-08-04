@@ -85,10 +85,19 @@ export function lockSalaryAdvanceBatch(
 
 export function createSalaryAdvanceJob(
   batchId: string,
+  signatures?: {
+    finance_signature_id?: string;
+    md_signature_id?: string;
+    finance_signature_code?: string;
+    md_signature_code?: string;
+  },
 ): Promise<SalaryAdvanceJob> {
   return request<SalaryAdvanceJob>(
     `/v1/salary-advance/batches/${batchId}/generation-jobs`,
-    { method: "POST" },
+    {
+      method: "POST",
+      body: signatures ? JSON.stringify(signatures) : undefined,
+    },
   );
 }
 
