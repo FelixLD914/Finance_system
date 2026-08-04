@@ -21,7 +21,7 @@ PAGE_SIZE = (595.25, 841.85)
 TEXT_ANCHORS = {
     "first_name": TextAnchor(161.17, 633.11, 12.93, 105.00, "center"),
     "surname": TextAnchor(317.64, 633.11, 12.93, 105.00, "center"),
-    "position": TextAnchor(486.20, 603.86, 11.04, 110.00, "center"),
+    "position": TextAnchor(486.20, 633.11, 11.04, 110.00, "center"),
     "department": TextAnchor(352.32, 588.98, 12.93, 300.00, "center"),
     "start_date": TextAnchor(391.30, 568.34, 12.93, 150.00, "center"),
     "reason": TextAnchor(51.94, 531.83, 12.93, 500.00, "left"),

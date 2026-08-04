@@ -55,6 +55,7 @@ CURRENT_RECORD_FIELDS = (
 # 表单模板里 K8:L9 已按三行高度制版并改成底部对齐，PDF 叠加层必须用同样的行数
 # 折行，两种产物才长得一样；改这里的行数要同步改模板第 9 行的行高。
 WRAPPED_FIELDS = {"position": 3}
+TOP_ALIGNED_FIELDS = {"position"}
 
 LINE_SPACING = 1.2
 MIN_FONT_SIZE = 7.0
@@ -289,30 +290,35 @@ def _fit(text: str, font: str, size: float, width: float) -> tuple[float, str]:
     return fitted_size, text
 
 
-def _wrap(text: str, font: str, size: float, width: float) -> list[str]:
-    """先按空格贪心折行，再把本身就超宽的词按字符硬断。"""
-
+def _wrap_by_words(text: str, font: str, size: float, width: float) -> tuple[list[str], bool]:
+    """按空格/单词折行，绝不硬截断单词。
+    若某个单词在当前字号下单词宽度超过 width，返回 has_oversized_word = True。
+    """
     from reportlab.pdfbase.pdfmetrics import stringWidth
 
-    wrapped: list[str] = []
-    for word in text.split():
-        if wrapped and stringWidth(f"{wrapped[-1]} {word}", font, size) <= width:
-            wrapped[-1] = f"{wrapped[-1]} {word}"
-        else:
-            wrapped.append(word)
+    words = text.split()
+    if not words:
+        return [], False
 
     lines: list[str] = []
-    for line in wrapped:
-        # 导入数据里存在漏空格的职位名（MANUFACTURING TECHNOLOGYSUPERVISOR 1），
-        # 这种整词超宽的没有断点可用，只能按字符断。
-        while stringWidth(line, font, size) > width and len(line) > 1:
-            cut = len(line) - 1
-            while cut > 1 and stringWidth(line[:cut], font, size) > width:
-                cut -= 1
-            lines.append(line[:cut])
-            line = line[cut:]
-        lines.append(line)
-    return lines
+    has_oversized_word = False
+    current_line = ""
+
+    for word in words:
+        word_w = stringWidth(word, font, size)
+        if word_w > width:
+            has_oversized_word = True
+        if not current_line:
+            current_line = word
+        elif stringWidth(f"{current_line} {word}", font, size) <= width:
+            current_line = f"{current_line} {word}"
+        else:
+            lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+
+    return lines, has_oversized_word
 
 
 def _fit_lines(
@@ -327,12 +333,17 @@ def _fit_lines(
     if max_lines <= 1:
         fitted_size, fitted = _fit(text, font, size, width)
         return fitted_size, [fitted]
+
     fitted_size = size
-    while True:
-        lines = _wrap(text, font, fitted_size, width)
-        if len(lines) <= max_lines or fitted_size <= MIN_FONT_SIZE:
-            return fitted_size, lines[:max_lines]
-        fitted_size = max(MIN_FONT_SIZE, fitted_size - 0.5)
+    while fitted_size > MIN_FONT_SIZE:
+        lines, has_oversized_word = _wrap_by_words(text, font, fitted_size, width)
+        if len(lines) <= max_lines and not has_oversized_word:
+            return fitted_size, lines
+        fitted_size = max(MIN_FONT_SIZE, round(fitted_size - 0.2, 2))
+
+    # 达到最小字号 MIN_FONT_SIZE 时，依然按单词折行，绝不截断单词
+    lines, _ = _wrap_by_words(text, font, fitted_size, width)
+    return fitted_size, lines
 
 
 def _draw_signature(canvas: Any, path: Path, box: tuple[float, float, float, float]) -> None:
@@ -416,16 +427,26 @@ def export_pdf_from_template(
             WRAPPED_FIELDS.get(field, 1),
         )
         overlay.setFont(font, size)
-        # 制版基线取的是单行探针的位置，也就是数据区的底部；多出来的行往上叠，
-        # 和模板里 K8:L9 的底部对齐一致。
-        for offset, line in enumerate(reversed(lines)):
-            line_y = anchor.y + offset * size * LINE_SPACING
-            if anchor.align == "right":
-                overlay.drawRightString(anchor.x, line_y, line)
-            elif anchor.align == "center":
-                overlay.drawCentredString(anchor.x, line_y, line)
-            else:
-                overlay.drawString(anchor.x, line_y, line)
+        if field in TOP_ALIGNED_FIELDS:
+            # 顶部基线对齐：第 0 行锚在 anchor.y（与左侧 Name / Surname 顶行水平对齐），后续行向下向下排列
+            for offset, line in enumerate(lines):
+                line_y = anchor.y - offset * size * LINE_SPACING
+                if anchor.align == "right":
+                    overlay.drawRightString(anchor.x, line_y, line)
+                elif anchor.align == "center":
+                    overlay.drawCentredString(anchor.x, line_y, line)
+                else:
+                    overlay.drawString(anchor.x, line_y, line)
+        else:
+            # 底部基线对齐：第 0 行在最下侧
+            for offset, line in enumerate(reversed(lines)):
+                line_y = anchor.y + offset * size * LINE_SPACING
+                if anchor.align == "right":
+                    overlay.drawRightString(anchor.x, line_y, line)
+                elif anchor.align == "center":
+                    overlay.drawCentredString(anchor.x, line_y, line)
+                else:
+                    overlay.drawString(anchor.x, line_y, line)
 
     approval = snapshot.normalized_data.get("approval_status")
     for name, selected in (
