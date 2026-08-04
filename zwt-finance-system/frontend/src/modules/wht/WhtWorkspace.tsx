@@ -788,10 +788,10 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         ),
       },
       {
-        title: t("wht.taskCountLabel") || "任务数量",
+        title: t("wht.taskCountLabel") || (locale === "en-US" ? "Task Count" : "任务数量"),
         dataIndex: "totalCount",
         width: 130,
-        render: (count: number) => <strong>{count} 项任务</strong>,
+        render: (count: number) => <strong>{t("wht.taskCount", { count })}</strong>,
       },
     ];
 
@@ -802,14 +802,14 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           dataIndex: "pendingReviewCount",
           width: 110,
           render: (count: number) =>
-            count > 0 ? <Tag color="gold">{count} 待复核</Tag> : <span className="date-value">0</span>,
+            count > 0 ? <Tag color="gold">{t("wht.pendingReviewTag", { count })}</Tag> : <span className="date-value">0</span>,
         },
         {
           title: t("status.draft"),
           dataIndex: "draftCount",
           width: 100,
           render: (count: number) =>
-            count > 0 ? <Tag color="blue">{count} 草稿</Tag> : <span className="date-value">0</span>,
+            count > 0 ? <Tag color="blue">{t("wht.draftTag", { count })}</Tag> : <span className="date-value">0</span>,
         },
       );
     }
@@ -820,7 +820,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         dataIndex: "approvedCount",
         width: 110,
         render: (count: number) =>
-          count > 0 ? <Tag color="green">{count} 已批准</Tag> : <span className="date-value">0</span>,
+          count > 0 ? <Tag color="green">{t("wht.approvedTag", { count })}</Tag> : <span className="date-value">0</span>,
       });
     }
 
@@ -831,14 +831,14 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
           dataIndex: "issuedCount",
           width: 110,
           render: (count: number) =>
-            count > 0 ? <Tag color="cyan">{count} 已出具</Tag> : <span className="date-value">0</span>,
+            count > 0 ? <Tag color="cyan">{t("wht.issuedTag", { count })}</Tag> : <span className="date-value">0</span>,
         },
         {
           title: t("status.voided"),
           dataIndex: "voidedCount",
           width: 100,
           render: (count: number) =>
-            count > 0 ? <Tag color="default">{count} 已作废</Tag> : <span className="date-value">0</span>,
+            count > 0 ? <Tag color="default">{t("wht.voidedTag", { count })}</Tag> : <span className="date-value">0</span>,
         },
       );
     }
@@ -857,7 +857,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         render: (val: number) => formatMoney(String(val)),
       },
       {
-        title: t("common.actions") || "操作",
+        title: t("common.actions"),
         key: "actions",
         width: 160,
         render: (_, record) => (
@@ -866,7 +866,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             icon={<RightOutlined />}
             onClick={() => setFilters((current) => ({ ...current, period: record.period }))}
           >
-            查看该期明细
+            {t("wht.viewPeriodDetails")}
           </Button>
         ),
       },
@@ -1218,7 +1218,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
               icon={<FilterOutlined />}
               onClick={() => setFiltersCollapsed(false)}
             >
-              高级筛选 {hasActiveFilters && <span className="active-dot">•</span>}
+              {t("wht.moreFilters")} {hasActiveFilters && <span className="active-dot">•</span>}
               <DownOutlined />
             </Button>
           </div>
@@ -1271,11 +1271,11 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
             </label>
             {hasActiveFilters && (
               <Button size="small" onClick={resetFilters}>
-                重置筛选
+                {t("wht.resetFilters")}
               </Button>
             )}
             <Button icon={<UpOutlined />} onClick={() => setFiltersCollapsed(true)}>
-              收起筛选
+              {t("wht.collapseFilters")}
             </Button>
           </div>
         )}
@@ -1283,7 +1283,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
         {filters.period === "all" ? (
           <>
             <div className="table-toolbar">
-              <strong>共 {periodSummaryRows.length} 个期数汇总台账</strong>
+              <strong>{t("wht.periodSummaryLedgerCount", { count: periodSummaryRows.length })}</strong>
               <Button
                 aria-label={t("common.reload")}
                 icon={<ReloadOutlined />}
@@ -1300,7 +1300,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                 pageSize: pageSize,
                 pageSizeOptions: [8, 10, 20, 50, 100],
                 showSizeChanger: true,
-                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${total} 条`,
+                showTotal: (total, range) => t("common.paginationTotal", { from: range[0], to: range[1], total }),
                 onChange: (_, newSize) => {
                   if (newSize && newSize !== pageSize) {
                     setPageSize(newSize);
@@ -1323,10 +1323,10 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                 size="small"
                 onClick={() => setFilters((current) => ({ ...current, period: "all" }))}
               >
-                {t("wht.backToAllPeriods") || "返回全部期数"}
+                {t("wht.backToAllPeriods")}
               </Button>
               <span className="period-breadcrumb-title">
-                当前查看期数：<strong>{filters.period}</strong>（共 {filteredTasks.length} 项任务）
+                {t("wht.currentViewingPeriod", { period: filters.period, count: filteredTasks.length })}
               </span>
             </div>
 
@@ -1431,7 +1431,7 @@ export function WhtWorkspace({ t, locale }: WhtWorkspaceProps) {
                 pageSize: pageSize,
                 pageSizeOptions: [8, 10, 20, 50, 100],
                 showSizeChanger: true,
-                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条 / 共 ${total} 条`,
+                showTotal: (total, range) => t("common.paginationTotal", { from: range[0], to: range[1], total }),
                 onChange: (page, newSize) => {
                   setCurrentPage(page);
                   if (newSize && newSize !== pageSize) {

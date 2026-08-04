@@ -111,7 +111,7 @@ export function AppShell({
                 {
                   key: "logout",
                   icon: <LogoutOutlined />,
-                  label: "退出登录",
+                  label: t("common.logout"),
                   danger: true,
                   onClick: () => void logout(),
                 },
@@ -124,7 +124,7 @@ export function AppShell({
               </Avatar>
               <span className="profile-copy">
                 {/* 显示真实登录用户：这个名字同时也是写进审计记录的 actor_name。 */}
-                <strong>{user?.displayName ?? ""}</strong>
+                <strong>{user?.displayName === "系统管理员" ? t("user.systemAdmin") : (user?.displayName ?? "")}</strong>
                 <small>{user?.role ?? ""}</small>
               </span>
               <DownOutlined />
