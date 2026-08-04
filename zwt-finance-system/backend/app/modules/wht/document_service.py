@@ -148,7 +148,7 @@ class WhtDocumentService:
             signature.usage = format_signature_usage(payload.usage)
         if payload.scale_percent is not None:
             signature.scale_percent = payload.scale_percent
-        if payload.is_default is True:
+        if payload.is_default is True or (signature.is_default and payload.usage is not None):
             if signature.status != "active":
                 raise WhtStateError("an inactive signature cannot be the default")
             await self._clear_defaults_overlapping(

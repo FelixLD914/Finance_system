@@ -44,6 +44,15 @@ def test_unknown_module_names_are_dropped_not_trusted() -> None:
         format_signature_usage(["typo_module"])
 
 
+def test_multi_module_signature_usage_formatting() -> None:
+    formatted = format_signature_usage(["wht", "tax_inv"])
+    assert formatted == "wht,tax_inv"
+    assert parse_signature_usage(formatted) == {"wht", "tax_inv"}
+    assert signature_allows(formatted, "wht")
+    assert signature_allows(formatted, "tax_inv")
+    assert not signature_allows(formatted, "salary_advance")
+
+
 @pytest.mark.parametrize("module", SIGNATURE_MODULES)
 def test_single_module_signature_only_allows_that_module(module: str) -> None:
     stored = format_signature_usage([module])
