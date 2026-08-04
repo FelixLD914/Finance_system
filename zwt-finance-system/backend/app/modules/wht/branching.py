@@ -45,17 +45,24 @@ def display_payee_name(
     branch_type: str | None,
     branch_number: str | None,
 ) -> str:
-    """Append the official Thai office label without changing the stored legal name."""
+    """Append the official Thai office label with parentheses according to original design."""
+    clean_name = (name or "").strip()
+    if not clean_name:
+        return ""
+
+    # 清理末尾可能粘连的未加括号或已加括号的总部/分支文案
+    clean_base = re.sub(r"[\s\(（]*(สำนักงานใหญ่|สาขาที่?\s*\d+|\(สำนักงานใหญ่\)|（สำนักงานใหญ่）)[\s\)）]*$", "", clean_name).strip()
 
     if branch_type == "head_office":
         label = "สำนักงานใหญ่"
     elif branch_type == "branch" and branch_number:
-        label = f"สาขา {branch_number}"
+        num_str = str(branch_number).strip().zfill(5)
+        label = f"สาขา {num_str}"
     else:
-        return name
-    # Legacy data sometimes already carried the office text inside the legal name.
-    clean_name = name.rstrip()
-    if clean_name.endswith((f"（{label}）", f"({label})")):
-        return name
-    # WHT 模板使用 Sarabun；该字体没有中文全角括号字形，PDF 会直接丢字。
-    return f"{name}({label})"
+        match = re.search(r"(สำนักงานใหญ่|สาขาที่?\s*\d+)", name)
+        if match:
+            label = match.group(1)
+        else:
+            return clean_base
+
+    return f"{clean_base}({label})"
