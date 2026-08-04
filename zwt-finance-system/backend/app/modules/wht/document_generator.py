@@ -395,17 +395,7 @@ def export_pdf_from_template(
             _canvas.setFont("Helvetica", size)
             _canvas.drawCentredString(x, y, str(text))
 
-        # 彻底擦除 WHT-Template.pdf 模板头部 (Payer) 区域硬编码固化的旧样例公司名称 ('บริษัท เจินเวสเทิร์น...'), 税号 ('0 1055 66051 02 1') 与旧地址
-        overlay.setFillColorRGB(1, 1, 1)
-        overlay.rect(37, 748, 305, 14, fill=1, stroke=0)
-        overlay.rect(37, 718, 305, 14, fill=1, stroke=0)
-        overlay.rect(460, 745, 115, 15, fill=1, stroke=0)
-        overlay.setFillColorRGB(0, 0, 0)
-
-        # 动态套印当前开票任务的付款方 (Payer) 名称、税号与地址
-        draw_text(values["PayerName"], 40.2, 752.0, font="ZwtSarabun", size=9)
-        draw_text(values["PayerTaxId"], 472.0, 752.0, font="Helvetica", size=9)
-        draw_text(values["PayerAddress"], 40.2, 722.0, font="ZwtSarabun", size=9)
+        # 付款方 (Payer) 100% 保持 WHT-Template.pdf 模板原版预印付款公司 ('บริษัท เจินเวสเทิร์น เทคโนโลยี (ไทยแลนด์) จำกัด(สำนักงานใหญ่)', 税号 '0 1055 66051 02 1') 完整无损，不做白块擦除也不叠加额外公司名称
 
         # 右对齐到页框内侧，给泰文标签留出固定间距；三位流水号不会再压住标签。
         draw_right(values["BookNo"], 570, 799)
