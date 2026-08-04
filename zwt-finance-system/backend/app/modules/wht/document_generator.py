@@ -400,9 +400,11 @@ def export_pdf_from_template(
         # 右对齐到页框内侧，给泰文标签留出固定间距；三位流水号不会再压住标签。
         draw_right(values["BookNo"], 570, 799)
         draw_right(values["RefNo"], 570, 785)
-        # 收款方 (Payee)
-        draw_text(values["PayeeNameTH"], 37, 660, font="ZwtSarabun", size=10)
-        draw_text(values["PayeeTaxID"], 482, 659, size=10)
+        # 收款方 (Payee)：
+        # 1. 字体字号保持与付款方完全一致 (ZwtSarabun, 9pt)
+        # 2. 收款方税号 (PayeeTaxID) 字号为 10pt，基线 y=667.0pt 精确对齐左侧“เลขประจำตัวผู้เสียภาษีอากร”泰语标签基线
+        draw_text(values["PayeeNameTH"], 37, 660, font="ZwtSarabun", size=9)
+        draw_text(values["PayeeTaxID"], 482, 667.0, size=10)
         draw_text(values["PayeeAddress"], 37, 628, font="ZwtSarabun", size=9)
         # Bug 1 修复：模板中「ลำดับที่ [   ] ในแบบ」框内部按合规要求留空，绝不打印序号（这里不用填写）
 
