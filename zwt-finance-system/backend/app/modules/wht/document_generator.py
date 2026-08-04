@@ -416,8 +416,8 @@ def export_pdf_from_template(
         overlay.rect(515, 260, 60, 13, fill=1, stroke=0)
         overlay.setFillColorRGB(0, 0, 0)
 
-        # 第 6 行 (6. อื่นๆ(ระบุ)) 100% 还原原版模板排版：x=181.0 居中，基线设为 y=251.0pt 精确自然压在虚线上方，前后预印虚线全程完整贯穿
-        draw_text(values["IncomeType"], 181.0, 251.0, font="ZwtSarabun", size=9)
+        # 第 6 行 (6. อื่นๆ(ระบุ)) 完完全全与图二一致：x=181.0 居中，基线设为 y=252.5pt 优雅悬浮于虚线上方 3pt 处，预印虚线在下方全长贯穿
+        draw_text(values["IncomeType"], 181.0, 252.5, font="ZwtSarabun", size=9)
         payment_date = task.payment_date
         if payment_date:
             draw_text(
