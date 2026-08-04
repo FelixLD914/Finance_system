@@ -399,8 +399,7 @@ def export_pdf_from_template(
         # 收款方税号是人工核对关键字段，字号与模板主体数字保持一致。
         draw_text(values["PayeeTaxID"], 482, 659, size=10)
         draw_text(values["PayeeAddress"], 37, 628, font="ZwtSarabun", size=9)
-        # 模板中的序号框实际范围为 x=50.5..113.6 / y=597.1..612.2。
-        draw_centered(values["No"], 82, 602)
+        # Bug 1 修复：模板中「ลำดับที่ [   ] ในแบบ」框内部按合规要求留空，绝不打印序号（这里不用填写）
 
         # PND3 / PND53 下排复选框中心点来自模板矢量坐标。勾号四周
         # 至少保留约 2pt，不再压住左边框或下边框。
@@ -410,25 +409,29 @@ def export_pdf_from_template(
         overlay.line(check_x - 5, check_y - 1.25, check_x - 1.5, check_y - 4.75)
         overlay.line(check_x - 1.5, check_y - 4.75, check_x + 5, check_y + 4.75)
 
-        # 遮盖模板第 2, 3, 4 页第 5 行金额列中预印的 '-' 减号符号，彻底消除金额上方小横线
+        # Bug 4 彻底修复：精准缩窄遮盖框宽度至 60pt (x=440..500 与 x=515..575)，距右边框 (579.5) 留出 4.5pt 安全间距，
+        # 既完全擦除 2-4 页第 5 行预印减号 '-'，又绝对不破损右侧竖直边框线！
         overlay.setFillColorRGB(1, 1, 1)
-        overlay.rect(440, 260, 65, 13, fill=1, stroke=0)
-        overlay.rect(515, 260, 65, 13, fill=1, stroke=0)
+        overlay.rect(440, 260, 60, 13, fill=1, stroke=0)
+        overlay.rect(515, 260, 60, 13, fill=1, stroke=0)
+
+        # Bug 2 彻底修复：擦除第 6 行 x=175..355 范围内的预印虚线 '----------------------'，避免虚线穿透泰文收入类型
+        overlay.rect(175, 244, 180, 10, fill=1, stroke=0)
         overlay.setFillColorRGB(0, 0, 0)
 
-        # 第 6 行 (6. อื่นๆ(ระบุ)) 绘图基线校准至 y=248.5pt：泰语收入类型恰好紧贴位于虚线上方，金额数字整齐对齐且无小横线
-        draw_text(values["IncomeType"], 181, 248.5, font="ZwtSarabun", size=9)
+        # Bug 3 彻底修复：第 6 行 (6. อื่นๆ(ระบุ)) 绘图基线抬升至 y=251.5pt，完美位于单元格垂直居中位置，不再「太往下了」
+        draw_text(values["IncomeType"], 181, 251.5, font="ZwtSarabun", size=9)
         payment_date = task.payment_date
         if payment_date:
             draw_text(
                 f"{payment_date.year}/{payment_date.month}/{payment_date.day}",
                 368,
-                248.5,
+                251.5,
             )
         amount = f"{task.total_amount:,.2f}"
         tax_amount = f"{task.wht_amount:,.2f}"
-        draw_right(amount, 499, 248.5)
-        draw_right(tax_amount, 571, 248.5)
+        draw_right(amount, 499, 251.5)
+        draw_right(tax_amount, 571, 251.5)
         # 汇总行上下边界为 y=222.5..238.6；使用居中基线避开边框。
         draw_right(amount, 499, 227)
         draw_right(tax_amount, 571, 227)
