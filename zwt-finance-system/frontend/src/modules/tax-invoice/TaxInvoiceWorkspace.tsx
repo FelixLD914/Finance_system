@@ -3713,6 +3713,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               <span>{conflictText(issue, t)}</span>
             </li>
           ))}
+        </ol>
       </Modal>
 
       <Modal
