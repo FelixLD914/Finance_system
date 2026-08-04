@@ -1171,7 +1171,7 @@
   z-index: 0;
   background-image: url("/login-bg.png");
   background-size: cover;
-  background-position: center;
+  background-position: center bottom;
   background-repeat: no-repeat;
   opacity: 1;
   pointer-events: none;
