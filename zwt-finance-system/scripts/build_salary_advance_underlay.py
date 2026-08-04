@@ -69,9 +69,9 @@ MAX_WIDTHS = {
     "applicant_display_name": 220.0,
     "request_date": 100.0,
     "finance_comment": 320.0,
-    "finance_display_name": 220.0,
+    "finance_display_name": 160.0,
     "finance_date": 100.0,
-    "md_display_name": 220.0,
+    "md_display_name": 160.0,
     "md_date": 100.0,
 }
 

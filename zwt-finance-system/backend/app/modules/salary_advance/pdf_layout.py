@@ -12,9 +12,9 @@ class TextAnchor:
     align: str = "left"
 
 
-SOURCE_XLSX_SHA256 = "9b646c6184a4edbd231188e10f9c92fb79cb46b4da6101feb729861e6c1246dd"
-PDF_UNDERLAY_SHA256 = "7137cb8d9e494317cc4bfaf094601ee97698c295a4af20dbed65929fc4f3e765"
-LAYOUT_VERSION = "797251f436c7ebcd"
+SOURCE_XLSX_SHA256 = "d199ea28200a98ea75e1d6c6f96db68739c345949e6232d6493f38c734aca8bd"
+PDF_UNDERLAY_SHA256 = "a384529a36420970ae02933f840db2931732b6718f7c793bbfbbd90b1a4cb1e6"
+LAYOUT_VERSION = "6302c0bfa6e89d91"
 PAGE_COUNT = 1
 PAGE_SIZE = (595.25, 841.85)
 
@@ -34,9 +34,9 @@ TEXT_ANCHORS = {
     "applicant_display_name": TextAnchor(288.11, 377.41, 12.93, 220.00, "left"),
     "request_date": TextAnchor(454.31, 363.37, 12.93, 100.00, "center"),
     "finance_comment": TextAnchor(361.31, 345.60, 12.93, 320.00, "center"),
-    "finance_display_name": TextAnchor(414.97, 293.75, 12.93, 220.00, "center"),
+    "finance_display_name": TextAnchor(339.82, 292.08, 12.93, 160.00, "center"),
     "finance_date": TextAnchor(454.31, 279.71, 12.93, 100.00, "center"),
-    "md_display_name": TextAnchor(414.97, 191.04, 12.93, 220.00, "center"),
+    "md_display_name": TextAnchor(339.82, 189.36, 12.93, 160.00, "center"),
     "md_date": TextAnchor(454.31, 176.99, 12.93, 100.00, "center"),
 }
 
