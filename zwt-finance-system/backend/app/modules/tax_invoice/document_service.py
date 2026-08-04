@@ -117,18 +117,36 @@ class TaxInvoiceDocumentService:
         signature_file: Path | None = None
         if payload.include_signature:
             if payload.signature_id is None:
-                raise TaxInvoiceStateError("signatureId is required when includeSignature is true")
-            signature = await self.session.scalar(
-                select(SignatureAsset).where(SignatureAsset.id == payload.signature_id)
-            )
-            if signature is None:
-                raise TaxInvoiceNotFoundError("signature image was not found")
-            if signature.status != "active":
-                raise TaxInvoiceStateError("the selected signature is inactive")
-            if not signature_allows(signature.usage, "tax_inv"):
-                raise TaxInvoiceStateError(
-                    "the selected signature is not approved for tax invoices"
+                signatures = list(
+                    (
+                        await self.session.scalars(
+                            select(SignatureAsset).where(
+                                SignatureAsset.deleted_at.is_(None),
+                                SignatureAsset.status == "active",
+                            ).order_by(
+                                SignatureAsset.is_default.desc(),
+                                SignatureAsset.created_at.desc(),
+                            )
+                        )
+                    ).all()
                 )
+                matching = [s for s in signatures if signature_allows(s.usage, "tax_inv")]
+                if matching:
+                    signature = matching[0]
+                else:
+                    raise TaxInvoiceStateError("no active default signature available for tax invoices")
+            else:
+                signature = await self.session.scalar(
+                    select(SignatureAsset).where(SignatureAsset.id == payload.signature_id)
+                )
+                if signature is None:
+                    raise TaxInvoiceNotFoundError("signature image was not found")
+                if signature.status != "active":
+                    raise TaxInvoiceStateError("the selected signature is inactive")
+                if not signature_allows(signature.usage, "tax_inv"):
+                    raise TaxInvoiceStateError(
+                        "the selected signature is not approved for tax invoices"
+                    )
             signature_file = signature_path(
                 self.settings.attachment_root,
                 signature.storage_key,
@@ -159,6 +177,7 @@ class TaxInvoiceDocumentService:
                     items,
                     self.settings.thai_font_path,
                     signature_file,
+                    signature.scale_percent if signature else 100,
                 )
                 template_hashes["pdf"] = hashlib.sha256(
                     pdf_template_path.read_bytes()

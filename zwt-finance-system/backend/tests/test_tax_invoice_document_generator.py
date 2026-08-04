@@ -280,6 +280,32 @@ def test_generates_three_copy_pdf_without_office(tmp_path) -> None:
         assert "P-001" in text
 
 
+def test_generates_three_copy_pdf_with_scaled_signature(tmp_path) -> None:
+    from PIL import Image, ImageDraw
+
+    sig_png = tmp_path / "sample_signature.png"
+    img = Image.new("RGBA", (200, 100), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.line((10, 10, 150, 80), fill=(10, 20, 180, 255), width=5)
+    img.save(sig_png)
+
+    for scale in (80, 100, 120):
+        output = tmp_path / f"tax-inv-sig-{scale}.pdf"
+        export_pdf_from_template(
+            ASSETS / "templates" / "TAX-INV-Template.pdf",
+            output,
+            _invoice(),
+            [_item()],
+            ASSETS / "fonts" / "Sarabun-Regular.ttf",
+            signature_source_path=sig_png,
+            signature_scale_percent=scale,
+        )
+
+        reader = PdfReader(output)
+        assert len(reader.pages) == 3
+        assert output.stat().st_size > 0
+
+
 def test_pdf_rejects_more_than_eighteen_lines(tmp_path) -> None:
     items = [_item(index) for index in range(1, MAX_ITEMS + 2)]
 

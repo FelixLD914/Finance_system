@@ -279,11 +279,12 @@ def export_pdf_from_template(
     items: list[TaxInvoiceItem],
     thai_font_path: Path,
     signature_source_path: Path | None = None,
+    signature_scale_percent: int = 100,
 ) -> None:
     """在静态底版上叠加业务数据，生成三联 TAX INV，全程不碰 Office。
 
     signature_source_path 给定时，在「ผู้มีอำนาจลงนาม/Authorized Signature」框内
-    盖章。三联都盖：副联必须与正本一致。
+    按 signature_scale_percent 缩放居中盖章。三联都盖：副联必须与正本一致。
     """
     if not pdf_template_path.is_file():
         raise TaxInvoiceDocumentGenerationError(
@@ -383,12 +384,18 @@ def export_pdf_from_template(
             )
 
         if prepared_signature is not None and prepared_signature.exists():
+            sig_x, sig_y, sig_w, sig_h = SIGNATURE_BOX
+            scale_ratio = (signature_scale_percent or 100) / 100.0
+            scaled_w = sig_w * scale_ratio
+            scaled_h = sig_h * scale_ratio
+            scaled_x = sig_x + (sig_w - scaled_w) / 2.0
+            scaled_y = sig_y + (sig_h - scaled_h) / 2.0
             overlay.drawImage(
                 ImageReader(str(prepared_signature)),
-                SIGNATURE_BOX[0],
-                SIGNATURE_BOX[1],
-                width=SIGNATURE_BOX[2],
-                height=SIGNATURE_BOX[3],
+                scaled_x,
+                scaled_y,
+                width=scaled_w,
+                height=scaled_h,
                 preserveAspectRatio=True,
                 anchor="c",
                 mask="auto",

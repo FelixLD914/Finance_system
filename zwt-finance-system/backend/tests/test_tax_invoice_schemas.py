@@ -23,6 +23,7 @@ def test_document_request_deduplicates_formats() -> None:
     assert request.formats == ["xlsx"]
 
 
-def test_document_request_requires_signature_id_when_signature_included() -> None:
-    with pytest.raises(ValidationError, match="signatureId"):
-        TaxInvoiceDocumentGenerateRequest(includeSignature=True)
+def test_document_request_allows_none_signature_id() -> None:
+    request = TaxInvoiceDocumentGenerateRequest(includeSignature=True)
+    assert request.include_signature is True
+    assert request.signature_id is None

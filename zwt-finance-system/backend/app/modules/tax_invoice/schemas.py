@@ -449,8 +449,6 @@ class TaxInvoiceDocumentGenerateRequest(ApiSchema):
     @model_validator(mode="after")
     def normalize_formats(self) -> "TaxInvoiceDocumentGenerateRequest":
         self.formats = list(dict.fromkeys(self.formats))
-        if self.include_signature and self.signature_id is None:
-            raise ValueError("signatureId is required when includeSignature is true")
         return self
 
 
