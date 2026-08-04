@@ -3790,7 +3790,7 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                     title: "发票/文档号",
                     dataIndex: "documentNo",
                     key: "documentNo",
-                    render: (val, record) => val || record.invoiceNo || "—",
+                    render: (val) => val || "—",
                   },
                   {
                     title: "客户名称",

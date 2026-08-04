@@ -1,5 +1,3 @@
-import pytest
-from pydantic import ValidationError
 
 from app.modules.tax_invoice.schemas import TaxInvoiceDocumentGenerateRequest
 
