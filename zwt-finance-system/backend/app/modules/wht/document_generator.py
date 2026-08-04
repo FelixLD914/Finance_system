@@ -414,13 +414,10 @@ def export_pdf_from_template(
         overlay.setFillColorRGB(1, 1, 1)
         overlay.rect(440, 260, 60, 13, fill=1, stroke=0)
         overlay.rect(515, 260, 60, 13, fill=1, stroke=0)
-
-        # Bug 2 彻底修复：擦除第 6 行 x=175..355 范围内的预印虚线 '----------------------'，避免虚线穿透泰文收入类型
-        overlay.rect(175, 244, 180, 10, fill=1, stroke=0)
         overlay.setFillColorRGB(0, 0, 0)
 
-        # Bug 3 彻底修复：第 6 行 (6. อื่นๆ(ระบุ)) 绘图基线抬升至 y=251.5pt，完美位于单元格垂直居中位置，不再「太往下了」
-        draw_text(values["IncomeType"], 181, 251.5, font="ZwtSarabun", size=9)
+        # 第 6 行 (6. อื่นๆ(ระบุ)) 保留完整预印虚线，收入类型 (IncomeType) 精确坐落在虚线上方 (y=249.0pt)
+        draw_text(values["IncomeType"], 181, 249.0, font="ZwtSarabun", size=9)
         payment_date = task.payment_date
         if payment_date:
             draw_text(
