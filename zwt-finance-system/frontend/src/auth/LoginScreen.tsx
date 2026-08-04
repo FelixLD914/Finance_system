@@ -1,7 +1,5 @@
 import { useState } from "react";
 import {
-  DownOutlined,
-  GlobalOutlined,
   LockOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -81,36 +79,26 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
 
   return (
     <main className="login-screen">
-      {/* 装饰底图走独立图层，不参与无障碍树，也方便单独调透明度。 */}
+      {/* 装饰底图走独立图层 */}
       <div className="login-backdrop" aria-hidden="true" />
 
-      <header className="login-topbar">
-        <div className="login-brand">
-          <span className="brand-zwt">ZWT</span>
-          <span className="brand-finance">Finance</span>
-        </div>
-        <Button
-          aria-label={t("login.switchLanguage")}
-          className="login-locale"
-          icon={<GlobalOutlined />}
-          type="text"
-          onClick={onToggleLocale}
-        >
-          {t("common.language")}
-          <DownOutlined className="login-locale-caret" />
-        </Button>
-      </header>
-
       <Card className="login-card" variant="borderless">
-        {/* 衬线字体只用在品牌标识上，表单标签、按钮和页脚一律 DM Sans。 */}
-        <p className="login-wordmark">
-          <span className="brand-zwt">ZWT</span>
-          <span className="brand-finance">Finance</span>
-        </p>
+        <div className="login-card-header">
+          <Button
+            aria-label={t("login.switchLanguage")}
+            className="login-locale-btn"
+            type="text"
+            onClick={onToggleLocale}
+          >
+            EN / 中文
+          </Button>
+        </div>
+
+        <h1 className="login-wordmark">ZWT Finance</h1>
         <p className="login-tagline">{t("login.tagline")}</p>
 
         {error !== null && (
-          <Alert type="error" showIcon title={error} className="login-error" />
+          <Alert type="error" showIcon message={error} className="login-error" />
         )}
 
         <Form<LoginFormValues>
@@ -123,7 +111,6 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
           requiredMark={false}
           onFinish={handleSubmit}
         >
-          {/* 设计稿里输入框只有占位符没有可见标签，标签靠 aria-label 提供。 */}
           <Form.Item
             name="username"
             rules={[{ required: true, message: t("login.usernameRequired") }]}
@@ -133,7 +120,7 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
               autoComplete="username"
               autoFocus
               placeholder={t("login.usernamePlaceholder")}
-              prefix={<UserOutlined />}
+              prefix={<UserOutlined className="input-icon" />}
               size="large"
             />
           </Form.Item>
@@ -146,7 +133,7 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
               aria-label={t("login.password")}
               autoComplete="current-password"
               placeholder={t("login.passwordPlaceholder")}
-              prefix={<LockOutlined />}
+              prefix={<LockOutlined className="input-icon" />}
               size="large"
             />
           </Form.Item>
@@ -170,6 +157,7 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
 
           <Button
             block
+            className="login-submit-btn"
             htmlType="submit"
             loading={submitting}
             size="large"
@@ -179,14 +167,6 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
           </Button>
         </Form>
       </Card>
-
-      <footer className="login-footer">
-        {/* 设计稿的 Privacy Policy / Terms 在本系统里没有对应页面，换成一句
-            成立的内部使用声明，不放指不到任何地方的链接。 */}
-        <span>{t("login.copyright", { year: new Date().getFullYear() })}</span>
-        <span aria-hidden="true">·</span>
-        <span>{t("login.internalOnly")}</span>
-      </footer>
     </main>
   );
 }

@@ -1142,124 +1142,93 @@
    自定义属性而不是改 tokens.css，别让它们漏到业务页面上去。 */
 
 .login-screen {
-  --login-canvas: #f6efe6;
-  --login-hairline: #e3d8c8;
-  --login-placeholder: #a99d8c;
+  --login-card-bg: rgba(247, 241, 233, 0.94);
+  --login-card-border: rgba(220, 206, 186, 0.7);
+  --login-input-bg: #f3ebd9;
+  --login-input-border: #dfd2c0;
+  --login-input-focus: #b89d74;
+  --login-text-primary: #5a4b38;
+  --login-text-muted: #8c7965;
+  --login-placeholder: #a69684;
+  --login-btn-bg: #ba9d73;
+  --login-btn-hover: #a78b61;
+  --login-btn-active: #917750;
 
   position: relative;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  gap: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: 100vh;
   min-height: 100dvh;
-  padding: 22px 32px 20px;
+  padding: 24px;
   overflow: hidden;
-  background: var(--login-canvas);
+  background-color: #f5efe4;
 }
 
 .login-backdrop {
   position: absolute;
   inset: 0;
   z-index: 0;
-  /* 插画分成上下两层，各自贴住视口的上下边、按视口宽度等比缩放。
-     不要合成一张用 background-size: cover：cover 从中心往外裁，四角器物被切掉
-     多少完全取决于视口宽高比 —— 16:9（最常见的显示器比例）上会裁掉上下各 170px，
-     左上角的计算器正好糊在页面自己的 ZWT Finance 标识后面。分层锚边之后，角上的
-     器物在任何宽高比下都完整可见，牺牲掉的只是中间那片本来就空着的画布：视口高时
-     中间留白，视口矮时两层在中间重叠，两种情况都发生在没有图案的区域。 */
-  background-image: url("/login-backdrop-top.svg"),
-    url("/login-backdrop-bottom.svg");
-  background-position: center top, center bottom;
-  background-repeat: no-repeat, no-repeat;
-  background-size: 100% auto, 100% auto;
-  opacity: 0.9;
+  background-image: url("/login-bg.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 1;
   pointer-events: none;
 }
 
-.login-topbar,
-.login-card,
-.login-footer {
+.login-card {
   position: relative;
   z-index: 1;
+  width: 100%;
+  max-width: 420px;
+  background: var(--login-card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--login-card-border);
+  border-radius: 20px;
+  box-shadow: 0 20px 48px rgba(110, 88, 60, 0.12), 0 4px 12px rgba(0, 0, 0, 0.04);
 }
 
-.login-topbar {
+.login-card .ant-card-body {
+  padding: 28px 36px 36px;
+}
+
+.login-card-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  justify-content: flex-end;
+  margin-bottom: 4px;
 }
 
-.login-brand,
-.login-wordmark {
-  display: flex;
-  align-items: baseline;
-  font-family: var(--font-brand);
-}
-
-.login-brand {
-  gap: 8px;
-}
-
-.login-brand .brand-zwt {
-  font-size: 30px;
-}
-
-.login-brand .brand-finance {
-  margin-left: 0;
-  font-size: 20px;
-}
-
-.login-locale.ant-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 10px;
-  color: var(--finance-text-muted);
+.login-locale-btn.ant-btn {
+  height: 28px;
+  padding: 0 4px;
+  color: var(--login-text-muted);
   font-size: 13px;
   font-weight: 500;
 }
 
-.login-locale-caret {
-  font-size: 10px;
-  opacity: 0.65;
-}
-
-.login-card {
-  place-self: center;
-  width: 100%;
-  max-width: 452px;
-  background: var(--finance-surface);
-  border: 1px solid var(--login-hairline);
-  border-radius: 18px;
-  box-shadow: 0 24px 60px rgba(84, 64, 40, 0.1);
-}
-
-.login-card .ant-card-body {
-  padding: 40px 44px 36px;
+.login-locale-btn.ant-btn:hover {
+  color: var(--login-text-primary);
+  background: transparent;
 }
 
 .login-wordmark {
-  gap: 10px;
-  justify-content: center;
   margin: 0;
-}
-
-.login-wordmark .brand-zwt {
-  font-size: 44px;
-  letter-spacing: -0.02em;
-}
-
-.login-wordmark .brand-finance {
-  margin-left: 0;
-  font-size: 30px;
+  color: var(--login-text-primary);
+  font-family: var(--font-brand), "Times New Roman", Georgia, serif;
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 
 .login-tagline {
-  margin: 8px 0 26px;
-  color: var(--finance-text-muted);
-  font-size: 13px;
+  margin: 6px 0 28px;
+  color: var(--login-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
   text-align: center;
 }
 
@@ -1272,47 +1241,86 @@
 }
 
 .login-card .ant-input-affix-wrapper {
-  height: 48px;
-  border-color: var(--login-hairline);
-  border-radius: var(--finance-radius-md);
+  height: 46px;
+  background: var(--login-input-bg);
+  border: 1px solid var(--login-input-border);
+  border-radius: 8px;
+  transition: all 0.2s ease;
 }
 
-.login-card .ant-input-prefix {
+.login-card .ant-input-affix-wrapper:hover,
+.login-card .ant-input-affix-wrapper-focused {
+  background: #f7f1e6;
+  border-color: var(--login-input-focus);
+  box-shadow: 0 0 0 2px rgba(184, 157, 116, 0.2);
+}
+
+.login-card .ant-input {
+  background: transparent;
+  color: var(--login-text-primary);
+  font-size: 14px;
+}
+
+.login-card .ant-input::placeholder {
+  color: var(--login-placeholder);
+}
+
+.login-card .input-icon {
   margin-inline-end: 10px;
   color: var(--login-placeholder);
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .login-options {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin: 2px 0 20px;
+  margin: 6px 0 24px;
+  color: var(--login-text-muted);
   font-size: 13px;
+}
+
+.login-options .ant-checkbox-wrapper {
+  color: var(--login-text-muted);
+  font-size: 13px;
+}
+
+.login-options .ant-checkbox-checked .ant-checkbox-inner {
+  background-color: var(--login-btn-bg);
+  border-color: var(--login-btn-bg);
 }
 
 .login-forgot.ant-btn {
   height: auto;
   padding: 0;
+  color: var(--login-text-muted);
   font-size: 13px;
 }
 
-.login-card .ant-btn-primary {
-  height: 48px;
-  border-radius: var(--finance-radius-md);
-  font-size: 15px;
-  font-weight: 600;
+.login-forgot.ant-btn:hover {
+  color: var(--login-text-primary);
 }
 
-.login-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--finance-text-muted);
-  font-size: 12px;
+.login-submit-btn.ant-btn-primary {
+  height: 46px;
+  background-color: var(--login-btn-bg);
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 14px rgba(186, 157, 115, 0.35);
+  transition: all 0.2s ease;
+}
+
+.login-submit-btn.ant-btn-primary:hover {
+  background-color: var(--login-btn-hover) !important;
+  box-shadow: 0 6px 18px rgba(186, 157, 115, 0.45);
+}
+
+.login-submit-btn.ant-btn-primary:active {
+  background-color: var(--login-btn-active) !important;
 }
 
 /* ── 开票向导 ─────────────────────────────────────────────────────────────
