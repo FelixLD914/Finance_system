@@ -21,6 +21,9 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute(
+        "ALTER TABLE core.signature_assets DROP CONSTRAINT IF EXISTS ck_signature_assets_ck_signature_assets_usage"
+    )
+    op.execute(
         "ALTER TABLE core.signature_assets DROP CONSTRAINT IF EXISTS ck_signature_assets_usage"
     )
     op.alter_column(
