@@ -132,7 +132,7 @@ def test_generates_single_page_pdf_without_office(tmp_path: Path) -> None:
         assets / "templates" / "Salary-Advance-Template.pdf",
         output,
         _snapshot(tmp_path),
-        assets / "fonts" / "Sarabun-Regular.ttf",
+        get_settings().salary_advance_font_path,
         xlsx_template_path=assets
         / "templates"
         / "Salary-Advance-Template.xlsx",
@@ -197,7 +197,7 @@ def test_long_position_is_printed_in_full(tmp_path: Path, position: str) -> None
         assets / "templates" / "Salary-Advance-Template.pdf",
         output,
         _snapshot(tmp_path, position=position),
-        assets / "fonts" / "Sarabun-Regular.ttf",
+        get_settings().salary_advance_font_path,
         xlsx_template_path=assets / "templates" / "Salary-Advance-Template.xlsx",
     )
 
@@ -222,7 +222,7 @@ def test_position_block_stays_inside_its_box(tmp_path: Path) -> None:
         assets / "templates" / "Salary-Advance-Template.pdf",
         output,
         _snapshot(tmp_path, position="MANUFACTURING TECHNOLOGY SUPERVISOR 2"),
-        assets / "fonts" / "Sarabun-Regular.ttf",
+        get_settings().salary_advance_font_path,
         xlsx_template_path=assets / "templates" / "Salary-Advance-Template.xlsx",
     )
 
