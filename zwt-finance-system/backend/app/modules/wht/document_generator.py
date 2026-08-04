@@ -145,6 +145,9 @@ def task_template_values(task: WhtTask) -> dict[str, Any]:
         "No": _task_sequence(task.task_no),
         "RefNo": task.task_no,
         "BookNo": task.book_no,
+        "PayerName": "บริษัท นำคนต่างด้าวมาทำงานในประเทศ ซีดับเบิ้ลยูที จำกัด",
+        "PayerTaxId": "0105562001234",
+        "PayerAddress": "เลขที่ 414 ถนนพหลโยธิน แขวงสามเสนใน เขตพญาไท กรุงเทพมหานคร 10400",
         "PayeeNameEN": task.company_name_en or "",
         "PayeeNameTH": display_payee_name(
             task.company_name,
@@ -392,11 +395,23 @@ def export_pdf_from_template(
             _canvas.setFont("Helvetica", size)
             _canvas.drawCentredString(x, y, str(text))
 
+        # 彻底擦除 WHT-Template.pdf 模板头部 (Payer) 区域硬编码固化的旧样例公司名称 ('บริษัท เจินเวสเทิร์น...'), 税号 ('0 1055 66051 02 1') 与旧地址
+        overlay.setFillColorRGB(1, 1, 1)
+        overlay.rect(37, 748, 305, 14, fill=1, stroke=0)
+        overlay.rect(37, 718, 305, 14, fill=1, stroke=0)
+        overlay.rect(460, 745, 115, 15, fill=1, stroke=0)
+        overlay.setFillColorRGB(0, 0, 0)
+
+        # 动态套印当前开票任务的付款方 (Payer) 名称、税号与地址
+        draw_text(values["PayerName"], 40.2, 752.0, font="ZwtSarabun", size=9)
+        draw_text(values["PayerTaxId"], 472.0, 752.0, font="Helvetica", size=9)
+        draw_text(values["PayerAddress"], 40.2, 722.0, font="ZwtSarabun", size=9)
+
         # 右对齐到页框内侧，给泰文标签留出固定间距；三位流水号不会再压住标签。
         draw_right(values["BookNo"], 570, 799)
         draw_right(values["RefNo"], 570, 785)
+        # 收款方 (Payee)
         draw_text(values["PayeeNameTH"], 37, 660, font="ZwtSarabun", size=10)
-        # 收款方税号是人工核对关键字段，字号与模板主体数字保持一致。
         draw_text(values["PayeeTaxID"], 482, 659, size=10)
         draw_text(values["PayeeAddress"], 37, 628, font="ZwtSarabun", size=9)
         # Bug 1 修复：模板中「ลำดับที่ [   ] ในแบบ」框内部按合规要求留空，绝不打印序号（这里不用填写）
