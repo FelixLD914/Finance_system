@@ -25,7 +25,7 @@ interface LoginFormValues {
 }
 
 /**
- * 只记用户名，不记口令。会话本身是 HttpOnly Cookie，有效期由服务端的
+ * 只记用户名，不记密码。会话本身是 HttpOnly Cookie，有效期由服务端的
  * session_idle_minutes 决定，前端无法延长，所以这个勾选框只能做到"下次不用
  * 重新打用户名"这一件事 —— 文案也照这个范围写，不要写成"记住我"。
  */
@@ -59,7 +59,7 @@ export function LoginScreen({ onToggleLocale, t }: LoginScreenProps) {
         window.localStorage.removeItem(REMEMBERED_USERNAME_KEY);
       }
     } catch (cause) {
-      // 后端对"用户不存在"和"口令错误"返回同一句话，前端照原样显示，
+      // 后端对"用户不存在"和"密码错误"返回同一句话，前端照原样显示，
       // 不要在这里推断或补充更具体的原因。
       setError(cause instanceof ApiError ? cause.message : t("login.failed"));
     } finally {
