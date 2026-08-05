@@ -134,15 +134,17 @@ export interface SalaryAdvanceEmployee {
   deletedByName: string | null;
 }
 
+// 必填的五项与后端 EmployeeCreate/EmployeeUpdate 一致：它们是预支单上要印的内容。
+// 批量导入不走这个类型，仍然允许缺字段。
 export interface EmployeeInput {
   empId: string;
-  firstName?: string | null;
-  surname?: string | null;
+  firstName: string;
+  surname: string;
+  department: string;
+  position: string;
+  startDate: string;
   enName?: string | null;
   chineseName?: string | null;
-  department?: string | null;
-  position?: string | null;
-  startDate?: string | null;
   isActive: boolean;
 }
 

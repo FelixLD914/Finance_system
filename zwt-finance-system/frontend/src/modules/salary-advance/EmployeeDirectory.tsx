@@ -27,6 +27,7 @@ import dayjs from "dayjs";
 
 import type { Translate } from "../../i18n";
 import {
+  EMPLOYEE_PAGE_LIMIT,
   createEmployee,
   deleteEmployee,
   downloadEmployeeTemplate,
@@ -44,13 +45,13 @@ interface EmployeeDirectoryProps {
 
 interface EmployeeFormValues {
   empId: string;
-  firstName?: string;
-  surname?: string;
+  firstName: string;
+  surname: string;
+  department: string;
+  position: string;
+  startDate: dayjs.Dayjs;
   enName?: string;
   chineseName?: string;
-  department?: string;
-  position?: string;
-  startDate?: dayjs.Dayjs | null;
   isActive: boolean;
 }
 
@@ -60,6 +61,7 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
   const [view, setView] = useState<"active" | "deleted">("active");
   const [employees, setEmployees] = useState<SalaryAdvanceEmployee[]>([]);
   const [deletedEmployees, setDeletedEmployees] = useState<SalaryAdvanceEmployee[]>([]);
+  const [truncatedTotal, setTruncatedTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
   const [editing, setEditing] = useState<SalaryAdvanceEmployee | null>(null);
@@ -69,8 +71,10 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
   const loadActiveEmployees = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listEmployees(undefined, false, false, 1, 500);
+      const res = await listEmployees(undefined, false, false, 1, EMPLOYEE_PAGE_LIMIT);
       setEmployees(res.items);
+      // 搜索框是在已加载的这一页里过滤的，超出一页时不说出来就等于谎报"查无此人"。
+      setTruncatedTotal(res.total > res.items.length ? res.total : 0);
     } catch (err) {
       message.error(err instanceof Error ? err.message : t("common.loadFailed"));
     } finally {
@@ -81,7 +85,7 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
   const loadDeletedEmployees = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await listEmployees(undefined, false, true, 1, 500);
+      const res = await listEmployees(undefined, false, true, 1, EMPLOYEE_PAGE_LIMIT);
       setDeletedEmployees(res.items);
     } catch (err) {
       message.error(err instanceof Error ? err.message : t("common.loadFailed"));
@@ -111,47 +115,45 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
 
   const openEditor = (employee?: SalaryAdvanceEmployee) => {
     setEditing(employee ?? null);
-    form.setFieldsValue(
-      employee
-        ? {
-            empId: employee.empId,
-            firstName: employee.firstName ?? undefined,
-            surname: employee.surname ?? undefined,
-            enName: employee.enName ?? undefined,
-            chineseName: employee.chineseName ?? undefined,
-            department: employee.department ?? undefined,
-            position: employee.position ?? undefined,
-            startDate: employee.startDate ? dayjs(employee.startDate) : null,
-            isActive: employee.isActive,
-          }
-        : {
-            empId: "",
-            firstName: "",
-            surname: "",
-            enName: "",
-            chineseName: "",
-            department: "",
-            position: "",
-            startDate: null,
-            isActive: true,
-          },
-    );
+    form.resetFields();
+    if (employee) {
+      form.setFieldsValue({
+        empId: employee.empId,
+        firstName: employee.firstName ?? "",
+        surname: employee.surname ?? "",
+        enName: employee.enName ?? "",
+        chineseName: employee.chineseName ?? "",
+        department: employee.department ?? "",
+        position: employee.position ?? "",
+        // 导入进来的历史记录可能缺这些字段，此处留空，必填规则会逼着补齐后才能保存。
+        startDate: employee.startDate ? dayjs(employee.startDate) : undefined,
+        isActive: employee.isActive,
+      });
+    } else {
+      form.setFieldsValue({ isActive: true });
+    }
     setModalOpen(true);
   };
 
   const save = async () => {
-    const values = await form.validateFields();
+    let values: EmployeeFormValues;
+    try {
+      values = await form.validateFields();
+    } catch {
+      // antd 已把错误标在字段上；再往上抛只会变成一个没人接的 rejection。
+      return;
+    }
     setPending(true);
     try {
       const payload: EmployeeInput = {
         empId: values.empId.trim(),
-        firstName: values.firstName?.trim() || null,
-        surname: values.surname?.trim() || null,
+        firstName: values.firstName.trim(),
+        surname: values.surname.trim(),
+        department: values.department.trim(),
+        position: values.position.trim(),
+        startDate: values.startDate.format("YYYY-MM-DD"),
         enName: values.enName?.trim() || null,
         chineseName: values.chineseName?.trim() || null,
-        department: values.department?.trim() || null,
-        position: values.position?.trim() || null,
-        startDate: values.startDate ? values.startDate.format("YYYY-MM-DD") : null,
         isActive: values.isActive,
       };
 
@@ -405,6 +407,18 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
         )}
       </div>
 
+      {view === "active" && truncatedTotal > 0 && (
+        <Alert
+          showIcon
+          type="warning"
+          style={{ marginBottom: 16 }}
+          message={t("salary.employeeListTruncated", {
+            total: truncatedTotal,
+            shown: employees.length,
+          })}
+        />
+      )}
+
       <Table
         columns={columns}
         dataSource={filtered}
@@ -434,11 +448,23 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
             <Input placeholder="Somchai Saelim" />
           </Form.Item>
 
+          {/* 这五项是预支单上要印的内容，后端 EmployeeCreate/EmployeeUpdate 同样必填：
+              存得下、开不出来的员工记录不该存在，报错要落在这里而不是开具弹窗里。 */}
           <div style={{ display: "flex", gap: 12 }}>
-            <Form.Item label={t("salary.firstName")} name="firstName" style={{ flex: 1 }}>
+            <Form.Item
+              label={t("salary.firstName")}
+              name="firstName"
+              rules={[{ required: true, message: t("salary.employeeFieldRequired") }]}
+              style={{ flex: 1 }}
+            >
               <Input placeholder="Somchai" />
             </Form.Item>
-            <Form.Item label={t("salary.surname")} name="surname" style={{ flex: 1 }}>
+            <Form.Item
+              label={t("salary.surname")}
+              name="surname"
+              rules={[{ required: true, message: t("salary.employeeFieldRequired") }]}
+              style={{ flex: 1 }}
+            >
               <Input placeholder="Saelim" />
             </Form.Item>
           </div>
@@ -447,16 +473,31 @@ export function EmployeeDirectory({ t }: EmployeeDirectoryProps) {
             <Form.Item label={t("salary.chineseName")} name="chineseName" style={{ flex: 1 }}>
               <Input placeholder="宋柴" />
             </Form.Item>
-            <Form.Item label={t("salary.department")} name="department" style={{ flex: 1 }}>
+            <Form.Item
+              label={t("salary.department")}
+              name="department"
+              rules={[{ required: true, message: t("salary.employeeFieldRequired") }]}
+              style={{ flex: 1 }}
+            >
               <Input placeholder="IT" />
             </Form.Item>
           </div>
 
           <div style={{ display: "flex", gap: 12 }}>
-            <Form.Item label={t("salary.position")} name="position" style={{ flex: 1 }}>
+            <Form.Item
+              label={t("salary.position")}
+              name="position"
+              rules={[{ required: true, message: t("salary.employeeFieldRequired") }]}
+              style={{ flex: 1 }}
+            >
               <Input placeholder="Software Engineer" />
             </Form.Item>
-            <Form.Item label={t("salary.startDate")} name="startDate" style={{ flex: 1 }}>
+            <Form.Item
+              label={t("salary.startDate")}
+              name="startDate"
+              rules={[{ required: true, message: t("salary.employeeFieldRequired") }]}
+              style={{ flex: 1 }}
+            >
               <DatePicker style={{ width: "100%" }} />
             </Form.Item>
           </div>

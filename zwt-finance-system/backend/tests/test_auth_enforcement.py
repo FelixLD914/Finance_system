@@ -86,6 +86,16 @@ MUTATING_ENDPOINTS = [
         "salary_advance:write",
     ),
     (
+        "post",
+        "/api/v1/salary-advance/employees/import",
+        "salary_advance:write",
+    ),
+    (
+        "post",
+        "/api/v1/salary-advance/single-records",
+        "salary_advance:write",
+    ),
+    (
         "get",
         f"/api/v1/salary-advance/employees/{FAKE_ID}/delete-preview",
         "salary_advance:write",

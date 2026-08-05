@@ -637,11 +637,11 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       if (selected.batch.status === "ready") {
         await lockSalaryAdvanceBatch(selected.batch.id);
       }
+      // 后端 ApiSchema 用 to_camel 生成别名且 populate_by_name=True，camelCase 即可，
+      // 不需要再同时发一份 snake_case。
       const job = await createSalaryAdvanceJob(selected.batch.id, {
         financeSignatureId: selectedFinanceSigId,
         mdSignatureId: selectedMdSigId,
-        finance_signature_id: selectedFinanceSigId,
-        md_signature_id: selectedMdSigId,
       });
       setJobDetail(await getSalaryAdvanceJob(job.id));
       message.success(t("salary.generateQueued"));
@@ -1260,36 +1260,34 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           >
             <Select
               options={[
-                { value: "Approve", label: "Approve" },
-                { value: "Not approved", label: "Not approved" },
+                { value: "Pending", label: t("salary.approvalPending") },
+                { value: "Approve", label: t("salary.approvalApprove") },
+                { value: "Not approved", label: t("salary.approvalNotApproved") },
               ]}
             />
           </Form.Item>
-          <Form.Item
-            label={t("salary.financeCode")}
-            name="finance_signature_code"
-            rules={[{ required: true }]}
-          >
+          {/* 签名两列刻意不必填（2026-08-05 口径，参照 WHT）：章在开具时选，
+              这里填的只是"盖哪张章"的可选提示。设成必填会把开具时才定的事
+              挡在编辑这一步，正是当初从 validation.py 删掉整套签名校验的原因。 */}
+          <Form.Item label={t("salary.financeCode")} name="finance_signature_code">
             <Select
+              allowClear
               showSearch
-              placeholder="选择财务负责人签名"
+              placeholder={t("salary.financeSignature")}
               options={financeSignatures.map((s) => ({
                 value: s.name,
-                label: `${s.name} ${s.isDefault ? "(默认)" : ""}`,
+                label: `${s.name}${s.isDefault ? ` [${t("salary.defaultSignatureTag")}]` : ""}`,
               }))}
             />
           </Form.Item>
-          <Form.Item
-            label={t("salary.mdCode")}
-            name="md_signature_code"
-            rules={[{ required: true }]}
-          >
+          <Form.Item label={t("salary.mdCode")} name="md_signature_code">
             <Select
+              allowClear
               showSearch
-              placeholder="选择董事签名"
+              placeholder={t("salary.mdSignature")}
               options={mdSignatures.map((s) => ({
                 value: s.name,
-                label: `${s.name} ${s.isDefault ? "(默认)" : ""}`,
+                label: `${s.name}${s.isDefault ? ` [${t("salary.defaultSignatureTag")}]` : ""}`,
               }))}
             />
           </Form.Item>

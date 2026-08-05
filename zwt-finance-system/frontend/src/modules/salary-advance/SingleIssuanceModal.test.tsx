@@ -10,6 +10,7 @@ const mockListEmployees = vi.fn();
 const mockCreateSingleRecord = vi.fn();
 
 vi.mock("./api", () => ({
+  EMPLOYEE_PAGE_LIMIT: 500,
   listEmployees: (...args: unknown[]) => mockListEmployees(...args),
   createSingleSalaryAdvanceRecord: (...args: unknown[]) => mockCreateSingleRecord(...args),
 }));
@@ -83,9 +84,45 @@ describe("SingleIssuanceModal", () => {
       expect(mockListEmployees).toHaveBeenCalled();
     });
 
-    const cancelBtn = screen.getByRole("button", { name: /取 消/i });
+    const cancelBtn = screen.getByRole("button", { name: /取\s*消/i });
     fireEvent.click(cancelBtn);
 
     expect(handleClose).toHaveBeenCalled();
+  });
+
+  it("asks for a full page of employees, not the defaulted 50", async () => {
+    // 回归：本来只传了 2 个参数，pageSize 落到默认 50 上——
+    // 第 51 个员工开不了单，界面上还看不出来。
+    mockListEmployees.mockResolvedValue({ items: [], total: 0 });
+
+    render(
+      <StyleProvider mock="server">
+        <AntApp>
+          <SingleIssuanceModal open onClose={vi.fn()} onSuccess={vi.fn()} />
+        </AntApp>
+      </StyleProvider>,
+    );
+
+    await waitFor(() => expect(mockListEmployees).toHaveBeenCalled());
+    expect(mockListEmployees).toHaveBeenCalledWith(undefined, true, false, 1, 500);
+  });
+
+  it("warns instead of silently hiding employees beyond the first page", async () => {
+    mockListEmployees.mockResolvedValue({
+      items: [{ id: "e1", empId: "EMP001", enName: "Somchai", isActive: true }],
+      total: 640,
+    });
+
+    render(
+      <StyleProvider mock="server">
+        <AntApp>
+          <SingleIssuanceModal open onClose={vi.fn()} onSuccess={vi.fn()} />
+        </AntApp>
+      </StyleProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/人员库共 640 人/)).toBeDefined();
+    });
   });
 });

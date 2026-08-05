@@ -3,9 +3,9 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from pydantic.alias_generators import to_camel
 
 
@@ -146,26 +146,35 @@ class SalaryAdvanceJobDetail(ApiSchema):
     documents: list[SalaryAdvanceDocumentResponse]
 
 
+# 单据上要印的五个字段在这里就必填：人员库存得下、预支单开不出来的记录不该存在。
+# 报错要落在录入这一步，而不是等到开具弹窗里——那里没有修员工资料的入口。
+# 批量导入走的是原始 dict，不经过这两个模型，仍然宽松（缺字段先进来、后补）。
+RequiredName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
+RequiredPosition = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
+
+
 class EmployeeCreate(ApiSchema):
     emp_id: str = Field(min_length=1, max_length=80)
-    first_name: str | None = Field(default=None, max_length=160)
-    surname: str | None = Field(default=None, max_length=160)
+    first_name: RequiredName
+    surname: RequiredName
     en_name: str | None = Field(default=None, max_length=300)
     chinese_name: str | None = Field(default=None, max_length=160)
-    department: str | None = Field(default=None, max_length=160)
-    position: str | None = Field(default=None, max_length=200)
-    start_date: date | None = None
+    department: RequiredName
+    position: RequiredPosition
+    start_date: date
     is_active: bool = True
 
 
 class EmployeeUpdate(ApiSchema):
-    first_name: str | None = Field(default=None, max_length=160)
-    surname: str | None = Field(default=None, max_length=160)
+    first_name: RequiredName
+    surname: RequiredName
     en_name: str | None = Field(default=None, max_length=300)
     chinese_name: str | None = Field(default=None, max_length=160)
-    department: str | None = Field(default=None, max_length=160)
-    position: str | None = Field(default=None, max_length=200)
-    start_date: date | None = None
+    department: RequiredName
+    position: RequiredPosition
+    start_date: date
     is_active: bool = True
 
 

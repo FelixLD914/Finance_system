@@ -39,14 +39,14 @@ EMPLOYEE_EXAMPLE: dict[str, str] = {
 
 EMPLOYEE_NOTES: tuple[tuple[str, str], ...] = (
     ("emp_id", "必填。员工工号（系统全局唯一）。"),
-    ("first_name", "选填。英文名 / 名字。"),
-    ("surname", "选填。英文姓氏。"),
-    ("en_name", "选填。全名（英文）。"),
+    ("first_name", "导入可空，但开预支单必填。英文名 / 名字。"),
+    ("surname", "导入可空，但开预支单必填。英文姓氏。"),
+    ("en_name", "选填。留空时自动取「名 + 姓」拼接。"),
     ("chinese_name", "选填。中文名。"),
-    ("department", "选填。所属部门。"),
-    ("position", "选填。职位/岗位名称。"),
-    ("start_date", "选填。入职日期，格式 YYYY-MM-DD。"),
-    ("is_active", "选填。是否在职（'是'/'否'，默认'是'）。"),
+    ("department", "导入可空，但开预支单必填。所属部门。"),
+    ("position", "导入可空，但开预支单必填。职位/岗位名称。"),
+    ("start_date", "导入可空，但开预支单必填。格式 YYYY-MM-DD，认不出的写法会整单退回。"),
+    ("is_active", "选填。是否在职（'是'/'否'，留空默认'是'；填'否'会同步为离职）。"),
 )
 
 
@@ -92,29 +92,46 @@ def build_employee_import_template_workbook() -> bytes:
     return buffer.getvalue()
 
 
-def _parse_date(value: Any) -> date | None:
-    if value is None or value == "":
+DATE_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%Y.%m.%d")
+TRUTHY = ("true", "1", "是", "y", "yes", "active", "在职")
+FALSY = ("false", "0", "否", "n", "no", "inactive", "离职")
+
+
+# 认不出来的值必须报错，不能静默落成 None/False。
+# 静默的代价出现在别处：入职日期悄悄变空，导入照样报"成功"，
+# 等到开预支单时才以"入职日期缺失或无法解析"炸出来——那时人已经不在导入这一步了。
+def _parse_date(value: Any, row_idx: int) -> date | None:
+    if value is None or str(value).strip() == "":
         return None
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
         return value
     val_str = str(value).strip()
-    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%d/%m/%Y", "%Y.%m.%d"):
+    for fmt in DATE_FORMATS:
         try:
             return datetime.strptime(val_str, fmt).date()
         except ValueError:
             pass
-    return None
+    raise SalaryAdvanceStateError(
+        f"第 {row_idx} 行入职日期 '{val_str}' 无法识别，"
+        f"支持的格式：{'、'.join(DATE_FORMATS)}"
+    )
 
 
-def _parse_bool(value: Any) -> bool:
-    if value is None or value == "":
+def _parse_bool(value: Any, row_idx: int) -> bool:
+    if value is None or str(value).strip() == "":
         return True
     if isinstance(value, bool):
         return value
     val_str = str(value).strip().lower()
-    return val_str in ("true", "1", "是", "y", "yes", "active", "在职")
+    if val_str in TRUTHY:
+        return True
+    if val_str in FALSY:
+        return False
+    raise SalaryAdvanceStateError(
+        f"第 {row_idx} 行是否在职 '{value}' 无法识别，请填 '是' 或 '否'"
+    )
 
 
 def parse_employee_sheet(content: bytes) -> list[dict[str, Any]]:
@@ -161,14 +178,14 @@ def parse_employee_sheet(content: bytes) -> list[dict[str, Any]]:
             if "start_date" in mapping and mapping["start_date"] < len(row)
             else None
         )
-        start_date = _parse_date(raw_start_date)
+        start_date = _parse_date(raw_start_date, row_idx)
 
         raw_is_active = (
             row[mapping["is_active"]]
             if "is_active" in mapping and mapping["is_active"] < len(row)
             else None
         )
-        is_active = _parse_bool(raw_is_active)
+        is_active = _parse_bool(raw_is_active, row_idx)
 
         parsed_rows.append(
             {

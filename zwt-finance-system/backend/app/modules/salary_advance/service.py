@@ -708,11 +708,20 @@ class SalaryAdvanceService:
             )
 
         employee = SalaryAdvanceEmployee(
+            id=uuid.uuid4(),
             **payload.model_dump(by_alias=False),
             created_by_name=self.actor_name,
             updated_by_name=self.actor_name,
         )
         self.session.add(employee)
+        self.session.add(
+            self._event(
+                "employee",
+                employee.id,
+                "created",
+                after_data=self._employee_snapshot(employee),
+            )
+        )
         await self.session.commit()
         await self.session.refresh(employee)
         return employee
@@ -723,18 +732,38 @@ class SalaryAdvanceService:
         payload: EmployeeUpdate,
     ) -> SalaryAdvanceEmployee:
         employee = await self._load_employee(employee_id, for_update=True)
+        before = self._employee_snapshot(employee)
         updates = payload.model_dump(by_alias=False, exclude_unset=True)
         for key, value in updates.items():
             setattr(employee, key, value)
         employee.updated_by_name = self.actor_name
+        self.session.add(
+            self._event(
+                "employee",
+                employee.id,
+                "updated",
+                before_data=before,
+                after_data=self._employee_snapshot(employee),
+            )
+        )
         await self.session.commit()
         await self.session.refresh(employee)
         return employee
 
     async def delete_employee(self, employee_id: uuid.UUID) -> SalaryAdvanceEmployee:
         employee = await self._load_employee(employee_id, for_update=True)
+        before = self._employee_snapshot(employee)
         employee.deleted_at = datetime.now(UTC)
         employee.deleted_by_name = self.actor_name
+        self.session.add(
+            self._event(
+                "employee",
+                employee.id,
+                "deleted",
+                before_data=before,
+                after_data=self._employee_snapshot(employee),
+            )
+        )
         await self.session.commit()
         await self.session.refresh(employee)
         return employee
@@ -754,12 +783,37 @@ class SalaryAdvanceService:
                 f"empId '{employee.emp_id}' is already used by another active employee; "
                 f"delete or change that one before restoring this record"
             )
+        before = self._employee_snapshot(employee)
         employee.deleted_at = None
         employee.deleted_by_name = None
         employee.updated_by_name = self.actor_name
+        self.session.add(
+            self._event(
+                "employee",
+                employee.id,
+                "restored",
+                before_data=before,
+                after_data=self._employee_snapshot(employee),
+            )
+        )
         await self.session.commit()
         await self.session.refresh(employee)
         return employee
+
+    @staticmethod
+    def _employee_snapshot(employee: SalaryAdvanceEmployee) -> dict[str, Any]:
+        return {
+            "empId": employee.emp_id,
+            "firstName": employee.first_name,
+            "surname": employee.surname,
+            "enName": employee.en_name,
+            "chineseName": employee.chinese_name,
+            "department": employee.department,
+            "position": employee.position,
+            "startDate": employee.start_date.isoformat() if employee.start_date else None,
+            "isActive": employee.is_active,
+            "deletedAt": employee.deleted_at.isoformat() if employee.deleted_at else None,
+        }
 
     async def count_employee_references(self, employee_id: uuid.UUID) -> int:
         employee = await self._load_employee(employee_id, include_deleted=True)
@@ -788,19 +842,39 @@ class SalaryAdvanceService:
             )
             if employee is None:
                 employee = SalaryAdvanceEmployee(
+                    id=uuid.uuid4(),
                     **row,
                     source_file_name=source_file_name,
                     created_by_name=self.actor_name,
                     updated_by_name=self.actor_name,
                 )
                 self.session.add(employee)
+                self.session.add(
+                    self._event(
+                        "employee",
+                        employee.id,
+                        "imported_create",
+                        after_data=self._employee_snapshot(employee),
+                        note=source_file_name,
+                    )
+                )
                 result.created += 1
             else:
+                before = self._employee_snapshot(employee)
                 for key, val in row.items():
                     setattr(employee, key, val)
-                employee.is_active = True
                 employee.source_file_name = source_file_name
                 employee.updated_by_name = self.actor_name
+                self.session.add(
+                    self._event(
+                        "employee",
+                        employee.id,
+                        "imported_update",
+                        before_data=before,
+                        after_data=self._employee_snapshot(employee),
+                        note=source_file_name,
+                    )
+                )
                 result.updated += 1
         await self.session.commit()
         return result
