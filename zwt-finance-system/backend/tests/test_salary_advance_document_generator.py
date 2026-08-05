@@ -124,6 +124,91 @@ def test_renders_approved_xlsx_without_applicant_signature(tmp_path: Path) -> No
     rendered.close()
 
 
+def _stamped_rects(pdf_path: Path) -> list[tuple[float, float, float, float]]:
+    """量出这一页上每张贴图的实际矩形 (x, y, 宽, 高)，单位 PDF 点。
+
+    量成品而不是复算一遍公式：复算只能证明"我抄对了自己写的算式"。
+    底版右上角本身有一张 logo 贴图，按 y 排除掉。
+    """
+    import pdfplumber
+
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+        return sorted(
+            (
+                (image["x0"], image["y0"], image["x1"] - image["x0"], image["y1"] - image["y0"])
+                for image in page.images
+                if image["y0"] < 500  # 页眉 logo 在 y≈734，两个签名位都在 400 以下
+            ),
+            key=lambda rect: -rect[1],
+        )
+
+
+@pytest.mark.parametrize("scale", [60, 100, 150])
+def test_signature_scale_shrinks_around_the_box_centre(tmp_path: Path, scale: int) -> None:
+    """签名库维护页存的比例必须真的改变工资预支单上的盖章尺寸，且围绕框中心缩放。
+
+    两点各钉一条：
+    1. **比例真的生效**——加这个参数之前 _draw_signature 根本没有 scale 形参，
+       维护页照样提示"已应用至系统开票"，出票尺寸一动不动。
+    2. **缩放围绕签名框中心**——与 wht / tax_invoice 两处 drawImage 前的算式
+       逐字一致，也与预览的 stampRectPt 一致。若改成钉住左下角，滑到 60% 时
+       预览与出票会差半个框，而用户正是照着预览在调。
+    """
+    import dataclasses
+
+    assets = Path(__file__).parents[1] / "app" / "assets"
+    output = tmp_path / f"salary-advance-{scale}.pdf"
+
+    export_pdf_from_template(
+        assets / "templates" / "Salary-Advance-Template.pdf",
+        output,
+        dataclasses.replace(
+            _snapshot(tmp_path), finance_scale_percent=scale, md_scale_percent=scale
+        ),
+        get_settings().salary_advance_font_path,
+        xlsx_template_path=assets / "templates" / "Salary-Advance-Template.xlsx",
+    )
+
+    rects = _stamped_rects(output)
+    assert len(rects) == 2, f"应当只有财务与董事两个签名位，实测 {rects}"
+    for rect, role in zip(rects, ("finance", "md"), strict=True):
+        box_x, box_y, box_w, box_h = pdf_layout.SIGNATURE_BOXES[role]
+        x, y, width, height = rect
+        # 等比适配后总有一个方向撑满缩放后的框，另一个方向留白并居中。
+        assert width <= box_w * scale / 100 + 0.01, role
+        assert height <= box_h * scale / 100 + 0.01, role
+        assert max(width / (box_w * scale / 100), height / (box_h * scale / 100)) == pytest.approx(
+            1.0, abs=0.01
+        ), f"{role} 没有撑满缩放后的签名框：{rect}"
+        # 中心不动才是"围绕框中心缩放"。
+        assert x + width / 2 == pytest.approx(box_x + box_w / 2, abs=0.01), role
+        assert y + height / 2 == pytest.approx(box_y + box_h / 2, abs=0.01), role
+
+
+def test_signature_scale_is_independent_per_position(tmp_path: Path) -> None:
+    """财务与董事常是两个人的章，各调各的尺寸；合成一个值就是让一个跟着另一个走。"""
+    import dataclasses
+
+    assets = Path(__file__).parents[1] / "app" / "assets"
+    output = tmp_path / "salary-advance-mixed.pdf"
+
+    export_pdf_from_template(
+        assets / "templates" / "Salary-Advance-Template.pdf",
+        output,
+        dataclasses.replace(
+            _snapshot(tmp_path), finance_scale_percent=60, md_scale_percent=150
+        ),
+        get_settings().salary_advance_font_path,
+        xlsx_template_path=assets / "templates" / "Salary-Advance-Template.xlsx",
+    )
+
+    finance_rect, md_rect = _stamped_rects(output)
+    assert md_rect[2] > finance_rect[2] * 2, (
+        f"两个位的比例没有各自生效：财务 {finance_rect}，董事 {md_rect}"
+    )
+
+
 def test_generates_single_page_pdf_without_office(tmp_path: Path) -> None:
     assets = Path(__file__).parents[1] / "app" / "assets"
     output = tmp_path / "salary-advance.pdf"

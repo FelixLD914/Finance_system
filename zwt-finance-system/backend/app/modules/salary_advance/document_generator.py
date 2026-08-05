@@ -96,6 +96,12 @@ class GenerationSnapshot:
     md_signature_path: Path
     finance_signature_version: dict[str, Any]
     md_signature_version: dict[str, Any]
+    # 签名库维护页里那个"确认应用签名尺寸到系统开票"存下来的比例
+    # (signature_assets.scale_percent)。两个签名位可以是两张不同的签名资产，
+    # 各带各的比例，所以分开传，不能合成一个。
+    # 默认 100 = 原尺寸：老调用方不传时行为与加这个参数之前完全一致。
+    finance_scale_percent: int = 100
+    md_scale_percent: int = 100
 
 
 def sha256_path(path: Path) -> str:
@@ -157,10 +163,22 @@ def _validate_signature(path: Path) -> None:
         raise SalaryAdvanceDocumentError(f"签名图片无效：{path.name}") from exc
 
 
-def _add_workbook_signature(worksheet: Any, path: Path, anchor: str) -> None:
+def _add_workbook_signature(
+    worksheet: Any,
+    path: Path,
+    anchor: str,
+    scale_percent: int = 100,
+) -> None:
+    """xlsx 那一份也认同一个 scale_percent。
+
+    xlsx 与 pdf 是同一张单据的两种产出，尺寸各走各的会让同一条记录导出两个样子。
+    110x35 是签名框在 Excel 里的可用区域（约等于 pdf_layout 的 90x28 点），
+    scale_percent 在这个"贴合尺寸"之上再乘一次，和 PDF 侧的含义一致。
+    """
     _validate_signature(path)
     image = OpenpyxlImage(str(path))
-    scale = min(110 / image.width, 35 / image.height)
+    ratio = (scale_percent or 100) / 100.0
+    scale = min(110 / image.width, 35 / image.height) * ratio
     image.width = max(1, int(image.width * scale))
     image.height = max(1, int(image.height * scale))
     worksheet.add_image(image, anchor)
@@ -207,8 +225,12 @@ def render_salary_advance_workbook(
         approval = normalized.get("approval_status")
         form["B42"] = "☑" if approval == "Approve" else "☐"
         form["H42"] = "☑" if approval == "Not approved" else "☐"
-        _add_workbook_signature(form, snapshot.finance_signature_path, "H34")
-        _add_workbook_signature(form, snapshot.md_signature_path, "H44")
+        _add_workbook_signature(
+            form, snapshot.finance_signature_path, "H34", snapshot.finance_scale_percent
+        )
+        _add_workbook_signature(
+            form, snapshot.md_signature_path, "H44", snapshot.md_scale_percent
+        )
 
         form.page_setup.orientation = "portrait"
         form.page_setup.paperSize = form.PAPERSIZE_A4
@@ -346,17 +368,32 @@ def _fit_lines(
     return fitted_size, lines
 
 
-def _draw_signature(canvas: Any, path: Path, box: tuple[float, float, float, float]) -> None:
+def _draw_signature(
+    canvas: Any,
+    path: Path,
+    box: tuple[float, float, float, float],
+    scale_percent: int = 100,
+) -> None:
+    """在签名框内套印签名，按 scale_percent **围绕框中心**缩放。
+
+    缩放口径与 wht / tax_invoice 两处 drawImage 逐字一致：签名库维护页的预览
+    就是照这个算式画的，三处但凡有一处不同，用户照着预览调出来的比例在那张
+    单据上就是错的。加这个参数之前，工资预支单是这三种单据里唯一不认
+    scale_percent 的——维护页照样弹"已成功应用至系统开票"，出票尺寸纹丝不动。
+    """
     from reportlab.lib.utils import ImageReader
 
     _validate_signature(path)
     x, y, width, height = box
+    ratio = (scale_percent or 100) / 100.0
+    scaled_w = width * ratio
+    scaled_h = height * ratio
     canvas.drawImage(
         ImageReader(str(path)),
-        x,
-        y,
-        width=width,
-        height=height,
+        x + (width - scaled_w) / 2.0,
+        y + (height - scaled_h) / 2.0,
+        width=scaled_w,
+        height=scaled_h,
         preserveAspectRatio=True,
         anchor="c",
         mask="auto",
@@ -466,11 +503,13 @@ def export_pdf_from_template(
         overlay,
         snapshot.finance_signature_path,
         pdf_layout.SIGNATURE_BOXES["finance"],
+        snapshot.finance_scale_percent,
     )
     _draw_signature(
         overlay,
         snapshot.md_signature_path,
         pdf_layout.SIGNATURE_BOXES["md"],
+        snapshot.md_scale_percent,
     )
     overlay.save()
     buffer.seek(0)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CheckOutlined,
   EyeOutlined,
@@ -6,9 +6,10 @@ import {
   FileTextOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined,
+  WarningOutlined,
   ZoomInOutlined,
 } from "@ant-design/icons";
-import { Button, InputNumber, Modal, Segmented, Slider, Space, Tag } from "antd";
+import { Alert, Button, InputNumber, Modal, Segmented, Slider, Space, Spin, Tag } from "antd";
 
 import type { Translate } from "../../i18n";
 import type { SignatureAsset, SignatureUsage } from "../wht/types";
@@ -30,80 +31,113 @@ const usageColors: Record<SignatureUsage, string> = {
 };
 
 /**
- * 对应真实系统 PDF 开票模板底图的参数配置 (A4 页面比例 595.25 x 841.85 pt)
- * 结合 backend/app/modules 各自的 SIGNATURE_BOX 坐标进行百分比定位，确保预览效果与后端 ReportLab 开票生成的 PDF 完全一致。
+ * 三份底版的 mediabox 都是 A4 且原点在 (0,0)、无 CropBox 偏移、无 /Rotate
+ * （2026-08-05 用 pypdf 实测三份 templates/*.pdf 确认）。底图 PNG 是整页
+ * 150 DPI 渲染（1241x1754），所以「PDF 点 / 页面尺寸」就是底图上的百分比位置。
  */
-const TEMPLATE_CONFIGS: Record<
-  SignatureUsage,
-  {
-    bgImage: string;
-    title: string;
-    // PDF 签名框在底板上的百分比坐标与基准宽高 (%)
-    sigBox: {
-      leftPercent: number; // 签名左侧在底图中的 X 轴百分比
-      bottomPercent: number; // 签名底部在底图中的 Y 轴 (从底部算) 百分比
-      widthPercent: number; // 基准 100% 时的宽度百分比
-      heightPercent: number; // 基准 100% 时的高度百分比
-    };
-  }
-> = {
+const PAGE_WIDTH_PT = 595.25;
+const PAGE_HEIGHT_PT = 841.85;
+
+interface SignatureBoxPt {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 签名框，单位一律是 **PDF 点**，数值逐字抄自后端，不在这里换算成百分比。
+ *
+ * 以前这张表存的是相对底图的百分比。同一份坐标存在两个地方、两种单位，就一定会
+ * 漂——2026-08-04 工资预支底版重制四轮，leftPercent 跟着更新了、bottomPercent 忘了，
+ * 预览比实际出票低了 12.9pt，而两边都不报错。改成和后端同一个单位之后，
+ * tests/test_signature_preview_alignment.py 是逐字比对而不是"换算完再比"，
+ * 抄错一位就是一条红测试。
+ *
+ * 改这张表 = 改后端坐标，两边必须同一次提交。
+ */
+const SIGNATURE_BOXES_PT: Record<SignatureUsage, SignatureBoxPt> = {
+  // backend/app/modules/wht/document_generator.py :: PDF_SIGNATURE_BOX
+  wht: { x: 201.5, y: 83.0, width: 95.0, height: 42.0 },
+  // backend/app/modules/tax_invoice/document_generator.py :: SIGNATURE_BOX
+  tax_inv: { x: 398.0, y: 112.0, width: 150.0, height: 46.0 },
+  // backend/app/modules/salary_advance/pdf_layout.py :: SIGNATURE_BOXES["finance"]
+  salary_advance: { x: 294.88, y: 304.91, width: 90.0, height: 28.0 },
+  salary_advance_finance: { x: 294.88, y: 304.91, width: 90.0, height: 28.0 },
+  // backend/app/modules/salary_advance/pdf_layout.py :: SIGNATURE_BOXES["md"]
+  salary_advance_md: { x: 294.82, y: 201.96, width: 90.0, height: 28.0 },
+};
+
+type TemplateTab = "wht" | "tax_inv" | "salary_advance";
+
+interface TemplateConfig {
+  bgImage: string;
+  title: string;
+  /** 这张底版上的签名位。工资预支单一页两个位（财务负责人 + 董事/总经理）。 */
+  stamps: { usage: SignatureUsage; label: string }[];
+  /**
+   * 出票前是否先跑 build_blue_signature——把图裁到墨迹外接框再转成蓝色墨水。
+   * WHT / TAX INV 跑（wht.document_generator.build_blue_signature），
+   * 工资预支不跑（salary_advance.document_generator._draw_signature 直接用原图），
+   * 所以同一张带留白的签名图，在工资预支单上印出来会明显更小——这是真实差异，
+   * 预览必须照着演，不能三个单据都画成一样。
+   */
+  inkPrepared: boolean;
+}
+
+const TEMPLATE_CONFIGS: Record<TemplateTab, TemplateConfig> = {
   wht: {
     bgImage: "/wht-template-bg.png",
     title: "WHT 扣缴凭证 (P.N.D.53/3 正式文件底板)",
-    sigBox: {
-      leftPercent: 33.85,
-      bottomPercent: 9.86,
-      widthPercent: 15.96,
-      heightPercent: 4.99,
-    },
+    stamps: [{ usage: "wht", label: "ผู้จ่ายเงิน 付款方签名" }],
+    inkPrepared: true,
   },
   tax_inv: {
     bgImage: "/tax-inv-template-bg.png",
     title: "TAX INV 增值税发票 (正式文件底板)",
-    sigBox: {
-      leftPercent: 66.86,
-      bottomPercent: 13.30,
-      widthPercent: 25.20,
-      heightPercent: 5.46,
-    },
+    stamps: [{ usage: "tax_inv", label: "ผู้มีอำนาจลงนาม 授权签字人" }],
+    inkPrepared: true,
   },
-  // 工资预支底版在 2026-08-04 重制了四轮（缩左边距、抬首行、重并 H37:J37）。
-  // leftPercent 当时跟着更新了，bottomPercent 没有，于是预览里的签名比实际出票
-  // 低了约 12.9pt（4.5mm）。现按 pdf_layout.SIGNATURE_BOXES 重算：
-  //   finance (294.88, 304.91, 90, 28) -> 304.91/841.85 = 36.219%
-  //   md      (294.82, 201.96, 90, 28) -> 201.96/841.85 = 23.990%
-  // tests/test_signature_preview_alignment.py 会把这四组数钉在后端坐标上。
   salary_advance: {
     bgImage: "/salary-advance-template-bg.png",
-    title: "工资预支单凭证 (财务负责人签名位置)",
-    sigBox: {
-      leftPercent: 49.54,
-      bottomPercent: 36.22,
-      widthPercent: 15.12,
-      heightPercent: 3.33,
-    },
-  },
-  salary_advance_finance: {
-    bgImage: "/salary-advance-template-bg.png",
-    title: "工资预支单凭证 (财务负责人签名位置)",
-    sigBox: {
-      leftPercent: 49.54,
-      bottomPercent: 36.22,
-      widthPercent: 15.12,
-      heightPercent: 3.33,
-    },
-  },
-  salary_advance_md: {
-    bgImage: "/salary-advance-template-bg.png",
-    title: "工资预支单凭证 (董事/总经理签名位置)",
-    sigBox: {
-      leftPercent: 49.53,
-      bottomPercent: 23.99,
-      widthPercent: 15.12,
-      heightPercent: 3.33,
-    },
+    title: "工资预支单凭证 (财务负责人 + 董事/总经理签名位置)",
+    stamps: [
+      { usage: "salary_advance_finance", label: "财务负责人 Finance Director" },
+      { usage: "salary_advance_md", label: "董事/总经理 Managing Director" },
+    ],
+    inkPrepared: false,
   },
 };
+
+/**
+ * 按缩放比算出这一次实际盖章的矩形，**围绕签名框中心缩放**。
+ *
+ * 这一段是后端三处 drawImage 之前那四行的逐字翻译：
+ *   scaled_x = x + (width - width * ratio) / 2
+ * 以前预览是钉住左下角只改宽高，滑块一动落点就跟出票分家：WHT 拉到 60% 时
+ * 预览的签名比实际出票左 19pt、低 8.4pt，而调的人正是照着预览在调。
+ */
+export function stampRectPt(box: SignatureBoxPt, scalePercent: number): SignatureBoxPt {
+  const ratio = (scalePercent || 100) / 100;
+  const width = box.width * ratio;
+  const height = box.height * ratio;
+  return {
+    x: box.x + (box.width - width) / 2,
+    y: box.y + (box.height - height) / 2,
+    width,
+    height,
+  };
+}
+
+/** PDF 点 -> 底图容器上的 CSS 百分比。容器宽高就是整页，所以是纯除法。 */
+function boxToCssPercent(rect: SignatureBoxPt) {
+  return {
+    left: `${(rect.x / PAGE_WIDTH_PT) * 100}%`,
+    bottom: `${(rect.y / PAGE_HEIGHT_PT) * 100}%`,
+    width: `${(rect.width / PAGE_WIDTH_PT) * 100}%`,
+    height: `${(rect.height / PAGE_HEIGHT_PT) * 100}%`,
+  };
+}
 
 /**
  * 生成默认的演示签名 SVG Data URL (当无法读取服务端真实图片时作为优雅降级)
@@ -118,6 +152,184 @@ function createDemoSignatureDataUrl(name: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+/**
+ * 扫描用的最长边上限。逐像素扫描跑在主线程上，签名上传只校验格式不校验尺寸
+ * （wht.document_generator.validate_signature_image），手机拍的一张 4000x3000
+ * 就是 1200 万次循环，弹窗会肉眼可见地卡住。
+ *
+ * 缩到这个尺寸再扫是安全的：决定落点的只有**墨迹外接框的长宽比**（外层用
+ * object-fit: contain 等比适配），等比缩放不改变它；预览里这张图最宽也就 480px，
+ * 缩到 1200 连观感都不掉。缩放只影响预览，不影响出票——出票是后端按原图算的。
+ */
+const INK_SCAN_MAX_EDGE = 1200;
+
+/**
+ * 浏览器里复刻 wht.document_generator.build_blue_signature：
+ * 剔除近白像素与扫描件下划线、转成蓝色墨水、裁到墨迹外接框（留 2px）。
+ *
+ * 为什么非做不可：出票时进 drawImage 的是**裁过的**图，预览如果直接贴原图，
+ * 一张四周有留白的签名（导出的 PNG 基本都是这样）在预览里只占框的一小块，
+ * 出票却是撑满整框。用户照着预览把比例调大，实际印出来就大得离谱。
+ */
+function prepareBlueInk(image: HTMLImageElement): string {
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  if (!naturalWidth || !naturalHeight) {
+    throw new Error("签名图片尺寸为 0，无法计算墨迹范围");
+  }
+  const shrink = Math.min(
+    1,
+    INK_SCAN_MAX_EDGE / Math.max(naturalWidth, naturalHeight),
+  );
+  const width = Math.max(1, Math.round(naturalWidth * shrink));
+  const height = Math.max(1, Math.round(naturalHeight * shrink));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("当前浏览器不支持 canvas 2d，无法复刻出票时的裁剪");
+  }
+  context.drawImage(image, 0, 0, width, height);
+  const source = context.getImageData(0, 0, width, height);
+  const pixels = source.data;
+
+  const isInk = (index: number): boolean => {
+    const offset = index * 4;
+    return (
+      pixels[offset + 3] > 0 &&
+      !(pixels[offset] >= 245 && pixels[offset + 1] >= 245 && pixels[offset + 2] >= 245)
+    );
+  };
+
+  // 扫描件常见的签名下划线：横跨至少 45% 宽度的连续墨迹整段剔除。
+  const minimumRuleWidth = Math.max(24, Math.floor(width * 0.45));
+  const removed = new Set<number>();
+  for (let y = 0; y < height; y += 1) {
+    const rowStart = y * width;
+    let runStart: number | null = null;
+    for (let x = 0; x <= width; x += 1) {
+      const occupied = x < width && isInk(rowStart + x);
+      if (occupied && runStart === null) {
+        runStart = x;
+      }
+      if (occupied || runStart === null) {
+        continue;
+      }
+      if (x - runStart >= minimumRuleWidth) {
+        for (let cursor = rowStart + runStart; cursor < rowStart + x; cursor += 1) {
+          removed.add(cursor);
+        }
+      }
+      runStart = null;
+    }
+  }
+
+  let left = width;
+  let top = height;
+  let right = 0;
+  let bottom = 0;
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 4;
+    if (removed.has(index) || !isInk(index)) {
+      pixels[offset + 3] = 0;
+      continue;
+    }
+    const luminance = Math.floor(
+      (299 * pixels[offset] + 587 * pixels[offset + 1] + 114 * pixels[offset + 2]) / 1000,
+    );
+    const strength = 255 - luminance;
+    if (strength < 14) {
+      pixels[offset + 3] = 0;
+      continue;
+    }
+    pixels[offset] = 20;
+    pixels[offset + 1] = 70;
+    pixels[offset + 2] = Math.min(255, 210 + Math.floor((strength / 255) * 25));
+    pixels[offset + 3] = Math.max(pixels[offset + 3], Math.min(255, Math.floor(strength * 1.7)));
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (x < left) left = x;
+    if (x >= right) right = x + 1;
+    if (y < top) top = y;
+    if (y >= bottom) bottom = y + 1;
+  }
+  if (right <= left || bottom <= top) {
+    throw new Error("这张签名图片里没有可用的墨迹，出票时同样会被拒绝");
+  }
+  context.putImageData(source, 0, 0);
+
+  const padding = 2;
+  const cropLeft = Math.max(0, left - padding);
+  const cropTop = Math.max(0, top - padding);
+  const cropRight = Math.min(width, right + padding);
+  const cropBottom = Math.min(height, bottom + padding);
+  const cropped = document.createElement("canvas");
+  cropped.width = cropRight - cropLeft;
+  cropped.height = cropBottom - cropTop;
+  const croppedContext = cropped.getContext("2d");
+  if (!croppedContext) {
+    throw new Error("当前浏览器不支持 canvas 2d，无法复刻出票时的裁剪");
+  }
+  croppedContext.drawImage(
+    canvas,
+    cropLeft,
+    cropTop,
+    cropped.width,
+    cropped.height,
+    0,
+    0,
+    cropped.width,
+    cropped.height,
+  );
+  return cropped.toDataURL("image/png");
+}
+
+type InkState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; dataUrl: string }
+  | { status: "failed"; reason: string };
+
+/**
+ * 预加载并按出票口径处理签名图。失败不静默——预览是用户唯一能看见落位的地方，
+ * 悄悄退回原图会让他照着一张假图去调比例。
+ */
+function usePreparedInk(src: string | null, enabled: boolean): InkState {
+  const [state, setState] = useState<InkState>({ status: "idle" });
+
+  useEffect(() => {
+    if (!src || !enabled) {
+      setState({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    setState({ status: "loading" });
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      try {
+        setState({ status: "ready", dataUrl: prepareBlueInk(image) });
+      } catch (error) {
+        setState({
+          status: "failed",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    };
+    image.onerror = () => {
+      if (cancelled) return;
+      setState({ status: "failed", reason: "签名图片加载失败，无法计算出票时的墨迹范围" });
+    };
+    image.src = src;
+    return () => {
+      cancelled = true;
+    };
+  }, [src, enabled]);
+
+  return state;
+}
+
 export function SignaturePreviewModal({
   signature,
   open,
@@ -125,7 +337,7 @@ export function SignaturePreviewModal({
   onClose,
   onSaveScale,
 }: SignaturePreviewModalProps) {
-  const [activeTemplate, setActiveTemplate] = useState<SignatureUsage>("wht");
+  const [activeTemplate, setActiveTemplate] = useState<TemplateTab>("wht");
   const [scalePercent, setScalePercent] = useState<number>(100);
   const [saving, setSaving] = useState<boolean>(false);
 
@@ -135,45 +347,54 @@ export function SignaturePreviewModal({
     }
   }, [signature, open]);
 
+  const isDemo =
+    import.meta.env.VITE_USE_MOCK_API === "true" || Boolean(signature?.sha256.startsWith("demo"));
+  const signatureSrc = signature
+    ? isDemo
+      ? createDemoSignatureDataUrl(signature.name)
+      : `/api/v1/wht/signatures/${signature.id}/content`
+    : null;
+
+  // 蓝笔化+裁剪只跟签名图有关，与当前看哪张底版、拖到多少比例无关，算一次即可。
+  const ink = usePreparedInk(signatureSrc, open);
+
+  const templateOptions = useMemo(
+    () => [
+      {
+        label: (
+          <Space size={4}>
+            <FileProtectOutlined />
+            <span>WHT 扣缴凭证 (P.N.D.53/3)</span>
+          </Space>
+        ),
+        value: "wht",
+      },
+      {
+        label: (
+          <Space size={4}>
+            <FileTextOutlined />
+            <span>TAX INV 增值税发票</span>
+          </Space>
+        ),
+        value: "tax_inv",
+      },
+      {
+        label: (
+          <Space size={4}>
+            <SafetyCertificateOutlined />
+            <span>工资预支单凭证</span>
+          </Space>
+        ),
+        value: "salary_advance",
+      },
+    ],
+    [],
+  );
+
   if (!signature) return null;
 
-  const isDemo = import.meta.env.VITE_USE_MOCK_API === "true" || signature.sha256.startsWith("demo");
-  const signatureSrc = isDemo
-    ? createDemoSignatureDataUrl(signature.name)
-    : `/api/v1/wht/signatures/${signature.id}/content`;
-
-  const templateOptions = [
-    {
-      label: (
-        <Space size={4}>
-          <FileProtectOutlined />
-          <span>WHT 扣缴凭证 (P.N.D.53/3)</span>
-        </Space>
-      ),
-      value: "wht",
-    },
-    {
-      label: (
-        <Space size={4}>
-          <FileTextOutlined />
-          <span>TAX INV 增值税发票</span>
-        </Space>
-      ),
-      value: "tax_inv",
-    },
-    {
-      label: (
-        <Space size={4}>
-          <SafetyCertificateOutlined />
-          <span>工资预支单凭证</span>
-        </Space>
-      ),
-      value: "salary_advance",
-    },
-  ];
-
   const handleConfirmSave = async () => {
-    if (!signature || !onSaveScale) {
+    if (!onSaveScale) {
       onClose();
       return;
     }
@@ -187,7 +408,12 @@ export function SignaturePreviewModal({
   };
 
   const currentCfg = TEMPLATE_CONFIGS[activeTemplate];
-  const scaleRatio = scalePercent / 100;
+  // 出票时进 drawImage 的图：WHT/TAX INV 是裁过的蓝墨，工资预支是原图。
+  const stampSrc = currentCfg.inkPrepared
+    ? ink.status === "ready"
+      ? ink.dataUrl
+      : null
+    : signatureSrc;
 
   return (
     <Modal
@@ -247,11 +473,13 @@ export function SignaturePreviewModal({
           </div>
 
           <div className="signature-image-wrapper">
-            <img
-              alt={signature.name}
-              className="source-signature-img"
-              src={signatureSrc}
-            />
+            {signatureSrc && (
+              <img
+                alt={signature.name}
+                className="source-signature-img"
+                src={signatureSrc}
+              />
+            )}
           </div>
 
           {/* 交互式签名大小调节器 */}
@@ -294,6 +522,7 @@ export function SignaturePreviewModal({
             </div>
             <small className="scale-hint">
               右侧使用系统开票正式文件底板（如 WHT/TAX INV/工资单），拖动滑块实时定位缩放签名套印效果。
+              缩放围绕签名框中心进行，与后端 ReportLab 出票口径一致。
             </small>
           </div>
 
@@ -327,9 +556,20 @@ export function SignaturePreviewModal({
               className="template-segmented"
               options={templateOptions}
               value={activeTemplate}
-              onChange={(val) => setActiveTemplate(val as SignatureUsage)}
+              onChange={(val) => setActiveTemplate(val as TemplateTab)}
             />
           </div>
+
+          {currentCfg.inkPrepared && ink.status === "failed" && (
+            <Alert
+              className="signature-preview-alert"
+              description={`${ink.reason}。这里显示的是未经处理的原图位置，与实际出票会有出入，请勿据此调整比例。`}
+              icon={<WarningOutlined />}
+              message="无法按出票口径处理签名图"
+              showIcon
+              type="error"
+            />
+          )}
 
           {/* 真实系统 PDF 模板底图 + 精确 ReportLab 坐标叠加渲染 */}
           <div className="pdf-template-underlay-viewport">
@@ -354,7 +594,7 @@ export function SignaturePreviewModal({
                   <span className="pdf-field val-total-amount" style={{ left: "78%", top: "73.2%" }}>150,000.00</span>
                   <span className="pdf-field val-total-tax" style={{ left: "91%", top: "73.2%" }}>4,500.00</span>
                   <span className="pdf-field val-bahttext" style={{ left: "45%", top: "76.5%" }}>-- หนึ่งแสนห้าหมื่นบาทถ้วน --</span>
-                  <span className="pdf-field val-date-thai" style={{ left: "38%", top: "90.8%" }}>3 กรกฎาคม 2569</span>
+                  <span className="pdf-field val-date-thai" style={{ left: "39%", top: "90.8%" }}>3 กรกฎาคม 2569</span>
                 </div>
               )}
 
@@ -381,20 +621,37 @@ export function SignaturePreviewModal({
                 </div>
               )}
 
-              {/* 核心套印签名图层：基于 ReportLab 官方坐标百分比与动态 scalePercent 精准定位 */}
-              <div
-                className="exact-signature-overlay-box"
-                style={{
-                  left: `${currentCfg.sigBox.leftPercent}%`,
-                  bottom: `${currentCfg.sigBox.bottomPercent}%`,
-                  width: `${currentCfg.sigBox.widthPercent * scaleRatio}%`,
-                  height: `${currentCfg.sigBox.heightPercent * scaleRatio}%`,
-                }}
-              >
-                <img alt="Applied Signature" src={signatureSrc} />
-              </div>
+              {/* 核心套印签名图层：坐标、居中缩放、等比适配三项都与后端 drawImage 同源 */}
+              {currentCfg.stamps.map(({ usage, label }) => {
+                const rect = stampRectPt(SIGNATURE_BOXES_PT[usage], scalePercent);
+                // 这张签名没勾这个位置，出票时不会盖在这儿，画个空框说明为什么。
+                const applies = signature.usage.includes(usage);
+                return (
+                  <div
+                    className={
+                      applies
+                        ? "exact-signature-overlay-box"
+                        : "exact-signature-overlay-box is-not-applicable"
+                    }
+                    data-testid={`signature-stamp-${usage}`}
+                    key={usage}
+                    style={boxToCssPercent(rect)}
+                    title={label}
+                  >
+                    {applies && stampSrc && <img alt={`${signature.name} — ${label}`} src={stampSrc} />}
+                    {applies && !stampSrc && <Spin size="small" />}
+                    {!applies && <span className="not-applicable-hint">未勾选此签名位</span>}
+                  </div>
+                );
+              })}
             </div>
           </div>
+
+          <small className="template-fidelity-note">
+            {currentCfg.inkPrepared
+              ? "出票前会先剔除近白背景与扫描下划线、裁到墨迹外接框并转为蓝色墨水，此处已按同一口径渲染。"
+              : "工资预支单直接套印原图（不裁白边、不转蓝），因此四周留白会占用签名框空间——此处按同一口径渲染。"}
+          </small>
         </div>
       </div>
     </Modal>

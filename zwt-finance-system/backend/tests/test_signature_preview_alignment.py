@@ -6,8 +6,16 @@
 2026-08-04 就这么出过一次：工资预支底版当天重制四轮，前端把 leftPercent 更新到了
 新坐标，bottomPercent 忘了改，预览里的签名比实际出票低约 12.9pt（4.5mm）。
 
-前端写的是百分比（相对底图），后端写的是 PDF 点。同一份坐标存在两个地方、
-两种单位，就一定会漂——所以在这里把它们钉在一起。
+2026-08-05 又发现一次，而且当时这个文件是绿的：四个百分比确实与后端对得上，
+偏移全在它们底下的那层 CSS 里——`.exact-signature-overlay-box` 上挂着一句
+`transform: translate(-50%, 50%)`，把签名整体左移半个框宽、下移半个框高
+（WHT 47.5pt/21pt，TAX INV 75pt/23pt），位移量还随缩放比变。教训是：
+**光钉数字不够，把数字画到屏幕上的那几行也要钉。**
+
+所以这个文件现在钉三样东西：
+1. 坐标表（前端改用 PDF 点，与后端同单位，逐字比对，不再"换算完再比"）；
+2. 渲染这些坐标的 CSS 不得再引入位移；
+3. 预览底图必须是用当前底版渲染的。
 """
 
 from __future__ import annotations
@@ -28,16 +36,16 @@ FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
 PREVIEW_TSX = (
     FRONTEND_ROOT / "src" / "modules" / "administration" / "SignaturePreviewModal.tsx"
 )
+GLOBAL_CSS = FRONTEND_ROOT / "src" / "styles" / "global.css"
 PUBLIC_DIR = FRONTEND_ROOT / "public"
 BACKGROUND_MANIFEST = PUBLIC_DIR / "signature-preview-backgrounds.json"
 TEMPLATE_DIR = BACKEND_ROOT / "app" / "assets" / "templates"
 
-# 三份底版都是 A4，前端按同一个页面尺寸换算百分比。
+# 三份底版的 mediabox 都是它，原点 (0,0)、无 CropBox 偏移、无 /Rotate。
 PAGE_WIDTH, PAGE_HEIGHT = 595.25, 841.85
 
-# 允许的偏差。前端只写两位小数，0.01pp 本身就值 0.06pt/0.08pt；
-# 0.5pt(0.18mm) 以内属于写法精度，超过就是真的对不上了。
-TOLERANCE_PT = 0.5
+# 前端现在直接写 PDF 点，抄错一位就是一位；留 0.01pt 只为浮点表示误差。
+TOLERANCE_PT = 0.01
 
 # 前端的 usage 名 -> 后端那个签名框 (x, y, 宽, 高)，单位 PDF 点。
 EXPECTED_BOXES: dict[str, tuple[float, float, float, float]] = {
@@ -51,13 +59,10 @@ EXPECTED_BOXES: dict[str, tuple[float, float, float, float]] = {
 
 _ENTRY = re.compile(
     r"(?P<usage>\w+):\s*\{\s*"
-    r"bgImage:.*?"
-    r"sigBox:\s*\{\s*"
-    r"leftPercent:\s*(?P<left>[\d.]+),\s*"
-    r"bottomPercent:\s*(?P<bottom>[\d.]+),\s*"
-    r"widthPercent:\s*(?P<width>[\d.]+),\s*"
-    r"heightPercent:\s*(?P<height>[\d.]+),?\s*\}",
-    re.DOTALL,
+    r"x:\s*(?P<x>[\d.]+),\s*"
+    r"y:\s*(?P<y>[\d.]+),\s*"
+    r"width:\s*(?P<width>[\d.]+),\s*"
+    r"height:\s*(?P<height>[\d.]+),?\s*\}"
 )
 
 
@@ -65,14 +70,13 @@ def _frontend_boxes() -> dict[str, dict[str, float]]:
     source = PREVIEW_TSX.read_text(encoding="utf-8")
     found = {
         match.group("usage"): {
-            key: float(match.group(key))
-            for key in ("left", "bottom", "width", "height")
+            key: float(match.group(key)) for key in ("x", "y", "width", "height")
         }
         for match in _ENTRY.finditer(source)
     }
     assert found, (
-        f"没能从 {PREVIEW_TSX.name} 里解析出任何 sigBox。"
-        "改了 TEMPLATE_CONFIGS 的写法就要同步改这里的正则——"
+        f"没能从 {PREVIEW_TSX.name} 里解析出任何签名框。"
+        "改了 SIGNATURE_BOXES_PT 的写法就要同步改这里的正则——"
         "解析不到会让这条测试静默失效。"
     )
     return found
@@ -87,20 +91,56 @@ def test_preview_covers_every_signature_usage() -> None:
 @pytest.mark.parametrize("usage", sorted(EXPECTED_BOXES))
 def test_preview_box_matches_backend_stamp_box(usage: str) -> None:
     box = _frontend_boxes()[usage]
-    x, y, width, height = EXPECTED_BOXES[usage]
-    for label, actual_pt, expected_pt in (
-        ("left", box["left"] / 100 * PAGE_WIDTH, x),
-        ("bottom", box["bottom"] / 100 * PAGE_HEIGHT, y),
-        ("width", box["width"] / 100 * PAGE_WIDTH, width),
-        ("height", box["height"] / 100 * PAGE_HEIGHT, height),
-    ):
-        drift = actual_pt - expected_pt
+    expected = dict(zip(("x", "y", "width", "height"), EXPECTED_BOXES[usage], strict=True))
+    for label, expected_pt in expected.items():
+        drift = box[label] - expected_pt
         assert abs(drift) <= TOLERANCE_PT, (
             f"{usage} 的预览 {label} 与后端盖章框差 {drift:+.2f}pt "
             f"({drift * 25.4 / 72:+.2f}mm)：\n"
-            f"  预览 {actual_pt:.2f}pt / 后端 {expected_pt:.2f}pt\n"
-            f"  应写 {expected_pt / (PAGE_WIDTH if label in ('left', 'width') else PAGE_HEIGHT) * 100:.2f}"
+            f"  预览 {box[label]:.2f}pt / 后端 {expected_pt:.2f}pt\n"
+            f"  SignaturePreviewModal.tsx 的 SIGNATURE_BOXES_PT 里应写 {expected_pt}"
         )
+
+
+def _css_rule(selector: str) -> str:
+    """取 global.css 里某个选择器的声明块（本文件只需要精确匹配的单选择器规则）。"""
+    source = GLOBAL_CSS.read_text(encoding="utf-8")
+    match = re.search(
+        rf"(?<![\w.-]){re.escape(selector)}\s*\{{(?P<body>[^}}]*)\}}", source
+    )
+    assert match, f"{GLOBAL_CSS.name} 里找不到 {selector} 的样式规则"
+    return match.group("body")
+
+
+def test_stamp_layer_is_not_displaced_by_a_transform() -> None:
+    """签名图层的 left/bottom 是签名框左下角，任何 transform 都会让它整体漂走。
+
+    这正是 2026-08-05 那次的成因：坐标表是对的，`translate(-50%, 50%)` 把
+    WHT 的签名左移 47.5pt、下移 21pt，而且位移随缩放比变化——用户越照着预览调，
+    离实际出票越远。同一个块里 `.pdf-field` 用 translate(-50%,-50%) 是对的
+    （那些样例文字按中心定位），两者贴得很近，很容易抄串。
+    """
+    body = _css_rule(".exact-signature-overlay-box")
+    assert "transform" not in body, (
+        ".exact-signature-overlay-box 上又出现了 transform。\n"
+        "这个盒子的 left/bottom 直接就是后端 drawImage 的 x/y（签名框左下角），"
+        "不需要也不能有任何位移；要做居中缩放请改 SignaturePreviewModal.tsx 的 "
+        "stampRectPt（围绕框中心算），别用 transform 兜。\n"
+        f"当前声明块：{body.strip()}"
+    )
+
+
+def test_preview_page_container_uses_the_real_mediabox_ratio() -> None:
+    """容器就是"整页"：叠加坐标全按它的百分比算，长宽比错了整层就跟着斜。"""
+    body = _css_rule(".pdf-page-container")
+    match = re.search(r"aspect-ratio:\s*([\d.]+)\s*/\s*([\d.]+)", body)
+    assert match, f".pdf-page-container 缺 aspect-ratio：{body.strip()}"
+    width, height = float(match.group(1)), float(match.group(2))
+    assert (width, height) == (PAGE_WIDTH, PAGE_HEIGHT), (
+        f".pdf-page-container 的 aspect-ratio 写的是 {width} / {height}，"
+        f"三份底版的 mediabox 是 {PAGE_WIDTH} x {PAGE_HEIGHT}。"
+        "用 A4 的名义值（595.28 / 841.89）会让整层叠加有微小系统性偏移。"
+    )
 
 
 def test_preview_backgrounds_are_rendered_from_the_current_plates() -> None:
