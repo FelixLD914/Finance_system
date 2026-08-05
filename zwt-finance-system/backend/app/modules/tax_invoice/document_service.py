@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,14 +23,28 @@ from app.modules.tax_invoice.models import (
     TaxInvoice,
     TaxInvoiceDocument,
     TaxInvoiceEvent,
+    TaxInvoiceImportBatch,
     TaxInvoiceItem,
 )
-from app.modules.tax_invoice.schemas import TaxInvoiceDocumentGenerateRequest
+from app.modules.tax_invoice.schemas import (
+    BatchGenerateDocumentsRequest,
+    TaxInvoiceDocumentGenerateRequest,
+)
 from app.modules.tax_invoice.service import (
     TaxInvoiceNotFoundError,
+    TaxInvoiceServiceError,
     TaxInvoiceStateError,
 )
 from app.modules.wht.document_generator import signature_path
+
+
+@dataclass(frozen=True)
+class BatchGenerateOutcome:
+    """批量开具的结果。skipped 里是 (票 id, 票号, 原因)——票号给界面直接显示。"""
+
+    generated_invoice_ids: list[uuid.UUID]
+    document_count: int
+    skipped: list[tuple[uuid.UUID, str | None, str]]
 
 
 class TaxInvoiceDocumentService:
@@ -111,48 +126,7 @@ class TaxInvoiceDocumentService:
         output_root = self._storage_path(relative_root.as_posix())
         output_root.mkdir(parents=True, exist_ok=False)
 
-        # 签名：图库是 WHT 与 TAX INV 共用的，但一张图能盖在哪种单据上由
-        # usage 决定——两种单据在旧工具里用的是不同的人。
-        signature: SignatureAsset | None = None
-        signature_file: Path | None = None
-        if payload.include_signature:
-            if payload.signature_id is None:
-                signatures = list(
-                    (
-                        await self.session.scalars(
-                            select(SignatureAsset).where(
-                                SignatureAsset.deleted_at.is_(None),
-                                SignatureAsset.status == "active",
-                            ).order_by(
-                                SignatureAsset.is_default.desc(),
-                                SignatureAsset.created_at.desc(),
-                            )
-                        )
-                    ).all()
-                )
-                matching = [s for s in signatures if signature_allows(s.usage, "tax_inv")]
-                if matching:
-                    signature = matching[0]
-                else:
-                    raise TaxInvoiceStateError("no active default signature available for tax invoices")
-            else:
-                signature = await self.session.scalar(
-                    select(SignatureAsset).where(SignatureAsset.id == payload.signature_id)
-                )
-                if signature is None:
-                    raise TaxInvoiceNotFoundError("signature image was not found")
-                if signature.status != "active":
-                    raise TaxInvoiceStateError("the selected signature is inactive")
-                if not signature_allows(signature.usage, "tax_inv"):
-                    raise TaxInvoiceStateError(
-                        "the selected signature is not approved for tax invoices"
-                    )
-            signature_file = signature_path(
-                self.settings.attachment_root,
-                signature.storage_key,
-            )
-            if not signature_file.is_file():
-                raise TaxInvoiceNotFoundError("signature image file was not found")
+        signature, signature_file = await self._resolve_generation_signature(payload)
 
         template_hashes: dict[str, str] = {}
         created_files: list[Path] = []
@@ -243,6 +217,127 @@ class TaxInvoiceDocumentService:
         for document in documents:
             await self.session.refresh(document)
         return documents
+
+    async def _resolve_generation_signature(
+        self,
+        payload: TaxInvoiceDocumentGenerateRequest,
+    ) -> tuple[SignatureAsset | None, Path | None]:
+        """定这次开具盖哪张章。
+
+        图库是 WHT 与 TAX INV 共用的，但一张图能盖在哪种单据上由 usage 决定——
+        两种单据在旧工具里用的是不同的人。
+
+        单独成一个方法：批量开具要在开跑之前先验一次，不然签名有问题时会得到
+        200 条一模一样的 skipped，而不是一句"这张签名不能用"。
+        """
+        if not payload.include_signature:
+            return None, None
+
+        signature: SignatureAsset | None
+        if payload.signature_id is None:
+            signatures = list(
+                (
+                    await self.session.scalars(
+                        select(SignatureAsset)
+                        .where(
+                            SignatureAsset.deleted_at.is_(None),
+                            SignatureAsset.status == "active",
+                        )
+                        .order_by(
+                            SignatureAsset.is_default.desc(),
+                            SignatureAsset.created_at.desc(),
+                        )
+                    )
+                ).all()
+            )
+            matching = [s for s in signatures if signature_allows(s.usage, "tax_inv")]
+            if not matching:
+                raise TaxInvoiceStateError(
+                    "no active default signature available for tax invoices"
+                )
+            signature = matching[0]
+        else:
+            # 必须连 deleted_at 一起过滤：软删除只设 deleted_at 和 is_default=False，
+            # **不动 status**（见 WhtDocumentService.delete_signature）。只判 status
+            # 的话，回收站里的签名照样能被显式选中盖到正式税票上——而
+            # delete_signature 的注释写的是"该模块生成文件时会拿到 404"。
+            signature = await self.session.scalar(
+                select(SignatureAsset).where(
+                    SignatureAsset.id == payload.signature_id,
+                    SignatureAsset.deleted_at.is_(None),
+                )
+            )
+            if signature is None:
+                raise TaxInvoiceNotFoundError("signature image was not found")
+            if signature.status != "active":
+                raise TaxInvoiceStateError("the selected signature is inactive")
+            if not signature_allows(signature.usage, "tax_inv"):
+                raise TaxInvoiceStateError(
+                    "the selected signature is not approved for tax invoices"
+                )
+
+        signature_file = signature_path(
+            self.settings.attachment_root,
+            signature.storage_key,
+        )
+        if not signature_file.is_file():
+            raise TaxInvoiceNotFoundError("signature image file was not found")
+        return signature, signature_file
+
+    async def generate_documents_for_batch(
+        self,
+        batch_id: uuid.UUID,
+        payload: BatchGenerateDocumentsRequest,
+    ) -> BatchGenerateOutcome:
+        """按批次批量开具，与 TaxInvoiceService.approve_batch 同构。
+
+        选票范围：invoice_ids 为空＝这批里**已批准但还没开**的全部（不碰已开具的，
+        重开会多出一版文件，得由人点名）；给了子集就只开那几张，此时已开具的也
+        允许重开——和单张端点语义一致。
+
+        逐张走 generate_documents()：每张各自 commit、各自落盘。出错的那张
+        generate_documents 内部会回滚并清掉半成品目录，这里只把原因收进 skipped，
+        不因为一张开不出来就把整批挡住——否则 200 张里坏 1 张就得全部重来。
+        """
+        batch = await self.session.get(TaxInvoiceImportBatch, batch_id)
+        if batch is None:
+            raise TaxInvoiceNotFoundError("import batch was not found")
+
+        statement = select(TaxInvoice).where(TaxInvoice.batch_id == batch_id)
+        if payload.invoice_ids is None:
+            statement = statement.where(TaxInvoice.status == "approved")
+        else:
+            statement = statement.where(
+                TaxInvoice.id.in_(payload.invoice_ids),
+                TaxInvoice.status.in_(("approved", "issued")),
+            )
+        targets = list(
+            (await self.session.scalars(statement.order_by(TaxInvoice.created_at))).all()
+        )
+        # 先把 (id, document_no) 抓下来：generate_documents 每张都会 commit，
+        # 之后会话里其余对象会被 expire，循环里再读属性就要触发重查。
+        refs = [(target.id, target.document_no) for target in targets]
+
+        # 签名先验一次再开跑：签名不可用是整批性的问题，应当直接失败，
+        # 而不是让每一张都自己撞一遍、回报 200 条相同的 skipped。
+        await self._resolve_generation_signature(payload)
+
+        generated_ids: list[uuid.UUID] = []
+        skipped: list[tuple[uuid.UUID, str | None, str]] = []
+        document_count = 0
+        for invoice_id, document_no in refs:
+            try:
+                documents = await self.generate_documents(invoice_id, payload)
+            except TaxInvoiceServiceError as exc:
+                skipped.append((invoice_id, document_no, str(exc)))
+                continue
+            generated_ids.append(invoice_id)
+            document_count += len(documents)
+        return BatchGenerateOutcome(
+            generated_invoice_ids=generated_ids,
+            document_count=document_count,
+            skipped=skipped,
+        )
 
     async def document_content(
         self,

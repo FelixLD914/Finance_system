@@ -221,6 +221,16 @@ export interface BatchRejectResult {
   rejectedIds: string[];
 }
 
+export interface BatchGenerateResult {
+  /** 成功开出文件的税票张数。 */
+  generatedCount: number;
+  generatedInvoiceIds: string[];
+  /** 落盘文件总数（每张票按所选格式可能是 1 或 2 个）。 */
+  documentCount: number;
+  /** 开不出来的，逐条附票号与原因；票号让用户能直接对上账。 */
+  skipped: { invoiceId: string; documentNo: string | null; reason: string }[];
+}
+
 export interface ExchangeRate {
   id: number;
   currency: string;

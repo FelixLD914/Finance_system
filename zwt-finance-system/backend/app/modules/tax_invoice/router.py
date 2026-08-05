@@ -43,6 +43,9 @@ from app.modules.tax_invoice.schemas import (
     BatchApproveRequest,
     BatchApproveResponse,
     BatchApproveSkipped,
+    BatchGenerateDocumentsRequest,
+    BatchGenerateDocumentsResponse,
+    BatchGenerateDocumentsSkipped,
     BatchRejectRequest,
     BatchRejectResponse,
     BotApiStatus,
@@ -962,6 +965,37 @@ async def generate_documents(
         TaxInvoiceDocumentResponse.model_validate(document)
         for document in documents
     ]
+
+
+@router.post(
+    "/batches/{batch_id}/generate-documents",
+    response_model=BatchGenerateDocumentsResponse,
+    dependencies=[Depends(require_permission("invoice:generate"))],
+)
+async def generate_documents_for_batch(
+    batch_id: uuid.UUID,
+    payload: BatchGenerateDocumentsRequest,
+    service: DocumentServiceDependency,
+) -> BatchGenerateDocumentsResponse:
+    """批量开具：把这批已批准的税票一次全开出来（可指定子集与签名）。
+
+    invoice_ids 为空＝这批里所有「已批准但还没开」的。逐张各自出文件、各自
+    落库；开不出来的进 skipped 回报，不挡住其余的。
+    """
+    outcome = await service.generate_documents_for_batch(batch_id, payload)
+    return BatchGenerateDocumentsResponse(
+        generated_count=len(outcome.generated_invoice_ids),
+        generated_invoice_ids=outcome.generated_invoice_ids,
+        document_count=outcome.document_count,
+        skipped=[
+            BatchGenerateDocumentsSkipped(
+                invoice_id=invoice_id,
+                document_no=document_no,
+                reason=reason,
+            )
+            for invoice_id, document_no, reason in outcome.skipped
+        ],
+    )
 
 
 @router.get(

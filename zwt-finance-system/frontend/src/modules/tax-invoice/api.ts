@@ -6,6 +6,7 @@ import {
 } from "../../shared/http";
 import type {
   BatchApproveResult,
+  BatchGenerateResult,
   BatchRejectResult,
   BotApiStatus,
   DualBatchImportResult,
@@ -162,6 +163,32 @@ export function approveTaxInvoiceBatch(
     {
       method: "POST",
       body: JSON.stringify({ invoiceIds, acceptWarnings }),
+    },
+  );
+}
+
+/**
+ * 批量开具：把某批已批准的税票一次全开出来。
+ *
+ * invoiceIds 为 null＝这批里所有「已批准但还没开」的；给了子集就只开那几张
+ * （此时已开具的也允许重开，与单张开具语义一致）。
+ * signatureId 为 null＝不盖章；给了就用那一张，后端会再校验适用范围是否含 tax_inv。
+ */
+export function generateTaxInvoiceDocumentsForBatch(
+  batchId: string,
+  invoiceIds: string[] | null,
+  signatureId: string | null = null,
+): Promise<BatchGenerateResult> {
+  return request<BatchGenerateResult>(
+    `/v1/tax-invoice/batches/${batchId}/generate-documents`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        invoiceIds,
+        includeSignature: signatureId !== null,
+        signatureId,
+        formats: ["xlsx", "pdf"],
+      }),
     },
   );
 }

@@ -452,6 +452,30 @@ class TaxInvoiceDocumentGenerateRequest(ApiSchema):
         return self
 
 
+class BatchGenerateDocumentsRequest(TaxInvoiceDocumentGenerateRequest):
+    """按批次批量开具。签名与格式的口径与单张开具完全一致，只多一个选票范围。
+
+    invoice_ids 为空＝把这批**已批准但还没开**的都开出来（不碰已开具的，
+    重开会多出一版文件，那得由人明确点名）；给了子集就只开那几张，
+    这时已开具的也允许重开——和单张端点的语义保持一致。
+    """
+
+    invoice_ids: list[uuid.UUID] | None = None
+
+
+class BatchGenerateDocumentsSkipped(ApiSchema):
+    invoice_id: uuid.UUID
+    document_no: str | None = None
+    reason: str
+
+
+class BatchGenerateDocumentsResponse(ApiSchema):
+    generated_count: int
+    generated_invoice_ids: list[uuid.UUID]
+    document_count: int
+    skipped: list[BatchGenerateDocumentsSkipped]
+
+
 class TaxInvoiceDocumentResponse(ApiSchema):
     id: uuid.UUID
     invoice_id: uuid.UUID

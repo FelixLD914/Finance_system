@@ -88,6 +88,7 @@ import {
   listTaxInvoices,
   listTaxInvoicesByBatch,
   approveTaxInvoiceBatch,
+  generateTaxInvoiceDocumentsForBatch,
   rejectTaxInvoiceBatch,
   rejectTaxInvoice,
   restoreTaxInvoice,
@@ -2152,6 +2153,80 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
     }
   };
 
+  // 批量开具。签名在弹窗里现选：一批票必须盖同一张章，选完就整批套用。
+  // 不复用单张开具的 generateForm——那个表单绑着 generateInvoiceTarget，
+  // 借用会让"当前正在开哪张票"这件事变得含糊。
+  const runBatchGenerate = async (scope: "all" | "selected") => {
+    if (!selectedBatch) return;
+    if (scope === "selected" && !reviewSelectedKeys.length) {
+      message.warning(t("tax.reviewSelectNone"));
+      return;
+    }
+    const batchId = selectedBatch.id;
+    const ids = scope === "selected" ? reviewSelectedKeys : null;
+
+    setBusy(true);
+    let options: SignatureAsset[] = [];
+    try {
+      options = await listSignatures(false, "tax_inv").catch(() => []);
+    } finally {
+      setBusy(false);
+    }
+    // 默认选中默认签名；没有可用签名时就是不盖章（后端允许 includeSignature=false）。
+    let chosen: string | null = (options.find((sig) => sig.isDefault) ?? options[0])?.id ?? null;
+
+    modal.confirm({
+      title: t("tax.batchGenerateTitle"),
+      width: 520,
+      content: (
+        <div style={{ display: "grid", gap: 8, paddingTop: 8 }}>
+          <div>{t("tax.batchGenerateBody")}</div>
+          <Select
+            defaultValue={chosen ?? undefined}
+            style={{ width: "100%" }}
+            placeholder={t("tax.batchGenerateNoSignature")}
+            allowClear
+            options={options.map((sig) => ({
+              value: sig.id,
+              label: sig.isDefault ? `${sig.name}（默认）` : sig.name,
+            }))}
+            onChange={(value?: string) => {
+              chosen = value ?? null;
+            }}
+          />
+        </div>
+      ),
+      okText: t("tax.batchGenerateConfirm"),
+      cancelText: t("common.cancel"),
+      async onOk() {
+        setBusy(true);
+        try {
+          const result = await generateTaxInvoiceDocumentsForBatch(batchId, ids, chosen);
+          if (result.skipped.length) {
+            message.warning(
+              t("tax.batchGeneratePartial", {
+                ok: result.generatedCount,
+                skipped: result.skipped.length,
+              }),
+            );
+          } else {
+            message.success(
+              t("tax.batchGenerateDone", { count: result.generatedCount }),
+            );
+          }
+          await reloadAfterBatchAction();
+        } catch (error) {
+          message.error(
+            error instanceof Error ? error.message : t("tax.batchGenerateFailed"),
+          );
+          throw error;
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
+
   const runBatchReject = (scope: "all" | "selected") => {
     if (!selectedBatch) return;
     if (scope === "selected" && !reviewSelectedKeys.length) {
@@ -3477,12 +3552,18 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
                   >
                     {t("tax.reviewGotoLedger")}
                   </Button>
+                  <Button onClick={startWizard}>
+                    {t("tax.submitNewBatch")}
+                  </Button>
+                  {/* 批准之后就是开具。这一步以前只有逐张一个个点，一批几十张
+                      要点几十次；批量开具补在这里，正好接着「全部已批准」。 */}
                   <Button
                     icon={<FileDoneOutlined />}
                     type="primary"
-                    onClick={startWizard}
+                    loading={busy}
+                    onClick={() => void runBatchGenerate("all")}
                   >
-                    {t("tax.submitNewBatch")}
+                    {t("tax.batchGenerateTitle")}
                   </Button>
                 </div>
               </section>
