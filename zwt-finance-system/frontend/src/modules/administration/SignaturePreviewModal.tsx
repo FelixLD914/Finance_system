@@ -8,6 +8,7 @@ import {
   SafetyCertificateOutlined,
   WarningOutlined,
   ZoomInOutlined,
+  ZoomOutOutlined,
 } from "@ant-design/icons";
 import { Alert, Button, InputNumber, Modal, Segmented, Slider, Space, Spin, Tag } from "antd";
 
@@ -333,6 +334,7 @@ export function SignaturePreviewModal({
 }: SignaturePreviewModalProps) {
   const [activeTemplate, setActiveTemplate] = useState<TemplateTab>("wht");
   const [scalePercent, setScalePercent] = useState<number>(100);
+  const [templateZoom, setTemplateZoom] = useState<number>(100);
   const [saving, setSaving] = useState<boolean>(false);
 
   useEffect(() => {
@@ -543,13 +545,42 @@ export function SignaturePreviewModal({
             <span>系统真实开票文件底板套印预览 (System PDF Template Preview)</span>
           </div>
 
-          <div className="template-toolbar">
+          <div className="template-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
             <Segmented
               className="template-segmented"
               options={templateOptions}
               value={activeTemplate}
               onChange={(val) => setActiveTemplate(val as TemplateTab)}
             />
+            <div className="template-zoom-controls" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <Button
+                size="small"
+                icon={<ZoomOutOutlined />}
+                disabled={templateZoom <= 60}
+                onClick={() => setTemplateZoom((z) => Math.max(60, z - 20))}
+                title="缩小底板模板"
+              />
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#475467", minWidth: 42, textAlign: "center", display: "inline-block" }}>
+                {templateZoom}%
+              </span>
+              <Button
+                size="small"
+                icon={<ZoomInOutlined />}
+                disabled={templateZoom >= 200}
+                onClick={() => setTemplateZoom((z) => Math.min(200, z + 20))}
+                title="放大底板模板"
+              />
+              {templateZoom !== 100 && (
+                <Button
+                  size="small"
+                  type="text"
+                  style={{ padding: "0 4px", fontSize: 11, color: "#8c6b3e" }}
+                  onClick={() => setTemplateZoom(100)}
+                >
+                  重置
+                </Button>
+              )}
+            </div>
           </div>
 
           {ink.status === "failed" && (
@@ -564,13 +595,16 @@ export function SignaturePreviewModal({
           )}
 
           {/* 底图就是后端真出的那一页（彩色、带样例数据、未盖章），
-              所以这里除了签名之外什么都不用画。
-              以前这一段有三块按百分比手工摆的样例文字，字体、断词、列宽全靠猜，
-              必然对不上底版：TAX INV 的品名被裁掉半个字、报关单号压在泰文标签上、
-              工资预支的金额盖住表单印刷字。**不要再加回来** —— 要改样例数据请改
-              scripts/build_signature_preview_backgrounds.py 里的样例，重出底图。 */}
+              支持通过 templateZoom 实时按 60%~200% 等比放大/缩小模版视口 */}
           <div className="pdf-template-underlay-viewport">
-            <div className="pdf-page-container">
+            <div
+              className="pdf-page-container"
+              style={{
+                maxWidth: `${Math.round(380 * (templateZoom / 100))}px`,
+                minWidth: `${Math.round(380 * (templateZoom / 100))}px`,
+                transition: "width 0.15s ease, max-width 0.15s ease, min-width 0.15s ease",
+              }}
+            >
               <img
                 alt={currentCfg.title}
                 className="pdf-underlay-image"

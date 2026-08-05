@@ -3163,7 +3163,7 @@ select {
   border-radius: 8px;
   padding: 10px;
   max-height: 380px;
-  overflow-y: auto;
+  overflow: auto;
 }
 
 .pdf-page-container {
