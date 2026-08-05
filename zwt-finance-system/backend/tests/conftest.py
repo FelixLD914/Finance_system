@@ -14,6 +14,7 @@ starlette 1.3 上反复创建销毁 portal 会让某次 teardown 抛
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Callable, Iterator
 
@@ -26,6 +27,32 @@ from app.main import app
 from app.modules.auth.service import Principal
 
 ClientFactory = Callable[..., TestClient]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    r"""把测试临时数据默认落到项目专属短目录（离开 C 盘、自动轮换）。
+
+    与 BOI 同源治本：pytest 的 tmp_path 等临时数据默认跟 --basetemp 走，而显式
+    --basetemp 会关掉 pytest 自带的 keep=3 轮换，导致每次换名字的全量跑都永久堆
+    一份副本（实测把 C:\ 的 Temp 堆到数 GB）。改为默认 PYTEST_DEBUG_TEMPROOT →
+    pytest 仍走 pytest-of-<user>/pytest-N 自动保留最近 3 次，数据落 D 盘短路径、
+    离开 C 盘、自清理。
+
+    非 Windows / 已给 --basetemp / 已设 PYTEST_DEBUG_TEMPROOT / 建目录失败
+    → 一律回退 pytest 默认，绝不因临时目录问题挡测试。
+    """
+    if os.name != "nt":
+        return
+    if getattr(config.option, "basetemp", None):
+        return
+    if os.environ.get("PYTEST_DEBUG_TEMPROOT", "").strip():
+        return
+    project_temproot = r"D:\pytest-tmp\finance"
+    try:
+        os.makedirs(project_temproot, exist_ok=True)
+    except OSError:
+        return
+    os.environ["PYTEST_DEBUG_TEMPROOT"] = project_temproot
 
 
 def build_principal(
