@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-from contextlib import suppress
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -19,6 +21,8 @@ from openpyxl.worksheet.properties import PageSetupProperties
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
+from app.core.signature_image import SignatureImageError
+from app.core.signature_image import build_blue_signature as prepare_signature_stamp
 from app.modules.salary_advance import pdf_layout
 from app.modules.salary_advance.validation import safe_excel_text
 
@@ -92,8 +96,12 @@ class SalaryAdvanceDocumentError(RuntimeError):
 @dataclass(frozen=True)
 class GenerationSnapshot:
     normalized_data: dict[str, Any]
-    finance_signature_path: Path
-    md_signature_path: Path
+    # None = 这一位不盖章。沿用 WHT / TAX INV 的 signature_source_path 约定。
+    # 产线路径不会出现 None——SalaryAdvanceDocumentService._resolve_signature
+    # 取不到签名是直接报错的（"绝不静默换人"，见 test_salary_advance_signature_
+    # resolution）；用得上 None 的只有制签名预览底图的脚本，它要的正是一份未盖章的页。
+    finance_signature_path: Path | None
+    md_signature_path: Path | None
     finance_signature_version: dict[str, Any]
     md_signature_version: dict[str, Any]
     # 签名库维护页里那个"确认应用签名尺寸到系统开票"存下来的比例
@@ -163,9 +171,34 @@ def _validate_signature(path: Path) -> None:
         raise SalaryAdvanceDocumentError(f"签名图片无效：{path.name}") from exc
 
 
+@contextmanager
+def _stamped_signature(path: Path | None) -> Iterator[Path | None]:
+    """把签名图按出票口径处理好（清底、去扫描下划线、转蓝墨、裁到墨迹外接框），
+    用完即删。`path` 为 None 表示这一位不盖章，原样返回 None。
+
+    与 WHT / TAX INV 走同一份 `core.signature_image`：同一张签名在三张单据上
+    必须是同一支笔写的。**裁掉四周留白尤其重要**——drawImage 是等比适配整张图，
+    留白会照比例吃掉签名框，不裁的话同一张图印在工资预支的 90pt 框里只有 34pt
+    （实测），用户反馈"签名过小"就是这么来的。
+    """
+    if path is None:
+        yield None
+        return
+    _validate_signature(path)
+    with tempfile.TemporaryDirectory(prefix="zwt-salary-sig-") as workspace:
+        prepared = Path(workspace) / "signature.png"
+        try:
+            prepare_signature_stamp(path, prepared)
+        except SignatureImageError as exc:
+            raise SalaryAdvanceDocumentError(
+                f"签名图片无法用于套印：{path.name}（{exc}）"
+            ) from exc
+        yield prepared
+
+
 def _add_workbook_signature(
     worksheet: Any,
-    path: Path,
+    path: Path | None,
     anchor: str,
     scale_percent: int = 100,
 ) -> None:
@@ -175,8 +208,13 @@ def _add_workbook_signature(
     110x35 是签名框在 Excel 里的可用区域（约等于 pdf_layout 的 90x28 点），
     scale_percent 在这个"贴合尺寸"之上再乘一次，和 PDF 侧的含义一致。
     """
+    if path is None:
+        return
     _validate_signature(path)
-    image = OpenpyxlImage(str(path))
+    # 立刻读进内存，不要把路径交给 openpyxl：它到 workbook.save() 才真正读文件，
+    # 而调用方传进来的是 _stamped_signature 那个用完即删的临时文件，
+    # 拖到 save 的时候早就没了（save 在 with 块之外）。
+    image = OpenpyxlImage(BytesIO(path.read_bytes()))
     ratio = (scale_percent or 100) / 100.0
     scale = min(110 / image.width, 35 / image.height) * ratio
     image.width = max(1, int(image.width * scale))
@@ -225,12 +263,16 @@ def render_salary_advance_workbook(
         approval = normalized.get("approval_status")
         form["B42"] = "☑" if approval == "Approve" else "☐"
         form["H42"] = "☑" if approval == "Not approved" else "☐"
-        _add_workbook_signature(
-            form, snapshot.finance_signature_path, "H34", snapshot.finance_scale_percent
-        )
-        _add_workbook_signature(
-            form, snapshot.md_signature_path, "H44", snapshot.md_scale_percent
-        )
+        # xlsx 与 pdf 是同一张单据的两种产出，签名必须经过同一道处理，
+        # 否则同一条记录导出两个样子（一份裁过、一份带着留白）。
+        with (
+            _stamped_signature(snapshot.finance_signature_path) as finance_stamp,
+            _stamped_signature(snapshot.md_signature_path) as md_stamp,
+        ):
+            _add_workbook_signature(
+                form, finance_stamp, "H34", snapshot.finance_scale_percent
+            )
+            _add_workbook_signature(form, md_stamp, "H44", snapshot.md_scale_percent)
 
         form.page_setup.orientation = "portrait"
         form.page_setup.paperSize = form.PAPERSIZE_A4
@@ -370,7 +412,7 @@ def _fit_lines(
 
 def _draw_signature(
     canvas: Any,
-    path: Path,
+    path: Path | None,
     box: tuple[float, float, float, float],
     scale_percent: int = 100,
 ) -> None:
@@ -383,6 +425,8 @@ def _draw_signature(
     """
     from reportlab.lib.utils import ImageReader
 
+    if path is None:
+        return
     _validate_signature(path)
     x, y, width, height = box
     ratio = (scale_percent or 100) / 100.0
@@ -499,18 +543,22 @@ def export_pdf_from_template(
             overlay.line(x + 1.5, y + size * 0.48, x + size * 0.42, y + 1.5)
             overlay.line(x + size * 0.42, y + 1.5, x + size - 1.2, y + size - 1.2)
 
-    _draw_signature(
-        overlay,
-        snapshot.finance_signature_path,
-        pdf_layout.SIGNATURE_BOXES["finance"],
-        snapshot.finance_scale_percent,
-    )
-    _draw_signature(
-        overlay,
-        snapshot.md_signature_path,
-        pdf_layout.SIGNATURE_BOXES["md"],
-        snapshot.md_scale_percent,
-    )
+    with (
+        _stamped_signature(snapshot.finance_signature_path) as finance_stamp,
+        _stamped_signature(snapshot.md_signature_path) as md_stamp,
+    ):
+        _draw_signature(
+            overlay,
+            finance_stamp,
+            pdf_layout.SIGNATURE_BOXES["finance"],
+            snapshot.finance_scale_percent,
+        )
+        _draw_signature(
+            overlay,
+            md_stamp,
+            pdf_layout.SIGNATURE_BOXES["md"],
+            snapshot.md_scale_percent,
+        )
     overlay.save()
     buffer.seek(0)
 

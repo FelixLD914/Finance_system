@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
-from app.core.signature_usage import parse_signature_usage
+from app.core.signature_usage import SIGNATURE_MODULES, parse_signature_usage
 from app.modules.wht.branching import BranchType, normalize_branch
 
 IssuanceType = Literal["normal", "supplement"]
@@ -400,7 +400,16 @@ class BatchTransitionResponse(ApiSchema):
 
 # 一张签名可以同时适用于多个模块，所以对外是集合而不是单值。
 # 存库仍是逗号分隔的字符串，转换在 app.core.signature_usage。
-SignatureUsage = Literal["wht", "tax_inv", "salary_advance"]
+#
+# **从 SIGNATURE_MODULES 派生，不要在这里重抄一遍。** 这里曾经手写成
+# ("wht", "tax_inv", "salary_advance")，加工资预支的两个角色位时只改了
+# core.signature_usage，这个 Literal 没跟上，后果是工资预支签名**完全不可用**：
+#   - 写：勾「预支单-财务负责人」保存 → usage 里的 salary_advance_finance
+#     过不了校验，接口 422（用户 2026-08-05 实拍）。
+#   - 读：SignatureAssetResponse.split_usage 会把库里的 salary_advance
+#     展开成三个角色名，同样过不了这个 Literal，响应校验直接 500。
+# 两处枚举分家不会有任何编译期提示，所以改成派生，从结构上消灭它。
+SignatureUsage = Literal[*SIGNATURE_MODULES]
 
 
 class SignatureAssetUpdate(ApiSchema):

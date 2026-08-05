@@ -1,3 +1,4 @@
+import dataclasses
 from io import BytesIO
 from pathlib import Path
 
@@ -144,6 +145,73 @@ def _stamped_rects(pdf_path: Path) -> list[tuple[float, float, float, float]]:
         )
 
 
+def test_signature_with_margins_still_fills_the_box(tmp_path: Path) -> None:
+    """导出的签名 PNG 四周基本都有留白，留白不能占掉签名框。
+
+    drawImage 是把**整张图**等比适配进签名框，所以图里的留白会照比例吃掉框。
+    工资预支原先不做裁剪，一张笔画只占 61% 宽的签名印出来只有 34pt（框宽 90pt，
+    38%），用户反馈"签名过小"。现在与 WHT / TAX INV 共用 core.signature_image，
+    先裁到墨迹外接框再套印。
+
+    钉的是"撑满"这个结果而不是"调了某个函数"：换实现只要签名还是该多大就多大，
+    这条就该继续绿。
+    """
+    assets = Path(__file__).parents[1] / "app" / "assets"
+    source = tmp_path / "margined.png"
+    canvas = Image.new("RGBA", (600, 300), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(canvas)
+    # 笔画只占画布中间：横向约 61%、纵向约 40%，四周都是留白。
+    draw.line((120, 200, 190, 90, 265, 195, 340, 85, 420, 190, 480, 130), fill="black", width=9)
+    canvas.save(source)
+
+    output = tmp_path / "margined-signature.pdf"
+    export_pdf_from_template(
+        assets / "templates" / "Salary-Advance-Template.pdf",
+        output,
+        dataclasses.replace(
+            _snapshot(tmp_path), finance_signature_path=source, md_signature_path=source
+        ),
+        get_settings().salary_advance_font_path,
+        xlsx_template_path=assets / "templates" / "Salary-Advance-Template.xlsx",
+    )
+
+    for rect, role in zip(_stamped_rects(output), ("finance", "md"), strict=True):
+        box_w, box_h = pdf_layout.SIGNATURE_BOXES[role][2:]
+        width, height = rect[2], rect[3]
+        # 等比适配后至少有一个方向要贴到框边；留白没裁掉的话两个方向都远不到。
+        assert max(width / box_w, height / box_h) == pytest.approx(1.0, abs=0.01), (
+            f"{role} 没有撑满签名框：{width:.1f}x{height:.1f}pt / 框 {box_w}x{box_h}pt。"
+            "签名图四周的留白多半没被裁掉。"
+        )
+        assert width > box_w * 0.8, (
+            f"{role} 只印了 {width:.1f}pt，框宽 {box_w}pt——这就是「签名过小」那个回归。"
+        )
+
+
+def test_workbook_signature_survives_the_temporary_prepared_file(tmp_path: Path) -> None:
+    """xlsx 侧同样要用裁过的图，且不能踩到临时文件的生命周期。
+
+    openpyxl 到 workbook.save() 才真正去读图片；套印用的是"用完即删"的临时文件，
+    把路径交给它就会在保存时扑空。这条守的是"能出得来"，删掉那层内存读取会红。
+    """
+    assets = Path(__file__).parents[1] / "app" / "assets"
+    source = tmp_path / "margined-xlsx.png"
+    _signature(source, (20, 35, 120, 255))
+
+    data = render_salary_advance_workbook(
+        assets / "templates" / "Salary-Advance-Template.xlsx",
+        dataclasses.replace(
+            _snapshot(tmp_path), finance_signature_path=source, md_signature_path=source
+        ),
+    )
+
+    rendered = load_workbook(BytesIO(data))
+    try:
+        assert len(rendered["表单模板"]._images) >= 3
+    finally:
+        rendered.close()
+
+
 @pytest.mark.parametrize("scale", [60, 100, 150])
 def test_signature_scale_shrinks_around_the_box_centre(tmp_path: Path, scale: int) -> None:
     """签名库维护页存的比例必须真的改变工资预支单上的盖章尺寸，且围绕框中心缩放。
@@ -155,8 +223,6 @@ def test_signature_scale_shrinks_around_the_box_centre(tmp_path: Path, scale: in
        逐字一致，也与预览的 stampRectPt 一致。若改成钉住左下角，滑到 60% 时
        预览与出票会差半个框，而用户正是照着预览在调。
     """
-    import dataclasses
-
     assets = Path(__file__).parents[1] / "app" / "assets"
     output = tmp_path / f"salary-advance-{scale}.pdf"
 
@@ -188,8 +254,6 @@ def test_signature_scale_shrinks_around_the_box_centre(tmp_path: Path, scale: in
 
 def test_signature_scale_is_independent_per_position(tmp_path: Path) -> None:
     """财务与董事常是两个人的章，各调各的尺寸；合成一个值就是让一个跟着另一个走。"""
-    import dataclasses
-
     assets = Path(__file__).parents[1] / "app" / "assets"
     output = tmp_path / "salary-advance-mixed.pdf"
 
