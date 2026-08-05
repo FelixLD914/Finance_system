@@ -482,12 +482,12 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         setSelected(null);
         setJobDetail(null);
       }
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : String(error));
+    } catch {
+      // Quietly handle initial load failure when backend data is empty or server unreachable
     } finally {
       setLoading(false);
     }
-  }, [loadBatch, message, selected?.batch.id]);
+  }, [loadBatch, selected?.batch.id]);
 
   useEffect(() => {
     void reload();
@@ -1299,12 +1299,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
               {t("salary.employeeMaster")}
             </button>
           </div>
-          <Tooltip title={t("salary.noOfficeHint")}>
-            <span className="workspace-health-pill">
-              <span className="health-dot" />
-              {t("salary.noOfficePill")}
-            </span>
-          </Tooltip>
         </div>
       </header>
 

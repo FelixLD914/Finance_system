@@ -2454,13 +2454,6 @@ export function TaxInvoiceWorkspace({ t, locale }: { t: Translate; locale: Local
               </h1>
               <p>{t("tax.subtitle")}</p>
             </div>
-            {/* 常驻规则说明压成一枚小胶囊：它是背景信息，不该和页面标题抢注意力。 */}
-            <Tooltip title={t("tax.rulesLocked")}>
-              <span className="tax-health-pill">
-                <span className="health-dot" />
-                {t("tax.rulesLocked")}
-              </span>
-            </Tooltip>
           </header>
 
           {/* 三个平级入口：看（台账）/ 做（开票）/ 查（汇率中心）。 */}

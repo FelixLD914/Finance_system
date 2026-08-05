@@ -12,6 +12,9 @@ import { SalaryAdvanceWorkspace } from "../modules/salary-advance/SalaryAdvanceW
 import { TaxInvoiceWorkspace } from "../modules/tax-invoice/TaxInvoiceWorkspace";
 import { WhtWorkspace } from "../modules/wht/WhtWorkspace";
 import { AppShell } from "./AppShell";
+import { GlobalSearchModal } from "./GlobalSearchModal";
+import { HelpModal } from "./HelpModal";
+import { NotificationsDrawer } from "./NotificationsDrawer";
 import { financeTheme } from "./theme";
 
 export function App() {
@@ -19,6 +22,9 @@ export function App() {
   const { user, initializing } = useAuth();
   const [activeModule, setActiveModule] = useState<ModuleKey>("wht");
   const [collapsed, setCollapsed] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const antdLocale = locale === "en-US" ? enUS : zhCN;
 
@@ -54,6 +60,9 @@ export function App() {
         onModuleChange={setActiveModule}
         onToggleCollapsed={() => setCollapsed((current) => !current)}
         onToggleLocale={toggleLocale}
+        onOpenSearch={() => setSearchOpen(true)}
+        onOpenNotifications={() => setNotificationsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
         t={t}
       >
         {activeModule === "wht" ? (
@@ -77,7 +86,28 @@ export function App() {
             />
           </section>
         )}
+
+        <GlobalSearchModal
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onNavigate={setActiveModule}
+          t={t}
+        />
+
+        <NotificationsDrawer
+          open={notificationsOpen}
+          onClose={() => setNotificationsOpen(false)}
+          onNavigate={setActiveModule}
+          t={t}
+        />
+
+        <HelpModal
+          open={helpOpen}
+          onClose={() => setHelpOpen(false)}
+          t={t}
+        />
       </AppShell>
     </ConfigProvider>
   );
 }
+

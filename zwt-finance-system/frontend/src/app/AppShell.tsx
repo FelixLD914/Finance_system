@@ -33,6 +33,9 @@ interface AppShellProps extends PropsWithChildren {
   onModuleChange: (key: ModuleKey) => void;
   onToggleCollapsed: () => void;
   onToggleLocale: () => void;
+  onOpenSearch: () => void;
+  onOpenNotifications: () => void;
+  onOpenHelp: () => void;
   t: Translate;
 }
 
@@ -44,6 +47,9 @@ export function AppShell({
   onModuleChange,
   onToggleCollapsed,
   onToggleLocale,
+  onOpenSearch,
+  onOpenNotifications,
+  onOpenHelp,
   t,
 }: AppShellProps) {
   const { user, logout } = useAuth();
@@ -84,15 +90,30 @@ export function AppShell({
         </Tooltip>
         <div className="topbar-actions">
           <Tooltip title={t("common.search")}>
-            <Button className="icon-button" icon={<SearchOutlined />} type="text" />
+            <Button
+              className="icon-button"
+              icon={<SearchOutlined />}
+              type="text"
+              onClick={onOpenSearch}
+            />
           </Tooltip>
           <Tooltip title={t("common.notifications")}>
-            <Button className="icon-button notification-button" icon={<BellOutlined />} type="text">
+            <Button
+              className="icon-button notification-button"
+              icon={<BellOutlined />}
+              type="text"
+              onClick={onOpenNotifications}
+            >
               <span className="notification-dot" />
             </Button>
           </Tooltip>
           <Tooltip title={t("common.help")}>
-            <Button className="icon-button" icon={<QuestionCircleOutlined />} type="text" />
+            <Button
+              className="icon-button"
+              icon={<QuestionCircleOutlined />}
+              type="text"
+              onClick={onOpenHelp}
+            />
           </Tooltip>
           <Button className="language-button" type="text" onClick={onToggleLocale}>
             {t("common.language")}
