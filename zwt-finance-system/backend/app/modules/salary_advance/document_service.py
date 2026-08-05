@@ -481,6 +481,10 @@ class SalaryAdvanceDocumentService:
             md_signature_path=managing_director.path,
             finance_signature_version=finance.version_snapshot(),
             md_signature_version=managing_director.version_snapshot(),
+            # 每个签名位取**自己那张签名资产**的比例。两个位常常是两个人的章，
+            # 各自在签名库维护页调过各自的尺寸。
+            finance_scale_percent=finance.asset.scale_percent,
+            md_scale_percent=managing_director.asset.scale_percent,
         )
 
     async def _resolve_signature(

@@ -3167,21 +3167,27 @@ select {
   overflow-y: auto;
 }
 
+/* 容器就是"整页"：叠加层的百分比坐标全都相对它算，所以它的长宽比必须是
+   底版 mediabox 的长宽比（595.25 x 841.85，三份底版实测一致），不能用
+   A4 的名义值 595.28 x 841.89。 */
 .pdf-page-container {
   position: relative;
   width: 100%;
   max-width: 480px;
-  aspect-ratio: 595.28 / 841.89;
+  aspect-ratio: 595.25 / 841.85;
   background: #ffffff;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   border-radius: 4px;
   overflow: hidden;
 }
 
+/* fill 而非 contain：底图是整页 150 DPI 渲染，像素取整后长宽比与页面差
+   0.06%，contain 会留出零点几像素的黑边并把整幅图往下推——量很小，但那是
+   一段没人对得上账的偏移。fill 让底图与容器严格重合，坐标系就只有一个。 */
 .pdf-underlay-image {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: fill;
   display: block;
 }
 
@@ -3204,23 +3210,58 @@ select {
   white-space: nowrap;
 }
 
-/* 核心签名套印图层：与后端 ReportLab PDF 坐标 100% 同比例定位 */
+/* 核心签名套印图层：与后端 ReportLab PDF 坐标 100% 同比例定位。
+ *
+ * 这里**不能有 transform**。内联样式写的 left/bottom 是签名框左下角
+ * （后端 drawImage 的 x/y 就是左下角），以前挂着一句 translate(-50%, 50%)，
+ * 于是预览把签名整体左移半个框宽、下移半个框高：WHT 差 47.5pt/21pt
+ * (16.8mm/7.4mm)，TAX INV 差 75pt/23pt。位移量还随缩放比变化，
+ * 越调越对不上。上面那行 .pdf-field 的 translate(-50%,-50%) 是对的——
+ * 那些样例文字是按中心定位的，两者不要互相抄。 */
 .exact-signature-overlay-box {
   position: absolute;
-  transform: translate(-50%, 50%);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 5;
   pointer-events: none;
-  transition: width 0.12s ease, height 0.12s ease;
+  transition: width 0.12s ease, height 0.12s ease, left 0.12s ease, bottom 0.12s ease;
 }
 
 .exact-signature-overlay-box img {
   width: 100%;
   height: 100%;
+  /* contain = ReportLab 的 preserveAspectRatio=True + anchor="c"：等比缩到框内并居中 */
   object-fit: contain;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.25));
+}
+
+/* 这张签名的适用范围没勾这个签名位：出票时这里是空的，画成虚框而不是留白，
+   否则用户会以为预览坏了。 */
+.exact-signature-overlay-box.is-not-applicable {
+  border: 1px dashed #d0d5dd;
+  border-radius: 2px;
+  background: rgba(240, 242, 245, 0.55);
+}
+
+.exact-signature-overlay-box .not-applicable-hint {
+  font-size: 9px;
+  line-height: 1.1;
+  color: #98a2b3;
+  text-align: center;
+  padding: 0 2px;
+}
+
+.signature-preview-alert {
+  margin-bottom: 10px;
+}
+
+.template-fidelity-note {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #667085;
 }
 
 .signature-source-panel .panel-title,

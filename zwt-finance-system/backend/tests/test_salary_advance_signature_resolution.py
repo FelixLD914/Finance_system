@@ -43,6 +43,7 @@ class FakeAsset:
     storage_key: str = "signatures/stub.png"
     sha256: str = "0" * 64
     signer_name: str | None = None
+    scale_percent: int = 100
 
 
 # ── 纯函数层 ────────────────────────────────────────────────────────────────
@@ -338,3 +339,32 @@ def test_signer_name_is_recorded_in_the_manifest(
 
     assert result.md_signature_version["signerName"] == "龚尧文"
     assert result.finance_signature_version["signerName"] == "邢兰慧"
+
+
+def test_each_position_carries_its_own_saved_scale(
+    tmp_path: Path,
+    signature_file: Path,
+) -> None:
+    """签名库维护页存的 scale_percent 必须跟着各自那张章走到出票。
+
+    加这条之前，工资预支是三种单据里唯一把它整个丢掉的：WHT 与 TAX INV 的
+    document_service 都传了 signature.scale_percent，这里没传，于是维护页弹
+    "已成功将签名缩放效果应用保存至系统开票"，工资预支单出来纹丝不动。
+    两个位常是两个人的章、各调各的尺寸，所以必须分开取——合成一个值就等于
+    让董事的章跟着财务的比例走。
+    """
+    finance = FakeAsset("FIN_XING_LANHUI", FINANCE_USAGE, signer_name="邢兰慧", scale_percent=80)
+    md = FakeAsset("MD_ZHU_FAJIAN", MD_USAGE, signer_name="朱发坚", scale_percent=135)
+    session = FakeSession(by_code=[finance, md], defaults=[])
+    service = build_service(session, tmp_path)
+    record = FakeRecord(
+        {
+            "finance_signature_code": "FIN_XING_LANHUI",
+            "md_signature_code": "MD_ZHU_FAJIAN",
+        }
+    )
+
+    result = snapshot(service, record)
+
+    assert result.finance_scale_percent == 80
+    assert result.md_scale_percent == 135
