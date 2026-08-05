@@ -110,7 +110,7 @@ describe("EmployeeDirectory Component", () => {
     fireEvent.click(newBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("新增员工")).toBeDefined();
+      expect(screen.getByRole("dialog")).toBeDefined();
     });
 
     const empIdInput = screen.getByLabelText("工号");

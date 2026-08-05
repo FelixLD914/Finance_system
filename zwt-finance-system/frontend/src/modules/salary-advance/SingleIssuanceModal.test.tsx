@@ -1,0 +1,91 @@
+// @vitest-environment jsdom
+
+import { StyleProvider } from "@ant-design/cssinjs";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { App as AntApp } from "antd";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { SingleIssuanceModal } from "./SingleIssuanceModal";
+
+const mockListEmployees = vi.fn();
+const mockCreateSingleRecord = vi.fn();
+
+vi.mock("./api", () => ({
+  listEmployees: (...args: unknown[]) => mockListEmployees(...args),
+  createSingleSalaryAdvanceRecord: (...args: unknown[]) => mockCreateSingleRecord(...args),
+}));
+
+beforeAll(() => {
+  class MockResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as Record<string, unknown>).ResizeObserver = MockResizeObserver;
+  const storage = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+      clear: () => storage.clear(),
+    },
+  });
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: () => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    }),
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.resetAllMocks();
+});
+
+describe("SingleIssuanceModal", () => {
+  it("renders single issuance modal and triggers cancel", async () => {
+    mockListEmployees.mockResolvedValue({
+      items: [
+        {
+          id: "emp-1",
+          empId: "EMP001",
+          enName: "Somchai Saelim",
+          chineseName: "宋柴",
+          department: "Engineering",
+          position: "Senior Developer",
+          startDate: "2023-01-15",
+          isActive: true,
+        },
+      ],
+      total: 1,
+    });
+
+    const handleSuccess = vi.fn();
+    const handleClose = vi.fn();
+
+    render(
+      <StyleProvider mock="server">
+        <AntApp>
+          <SingleIssuanceModal open={true} onClose={handleClose} onSuccess={handleSuccess} />
+        </AntApp>
+      </StyleProvider>,
+    );
+
+    expect(screen.getByText("单张开具工资预支单")).toBeDefined();
+
+    await waitFor(() => {
+      expect(mockListEmployees).toHaveBeenCalled();
+    });
+
+    const cancelBtn = screen.getByRole("button", { name: /取 消/i });
+    fireEvent.click(cancelBtn);
+
+    expect(handleClose).toHaveBeenCalled();
+  });
+});
