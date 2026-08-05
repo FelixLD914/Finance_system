@@ -36,7 +36,9 @@ FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
 PREVIEW_TSX = (
     FRONTEND_ROOT / "src" / "modules" / "administration" / "SignaturePreviewModal.tsx"
 )
-GLOBAL_CSS = FRONTEND_ROOT / "src" / "styles" / "global.css"
+# 样式分三层（styles/tokens, styles/global, ui/finance-ui），层叠里最后加载的赢，
+# 所以守卫要扫全部而不是只扫 global.css。
+CSS_ROOT = FRONTEND_ROOT / "src"
 PUBLIC_DIR = FRONTEND_ROOT / "public"
 BACKGROUND_MANIFEST = PUBLIC_DIR / "signature-preview-backgrounds.json"
 TEMPLATE_DIR = BACKEND_ROOT / "app" / "assets" / "templates"
@@ -102,14 +104,22 @@ def test_preview_box_matches_backend_stamp_box(usage: str) -> None:
         )
 
 
-def _css_rule(selector: str) -> str:
-    """取 global.css 里某个选择器的声明块（本文件只需要精确匹配的单选择器规则）。"""
-    source = GLOBAL_CSS.read_text(encoding="utf-8")
-    match = re.search(
-        rf"(?<![\w.-]){re.escape(selector)}\s*\{{(?P<body>[^}}]*)\}}", source
-    )
-    assert match, f"{GLOBAL_CSS.name} 里找不到 {selector} 的样式规则"
-    return match.group("body")
+def _css_rules(selector: str) -> list[tuple[str, str]]:
+    """在**全部**前端样式表里找这个选择器的声明块，返回 (文件名, 声明块)。
+
+    不能只看 global.css：样式分三层（tokens / global / ui/finance-ui），
+    finance-ui.css 最后加载、层叠里赢。只盯着 global.css 的守卫，会被另一个
+    文件里的一句覆盖悄悄绕过去——那正是这条测试要拦的那类事故。
+    """
+    found: list[tuple[str, str]] = []
+    for path in sorted(CSS_ROOT.rglob("*.css")):
+        for match in re.finditer(
+            rf"(?<![\w.-]){re.escape(selector)}\s*\{{(?P<body>[^}}]*)\}}",
+            path.read_text(encoding="utf-8"),
+        ):
+            found.append((str(path.relative_to(FRONTEND_ROOT)), match.group("body")))
+    assert found, f"前端样式表里找不到 {selector} 的规则（搜了 {CSS_ROOT}）"
+    return found
 
 
 def test_stamp_layer_is_not_displaced_by_a_transform() -> None:
@@ -120,27 +130,36 @@ def test_stamp_layer_is_not_displaced_by_a_transform() -> None:
     离实际出票越远。同一个块里 `.pdf-field` 用 translate(-50%,-50%) 是对的
     （那些样例文字按中心定位），两者贴得很近，很容易抄串。
     """
-    body = _css_rule(".exact-signature-overlay-box")
-    assert "transform" not in body, (
-        ".exact-signature-overlay-box 上又出现了 transform。\n"
-        "这个盒子的 left/bottom 直接就是后端 drawImage 的 x/y（签名框左下角），"
+    offenders = [
+        (name, body.strip())
+        for name, body in _css_rules(".exact-signature-overlay-box")
+        if "transform" in body
+    ]
+    assert not offenders, (
+        ".exact-signature-overlay-box 上又出现了 transform：\n"
+        + "\n".join(f"  {name}: {body}" for name, body in offenders)
+        + "\n这个盒子的 left/bottom 直接就是后端 drawImage 的 x/y（签名框左下角），"
         "不需要也不能有任何位移；要做居中缩放请改 SignaturePreviewModal.tsx 的 "
-        "stampRectPt（围绕框中心算），别用 transform 兜。\n"
-        f"当前声明块：{body.strip()}"
+        "stampRectPt（围绕框中心算），别用 transform 兜。"
     )
 
 
 def test_preview_page_container_uses_the_real_mediabox_ratio() -> None:
     """容器就是"整页"：叠加坐标全按它的百分比算，长宽比错了整层就跟着斜。"""
-    body = _css_rule(".pdf-page-container")
-    match = re.search(r"aspect-ratio:\s*([\d.]+)\s*/\s*([\d.]+)", body)
-    assert match, f".pdf-page-container 缺 aspect-ratio：{body.strip()}"
-    width, height = float(match.group(1)), float(match.group(2))
-    assert (width, height) == (PAGE_WIDTH, PAGE_HEIGHT), (
-        f".pdf-page-container 的 aspect-ratio 写的是 {width} / {height}，"
-        f"三份底版的 mediabox 是 {PAGE_WIDTH} x {PAGE_HEIGHT}。"
-        "用 A4 的名义值（595.28 / 841.89）会让整层叠加有微小系统性偏移。"
-    )
+    ratios = [
+        (name, re.search(r"aspect-ratio:\s*([\d.]+)\s*/\s*([\d.]+)", body))
+        for name, body in _css_rules(".pdf-page-container")
+    ]
+    declared = [(name, m) for name, m in ratios if m]
+    assert declared, ".pdf-page-container 没有任何一处声明 aspect-ratio"
+    for name, match in declared:
+        assert match is not None
+        width, height = float(match.group(1)), float(match.group(2))
+        assert (width, height) == (PAGE_WIDTH, PAGE_HEIGHT), (
+            f"{name} 里 .pdf-page-container 的 aspect-ratio 写的是 {width} / {height}，"
+            f"三份底版的 mediabox 是 {PAGE_WIDTH} x {PAGE_HEIGHT}。"
+            "用 A4 的名义值（595.28 / 841.89）会让整层叠加有微小系统性偏移。"
+        )
 
 
 def test_preview_backgrounds_are_rendered_from_the_current_plates() -> None:
