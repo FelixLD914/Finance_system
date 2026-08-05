@@ -545,7 +545,7 @@ export function SignaturePreviewModal({
             <span>系统真实开票文件底板套印预览 (System PDF Template Preview)</span>
           </div>
 
-          <div className="template-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <div className="template-toolbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <Segmented
               className="template-segmented"
               options={templateOptions}
@@ -600,9 +600,11 @@ export function SignaturePreviewModal({
             <div
               className="pdf-page-container"
               style={{
-                maxWidth: `${Math.round(380 * (templateZoom / 100))}px`,
+                width: `${Math.round(380 * (templateZoom / 100))}px`,
                 minWidth: `${Math.round(380 * (templateZoom / 100))}px`,
-                transition: "width 0.15s ease, max-width 0.15s ease, min-width 0.15s ease",
+                maxWidth: "none",
+                flexShrink: 0,
+                transition: "width 0.15s ease, min-width 0.15s ease",
               }}
             >
               <img

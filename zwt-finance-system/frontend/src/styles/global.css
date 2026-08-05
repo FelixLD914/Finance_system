@@ -3042,9 +3042,11 @@ select {
 
 .signature-preview-container {
   display: grid;
-  grid-template-columns: 290px 1fr;
+  grid-template-columns: 290px minmax(0, 1fr);
   gap: 14px;
   padding-top: 4px;
+  width: 100%;
+  min-width: 0;
 }
 
 .signature-source-panel,
@@ -3055,6 +3057,9 @@ select {
   border: 1px solid #eaecf0;
   border-radius: 10px;
   padding: 12px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .signature-source-panel .panel-title.doc-signature-block .signature-overlay {
@@ -3155,6 +3160,9 @@ select {
 /* 系统真实 PDF 文件模板视口与全真图层定位 */
 .pdf-template-underlay-viewport {
   flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -3164,6 +3172,7 @@ select {
   padding: 10px;
   max-height: 380px;
   overflow: auto;
+  box-sizing: border-box;
 }
 
 .pdf-page-container {
@@ -3175,6 +3184,7 @@ select {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   border-radius: 4px;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 /* fill 而非 contain：底图是整页 150 DPI 渲染，像素取整后长宽比与页面差
