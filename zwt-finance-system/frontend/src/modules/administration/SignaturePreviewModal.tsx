@@ -408,7 +408,8 @@ export function SignaturePreviewModal({
 
   return (
     <Modal
-      centered
+      style={{ top: 20 }}
+      styles={{ body: { padding: "10px 16px" } }}
       destroyOnClose
       footer={
         <div className="signature-preview-footer">

@@ -13,11 +13,10 @@ import type { ModuleKey } from "../modules/registry";
 
 export interface SystemNotification {
   id: string;
-  createdAt: string;
   read: boolean;
   type: "action" | "info" | "success";
   moduleKey: ModuleKey;
-  // Optional custom titles/descriptions if added dynamically
+  createdAt?: string;
   title?: string;
   description?: string;
   titleEn?: string;
@@ -32,9 +31,17 @@ interface NotificationsDrawerProps {
   t: Translate;
 }
 
+const NOW = Date.now();
+
 const NOTIFICATION_DICTIONARY: Record<
   string,
-  { titleZh: string; titleEn: string; descZh: string; descEn: string }
+  {
+    titleZh: string;
+    titleEn: string;
+    descZh: string;
+    descEn: string;
+    createdAt: string;
+  }
 > = {
   "notif-1": {
     titleZh: "WHT 待复核单据提醒",
@@ -42,6 +49,7 @@ const NOTIFICATION_DICTIONARY: Record<
     descZh: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
     descEn:
       "2 WHT certificate drafts submitted, awaiting supervisor review & formal number allocation",
+    createdAt: new Date(NOW - 10 * 60 * 1000).toISOString(), // 10 mins ago
   },
   "notif-2": {
     titleZh: "TAX INV BOT 汇率更新成功",
@@ -49,6 +57,7 @@ const NOTIFICATION_DICTIONARY: Record<
     descZh: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
     descEn:
       "Latest BOT USD buying transfer exchange rate synced from API successfully",
+    createdAt: new Date(NOW - 60 * 60 * 1000).toISOString(), // 1 hour ago
   },
   "notif-3": {
     titleZh: "工资预支单数据待校验",
@@ -56,6 +65,7 @@ const NOTIFICATION_DICTIONARY: Record<
     descZh: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
     descEn:
       "Newly imported Salary Advance batch 202608 has 1 employee record needing name check",
+    createdAt: new Date(NOW - 120 * 60 * 1000).toISOString(), // 2 hours ago
   },
   "notif-4": {
     titleZh: "签名图库默认版本提示",
@@ -63,36 +73,35 @@ const NOTIFICATION_DICTIONARY: Record<
     descZh: "系统管理中已更新财务负责人与总经理印鉴签名图片",
     descEn:
       "Default signature image assets for supervisor and MD updated in System Admin",
+    createdAt: new Date(NOW - (24 * 60 + 5 * 60) * 60 * 1000).toISOString(), // Yesterday 16:30
   },
 };
-
-const NOW = Date.now();
 
 const INITIAL_NOTIFICATIONS: SystemNotification[] = [
   {
     id: "notif-1",
-    createdAt: new Date(NOW - 10 * 60 * 1000).toISOString(), // 10 mins ago
+    createdAt: NOTIFICATION_DICTIONARY["notif-1"].createdAt,
     read: false,
     type: "action",
     moduleKey: "wht",
   },
   {
     id: "notif-2",
-    createdAt: new Date(NOW - 60 * 60 * 1000).toISOString(), // 1 hour ago
+    createdAt: NOTIFICATION_DICTIONARY["notif-2"].createdAt,
     read: false,
     type: "success",
     moduleKey: "tax-invoice",
   },
   {
     id: "notif-3",
-    createdAt: new Date(NOW - 120 * 60 * 1000).toISOString(), // 2 hours ago
+    createdAt: NOTIFICATION_DICTIONARY["notif-3"].createdAt,
     read: false,
     type: "action",
     moduleKey: "salary-advance",
   },
   {
     id: "notif-4",
-    createdAt: new Date(NOW - (24 * 60 + 5 * 60) * 60 * 1000).toISOString(), // Yesterday
+    createdAt: NOTIFICATION_DICTIONARY["notif-4"].createdAt,
     read: true,
     type: "info",
     moduleKey: "administration",
@@ -128,16 +137,15 @@ function formatRelativeTime(isoString: string, isEn: boolean): string {
       ? `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`
       : `${diffHours} 小时前`;
   }
+
+  const hours = String(date.getHours()).padStart(2, "0");
+  const mins = String(date.getMinutes()).padStart(2, "0");
   if (diffDays === 1) {
-    const hours = String(date.getHours()).padStart(2, "0");
-    const mins = String(date.getMinutes()).padStart(2, "0");
     return isEn ? `Yesterday ${hours}:${mins}` : `昨天 ${hours}:${mins}`;
   }
 
   const month = date.getMonth() + 1;
   const day = date.getDate();
-  const hours = String(date.getHours()).padStart(2, "0");
-  const mins = String(date.getMinutes()).padStart(2, "0");
   return isEn
     ? `${month}/${day} ${hours}:${mins}`
     : `${month}月${day}日 ${hours}:${mins}`;
@@ -250,7 +258,11 @@ export function NotificationsDrawer({
               ? dict?.descEn || n.descriptionEn || n.description
               : dict?.descZh || n.description;
 
-            const formattedTime = formatRelativeTime(n.createdAt, isEn);
+            const rawIso = n.createdAt || dict?.createdAt;
+            const formattedTime = formatRelativeTime(
+              rawIso || new Date(NOW - 10 * 60 * 1000).toISOString(),
+              isEn,
+            );
 
             return (
               <div

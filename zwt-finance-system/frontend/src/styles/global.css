@@ -3042,10 +3042,9 @@ select {
 
 .signature-preview-container {
   display: grid;
-  grid-template-columns: 310px 1fr;
-  gap: 20px;
-  min-height: 480px;
-  padding-top: 12px;
+  grid-template-columns: 290px 1fr;
+  gap: 14px;
+  padding-top: 4px;
 }
 
 .signature-source-panel,
@@ -3055,7 +3054,7 @@ select {
   background: #fcfcfd;
   border: 1px solid #eaecf0;
   border-radius: 10px;
-  padding: 16px;
+  padding: 12px;
 }
 
 .signature-source-panel .panel-title.doc-signature-block .signature-overlay {
@@ -3082,8 +3081,8 @@ select {
   background: #ffffff;
   border: 1px solid #eaecf0;
   border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 14px;
+  padding: 10px;
+  margin-bottom: 10px;
 }
 
 .signature-scale-control-card .control-header {
@@ -3162,21 +3161,18 @@ select {
   background: #f2f4f7;
   border: 1px solid #d0d5dd;
   border-radius: 8px;
-  padding: 16px;
-  max-height: 540px;
+  padding: 10px;
+  max-height: 380px;
   overflow-y: auto;
 }
 
-/* 容器就是"整页"：叠加层的百分比坐标全都相对它算，所以它的长宽比必须是
-   底版 mediabox 的长宽比（595.25 x 841.85，三份底版实测一致），不能用
-   A4 的名义值 595.28 x 841.89。 */
 .pdf-page-container {
   position: relative;
   width: 100%;
-  max-width: 480px;
+  max-width: 380px;
   aspect-ratio: 595.25 / 841.85;
   background: #ffffff;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   border-radius: 4px;
   overflow: hidden;
 }
