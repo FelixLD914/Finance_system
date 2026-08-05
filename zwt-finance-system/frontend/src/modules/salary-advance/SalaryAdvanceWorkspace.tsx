@@ -383,20 +383,20 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
 
   const loadActiveSignatures = useCallback(async () => {
     try {
-      const sigs = await listSignatures(true, "salary_advance");
+      const sigs = await listSignatures(false, "salary_advance");
       setSignatures(sigs);
-      const finDefault =
-        sigs.find(
-          (s) =>
-            s.isDefault &&
-            (s.usage.includes("salary_advance_finance") || s.usage.includes("salary_advance")),
-        ) || sigs.find((s) => s.usage.includes("salary_advance_finance") || s.usage.includes("salary_advance"));
-      const mdDefault =
-        sigs.find(
-          (s) =>
-            s.isDefault &&
-            (s.usage.includes("salary_advance_md") || s.usage.includes("salary_advance")),
-        ) || sigs.find((s) => s.usage.includes("salary_advance_md") || s.usage.includes("salary_advance"));
+      const finSigs = sigs.filter(
+        (s) =>
+          s.usage.includes("salary_advance_finance") ||
+          s.usage.includes("salary_advance"),
+      );
+      const mdSigs = sigs.filter(
+        (s) =>
+          s.usage.includes("salary_advance_md") ||
+          s.usage.includes("salary_advance"),
+      );
+      const finDefault = finSigs.find((s) => s.isDefault) ?? finSigs[0];
+      const mdDefault = mdSigs.find((s) => s.isDefault) ?? mdSigs[0];
       if (finDefault) setSelectedFinanceSigId(finDefault.id);
       if (mdDefault) setSelectedMdSigId(mdDefault.id);
     } catch {
@@ -612,16 +612,29 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     }
   };
 
-  const startGeneration = () => {
+  const startGeneration = async () => {
     if (!selected) return;
-    setGenerateOpen(true);
+    try {
+      setBusy(true);
+      await loadActiveSignatures();
+      setGenerateOpen(true);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submitGeneration = async () => {
     if (!selected) return;
     setBusy(true);
     try {
+      if (selected.batch.status === "ready") {
+        await lockSalaryAdvanceBatch(selected.batch.id);
+      }
       const job = await createSalaryAdvanceJob(selected.batch.id, {
+        financeSignatureId: selectedFinanceSigId,
+        mdSignatureId: selectedMdSigId,
         finance_signature_id: selectedFinanceSigId,
         md_signature_id: selectedMdSigId,
       });
@@ -902,13 +915,19 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
                 {t("salary.lock")}
               </Button>
               <Button
-                disabled={selected.batch.status !== "locked"}
+                disabled={!["ready", "locked"].includes(selected.batch.status)}
                 icon={<SafetyCertificateOutlined />}
                 loading={busy}
                 type="primary"
-                onClick={() => void startGeneration()}
+                onClick={() => {
+                  startGeneration().catch((err) => {
+                    message.error(err instanceof Error ? err.message : String(err));
+                  });
+                }}
               >
-                {t("salary.generate")}
+                {selected.batch.status === "ready"
+                  ? t("salary.batchApproveAndGenerate")
+                  : t("salary.generate")}
               </Button>
             </Space>
           </div>
@@ -1253,40 +1272,46 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       <Modal
         destroyOnHidden
         open={generateOpen}
-        title="选择盖章签名并批量生成凭证"
-        okText="确认生成"
+        title={t("salary.batchApproveGenerateTitle")}
+        okText={t("common.confirm")}
         cancelText={t("common.cancel")}
         confirmLoading={busy}
         onCancel={() => setGenerateOpen(false)}
-        onOk={() => void submitGeneration()}
+        onOk={() => {
+          submitGeneration().catch((err) => {
+            message.error(err instanceof Error ? err.message : String(err));
+          });
+        }}
       >
         <Space direction="vertical" style={{ width: "100%", marginTop: 8 }} size="large">
           <div>
             <div style={{ marginBottom: 6, fontWeight: 500 }}>
-              财务负责人签名 (Finance Director Signature):
+              {t("salary.financeSignature")}
             </div>
             <Select
+              aria-label={t("salary.financeSignature")}
               style={{ width: "100%" }}
               value={selectedFinanceSigId}
               onChange={(val) => setSelectedFinanceSigId(val)}
               options={financeSignatures.map((s) => ({
                 value: s.id,
-                label: `${s.name} (${s.originalFileName}) ${s.isDefault ? "【默认签名】" : ""}`,
+                label: `${s.name}${s.signerName ? ` (${s.signerName})` : ""}${s.isDefault ? ` [${t("salary.defaultSignatureTag")}]` : ""}`,
               }))}
             />
           </div>
 
           <div>
             <div style={{ marginBottom: 6, fontWeight: 500 }}>
-              董事/总经理签名 (Managing Director Signature):
+              {t("salary.mdSignature")}
             </div>
             <Select
+              aria-label={t("salary.mdSignature")}
               style={{ width: "100%" }}
               value={selectedMdSigId}
               onChange={(val) => setSelectedMdSigId(val)}
               options={mdSignatures.map((s) => ({
                 value: s.id,
-                label: `${s.name} (${s.originalFileName}) ${s.isDefault ? "【默认签名】" : ""}`,
+                label: `${s.name}${s.signerName ? ` (${s.signerName})` : ""}${s.isDefault ? ` [${t("salary.defaultSignatureTag")}]` : ""}`,
               }))}
             />
           </div>

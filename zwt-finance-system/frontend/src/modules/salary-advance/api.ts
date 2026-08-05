@@ -86,6 +86,10 @@ export function lockSalaryAdvanceBatch(
 export function createSalaryAdvanceJob(
   batchId: string,
   signatures?: {
+    financeSignatureId?: string;
+    mdSignatureId?: string;
+    financeSignatureCode?: string;
+    mdSignatureCode?: string;
     finance_signature_id?: string;
     md_signature_id?: string;
     finance_signature_code?: string;
