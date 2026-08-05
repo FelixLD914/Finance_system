@@ -49,6 +49,31 @@ class JobAggregate:
     documents: list[SalaryAdvanceGeneratedDocument]
 
 
+def declared_modules(usage: str | None) -> set[str]:
+    """签名"字面上写了"哪些模块——不做 core.signature_usage 里的角色展开。
+
+    展开后的集合回答的是"能不能盖"，这里回答的是"是不是专门为这个角色设的"。
+    挑默认签名时要用后者：通用 salary_advance 也能盖财务位，但一旦有人专门配了
+    salary_advance_finance，就该由专门的那张胜出。
+    """
+    return {item.strip() for item in (usage or "").split(",") if item.strip()}
+
+
+def rank_role_signatures(
+    assets: list[SignatureAsset],
+    role_usage: str,
+) -> list[SignatureAsset]:
+    """筛掉盖不了这个角色位的，并把"专门为该角色设的"排到前面。
+
+    入参顺序即同档次内的优先级（调用方已按版本或创建时间排好），这里只做稳定
+    重排，不改同档次内的相对次序。
+    """
+    usable = [asset for asset in assets if signature_allows(asset.usage, role_usage)]
+    explicit = [a for a in usable if role_usage in declared_modules(a.usage)]
+    explicit_ids = {id(a) for a in explicit}
+    return explicit + [a for a in usable if id(a) not in explicit_ids]
+
+
 @dataclass(frozen=True)
 class ResolvedSignature:
     asset: SignatureAsset
@@ -60,6 +85,8 @@ class ResolvedSignature:
             "assetName": self.asset.name,
             "assetVersion": self.asset.version,
             "assetSha256": self.asset.sha256,
+            # 落进 manifest：事后要能回答"这张单子上印的名字是谁、盖的是哪一版章"。
+            "signerName": self.asset.signer_name or "",
         }
 
 
@@ -147,6 +174,10 @@ class SalaryAdvanceDocumentService:
 
         if not target_ids:
             raise SalaryAdvanceStateError("没有可生成或可重试的记录")
+        # 选定的签名在这里就校验一遍：不然要等后台任务跑到某一条记录才炸，
+        # 那时前面几十份文件已经生成、任务状态也已经是 partially_completed 了。
+        await self._assert_selectable(finance_signature_id, "finance")
+        await self._assert_selectable(md_signature_id, "md")
         template = await SalaryAdvanceService(
             self.session,
             self.actor_name,
@@ -434,8 +465,18 @@ class SalaryAdvanceDocumentService:
         md_id = md_signature_id or (job.md_signature_id if job else None)
         finance = await self._resolve_signature(record, "finance", signature_id=fin_id)
         managing_director = await self._resolve_signature(record, "md", signature_id=md_id)
+
+        # 单据上印的姓名以**签名资产**上的 signer_name 为准，不用导入行里的那一列。
+        # 这两样以前来自不同源头（姓名来自导入表、章来自签名解析链），可以是不同
+        # 的人而系统拦不住；印的名字跟着章走，这种不一致在结构上就不可能出现了。
+        # 写回 normalized_data 一处，xlsx 与 pdf 两条产出链路同时生效——
+        # render_salary_advance_workbook 把 normalized 写进「当前记录」，
+        # 表单里 H37/H47 的公式再从 B19/B22 取。
+        normalized = dict(record.normalized_data)
+        normalized["finance_display_name"] = finance.asset.signer_name or ""
+        normalized["md_display_name"] = managing_director.asset.signer_name or ""
         return GenerationSnapshot(
-            normalized_data=dict(record.normalized_data),
+            normalized_data=normalized,
             finance_signature_path=finance.path,
             md_signature_path=managing_director.path,
             finance_signature_version=finance.version_snapshot(),
@@ -448,82 +489,131 @@ class SalaryAdvanceDocumentService:
         role: str,
         signature_id: uuid.UUID | None = None,
     ) -> ResolvedSignature:
-        role_usage = "salary_advance_finance" if role == "finance" else "salary_advance_md"
-        asset: SignatureAsset | None = None
+        """定这一行的这个角色位上盖谁的章。
 
+        取值顺序按"越具体越优先"排（2026-08-05 业务口径）：
+
+        1. **本次开具显式选定的那张**——用户在开具弹窗里点的，没有比这更明确的意图。
+        2. **这一行自带的签名代码**——导入文件对这一名员工的指示。总经理有两个人
+           （龚尧文 / 朱发坚），validation._resolve_signer_codes 宁可整行报错也不猜，
+           把这份判断丢掉就等于白做。
+        3. **该角色的默认签名**——都没说时的约定值；角色专属优先于通用
+           salary_advance（后者只是给角色化之前的老签名留的兼容）。
+
+        改过顺序：原实现把默认签名排在逐行代码之前，于是只要签名库里有一张默认签名，
+        导入文件里的 md_signature_code 就永远读不到——每一行都盖同一个人，而且不报警。
+
+        取不到就报错，**不做"随便挑一张能用的"兜底**。原实现的第 4 步会在指定签名
+        被停用时静默换成另一个人的签名盖在审批单上；这类错误金额看着都对，事后极难发现。
+        validation.py 里那句"正式单据上盖错签名比导入失败严重得多"，在这里同样成立。
+        """
+        role_usage = "salary_advance_finance" if role == "finance" else "salary_advance_md"
+        role_label = "财务负责人" if role == "finance" else "董事"
+
+        # 1. 本次开具显式选定的。选了却不能用要直接报错——静默降级会让用户以为
+        #    盖的是自己选的那张，实际盖的是别人的，"让用户选签名"就成了假功能。
         if signature_id is not None:
-            asset = await self.session.scalar(
-                select(SignatureAsset).where(
-                    SignatureAsset.id == signature_id,
+            return self._with_path(
+                await self._selected_signature(signature_id, role)
+            )
+
+        # 2. 这一行自带的签名代码。签名库里按名称找，同名取版本最新的一版。
+        code_key = "finance_signature_code" if role == "finance" else "md_signature_code"
+        code = str(record.normalized_data.get(code_key) or "").strip().upper()
+        if code:
+            candidates = (
+                await self.session.scalars(
+                    select(SignatureAsset)
+                    .where(
+                        func.upper(SignatureAsset.name) == code,
+                        SignatureAsset.deleted_at.is_(None),
+                        SignatureAsset.status == "active",
+                    )
+                    .order_by(SignatureAsset.version.desc())
+                )
+            ).all()
+            usable = rank_role_signatures(list(candidates), role_usage)
+            if usable:
+                return self._with_path(usable[0])
+            # 代码写了却找不到能用的：这一行明确指名了要盖哪张章，退回默认签名
+            # 就是盖成另一个人，所以报错而不是降级。导入侧不再校验这一列（它是
+            # 可选的、开具时可另选），所以这里是它唯一的把关点。
+            raise SalaryAdvanceStateError(
+                f"这条记录为【{role_label}】填了签名代码「{code}」，"
+                "但签名库里没有可用于工资预支该角色的同名签名。"
+                "请在开具时直接选定签名，或清空该列，或在系统管理 → 签名库维护中补上这张签名。"
+            )
+
+        # 3. 该角色的默认签名，角色专属优先于通用 salary_advance。
+        asset = await self._default_for_role(role_usage)
+        if asset is None:
+            raise SalaryAdvanceStateError(
+                f"签名库中没有可用于工资预支【{role_label}】的默认签名，"
+                "请在开具时选定签名，或在系统管理 → 签名库维护中设置默认签名"
+            )
+        return self._with_path(asset)
+
+    async def _assert_selectable(
+        self,
+        signature_id: uuid.UUID | None,
+        role: str,
+    ) -> None:
+        """开具入口处的前置校验；没选（None）是合法的，表示走后面的取值顺序。"""
+        if signature_id is not None:
+            await self._selected_signature(signature_id, role)
+
+    async def _selected_signature(
+        self,
+        signature_id: uuid.UUID,
+        role: str,
+    ) -> SignatureAsset:
+        """取用户显式选定的那张签名，不合格就报错——绝不降级到别人的签名。
+
+        单独成一个方法而不是内联进 _resolve_signature：create_job 要在还没有
+        record 的时候用同一套口径先校验一遍，两处判断必须同源。
+        """
+        role_usage = "salary_advance_finance" if role == "finance" else "salary_advance_md"
+        role_label = "财务负责人" if role == "finance" else "董事"
+        asset = await self.session.scalar(
+            select(SignatureAsset).where(
+                SignatureAsset.id == signature_id,
+                SignatureAsset.deleted_at.is_(None),
+                SignatureAsset.status == "active",
+            )
+        )
+        if asset is None:
+            raise SalaryAdvanceStateError(
+                f"为【{role_label}】选定的签名不存在或已停用，请重新选择"
+            )
+        if not signature_allows(asset.usage, role_usage):
+            raise SalaryAdvanceStateError(
+                f"签名「{asset.name}」的适用范围不含工资预支【{role_label}】，"
+                "请在系统管理 → 签名库维护中调整适用单据，或改选其他签名"
+            )
+        return asset
+
+    async def _default_for_role(self, role_usage: str) -> SignatureAsset | None:
+        """挑该角色的默认签名：显式声明了角色的排在只写通用 salary_advance 的前面。
+
+        通用 salary_advance 会同时满足财务与董事两个位（见 core.signature_usage 的
+        双向兼容），那是给角色化之前的老签名留的退路。一旦用户按新口径维护了角色
+        专属签名，就该由专属的胜出，否则维护了也不生效。
+        """
+        defaults = (
+            await self.session.scalars(
+                select(SignatureAsset)
+                .where(
                     SignatureAsset.deleted_at.is_(None),
                     SignatureAsset.status == "active",
+                    SignatureAsset.is_default.is_(True),
                 )
+                .order_by(SignatureAsset.created_at.desc())
             )
-            if asset and not signature_allows(asset.usage, role_usage):
-                asset = None
+        ).all()
+        ranked = rank_role_signatures(list(defaults), role_usage)
+        return ranked[0] if ranked else None
 
-        if asset is None:
-            # 1. 尝试以指定角色或工资预支单的默认签名提取
-            default_assets = (
-                await self.session.scalars(
-                    select(SignatureAsset)
-                    .where(
-                        SignatureAsset.deleted_at.is_(None),
-                        SignatureAsset.status == "active",
-                        SignatureAsset.is_default.is_(True),
-                    )
-                    .order_by(SignatureAsset.created_at.desc())
-                )
-            ).all()
-            asset = next(
-                (a for a in default_assets if signature_allows(a.usage, role_usage)),
-                None,
-            )
-
-        if asset is None:
-            # 2. 按数据记录里的 finance_signature_code / md_signature_code 字符编码在签名库中提取
-            code_key = "finance_signature_code" if role == "finance" else "md_signature_code"
-            code = str(record.normalized_data.get(code_key) or "").strip().upper()
-            if code:
-                candidates = (
-                    await self.session.scalars(
-                        select(SignatureAsset)
-                        .where(
-                            func.upper(SignatureAsset.name) == code,
-                            SignatureAsset.deleted_at.is_(None),
-                            SignatureAsset.status == "active",
-                        )
-                        .order_by(SignatureAsset.version.desc())
-                    )
-                ).all()
-                asset = next(
-                    (c for c in candidates if signature_allows(c.usage, role_usage)),
-                    None,
-                )
-
-        if asset is None:
-            # 3. 兜底提取：取全库该角色/预支单可用的最新 active 签名
-            all_actives = (
-                await self.session.scalars(
-                    select(SignatureAsset)
-                    .where(
-                        SignatureAsset.deleted_at.is_(None),
-                        SignatureAsset.status == "active",
-                    )
-                    .order_by(SignatureAsset.created_at.desc())
-                )
-            ).all()
-            asset = next(
-                (a for a in all_actives if signature_allows(a.usage, role_usage)),
-                None,
-            )
-
-        if asset is None:
-            role_label = "财务负责人" if role == "finance" else "董事"
-            raise SalaryAdvanceStateError(
-                f"签名库中没有可用于工资预支【{role_label}】的签名，请在系统管理 → 签名库维护中上传或选择设置"
-            )
-
+    def _with_path(self, asset: SignatureAsset) -> ResolvedSignature:
         path = self._storage_path(asset.storage_key)
         if not path.is_file():
             raise SalaryAdvanceStateError(f"签名资产文件不存在：{asset.name}")

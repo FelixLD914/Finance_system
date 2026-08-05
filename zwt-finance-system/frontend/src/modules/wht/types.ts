@@ -259,6 +259,12 @@ export interface SignatureAsset {
   version: number;
   status: "active" | "inactive";
   usage: SignatureUsage[];
+  /**
+   * 签名人姓名。**只有工资预支单会印它**（签名横线下方的 "( 姓名 )"），
+   * WHT 与 TAX INV 的单据上只有签名图，所以这两类签名此项为空是正常的。
+   * 适用单据勾了工资预支时必填——服务端按改完之后的 usage 判定。
+   */
+  signerName?: string | null;
   /** 默认签名按适用范围各算各的：各模块可以各有一张默认。 */
   isDefault: boolean;
   /** 用户选择的签名放大/缩小百分比比例（如 100 代表 100%，120 代表 120%）。 */

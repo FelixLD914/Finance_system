@@ -133,64 +133,16 @@ def _issue(field: str, code: str, message: str) -> dict[str, str]:
     return {"field": field, "code": code, "message": message}
 
 
-def _resolve_signer_codes(
-    data: dict[str, Any],
-    errors: list[dict[str, str]],
-    warnings: list[dict[str, str]],
-) -> tuple[str, str]:
-    """从签名代码或签字人姓名确定财务/总经理签名代码。
-
-    只做确定性的姓名→代码映射，绝不按期间、月份等无关字段猜签名人——
-    正式单据上盖错签名比导入失败严重得多。
-    """
-    finance_code = normalize_text(data.get("finance_signature_code")).upper()
-    finance_name = normalize_text(data.get("finance_display_name"))
-    if not finance_code:
-        if not finance_name or "邢兰慧" in finance_name or "LANHUI" in finance_name.upper():
-            # 本业务的财务签字人固定为邢兰慧（与旧工具口径一致），
-            # 留空时默认之，但要在校验报告里可见。
-            finance_code = "FIN_XING_LANHUI"
-            warnings.append(
-                _issue(
-                    "finance_signature_code",
-                    "DEFAULTED",
-                    "财务签名代码已按默认签字人邢兰慧填入",
-                )
-            )
-        else:
-            errors.append(
-                _issue(
-                    "finance_signature_code",
-                    "SIGNER_UNKNOWN",
-                    f"无法从财务签字人「{finance_name}」确定签名代码，请填写签名代码",
-                )
-            )
-
-    md_code = normalize_text(data.get("md_signature_code")).upper()
-    md_name = normalize_text(data.get("md_display_name"))
-    if not md_code:
-        md_upper = md_name.upper()
-        if "龚尧文" in md_name or "YAOWEN" in md_upper:
-            md_code = "MD_GONG_YAOWEN"
-        elif "朱发坚" in md_name or "FAJIAN" in md_upper:
-            md_code = "MD_ZHU_FAJIAN"
-        else:
-            errors.append(
-                _issue(
-                    "md_signature_code",
-                    "SIGNER_UNKNOWN",
-                    "无法确定总经理签名代码，请填写总经理签字人或签名代码",
-                )
-            )
-    return finance_code, md_code
-
-
 def validate_and_normalize_record(
     raw: dict[str, Any],
     *,
     batch_period: str | None = None,
-    active_signature_codes: set[str] | None = None,
 ) -> tuple[str, list[dict[str, str]], list[dict[str, str]], dict[str, Any]]:
+    """校验并规范化一行导入数据。
+
+    口径：**只校验单据上要印的信息**。签名不在此列——章在开具时选，
+    与 WHT 的批量导入一致。
+    """
     errors: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     normalized: dict[str, Any] = {}
@@ -304,41 +256,30 @@ def validate_and_normalize_record(
         )
     normalized["approval_status"] = approval_status
 
-    finance_code, md_code = _resolve_signer_codes(raw, errors, warnings)
-    finance_name = normalize_text(raw.get("finance_display_name"))
-    md_name = normalize_text(raw.get("md_display_name"))
-    normalized["finance_display_name"] = finance_name or "邢兰慧"
-    if md_name:
-        normalized["md_display_name"] = md_name
-    elif md_code == "MD_GONG_YAOWEN":
-        normalized["md_display_name"] = "龚尧文"
-    elif md_code == "MD_ZHU_FAJIAN":
-        normalized["md_display_name"] = "朱发坚"
-    else:
-        normalized["md_display_name"] = ""
-    normalized["finance_signature_code"] = finance_code
-    normalized["md_signature_code"] = md_code
-
-    if active_signature_codes is not None:
-        for field, code in (
-            ("finance_signature_code", finance_code),
-            ("md_signature_code", md_code),
-        ):
-            # 代码本身缺失时上面已报 SIGNER_UNKNOWN，不再叠加一条。
-            if code and code not in active_signature_codes:
-                errors.append(
-                    _issue(
-                        field,
-                        "SIGNATURE_NOT_FOUND",
-                        f"签名库中没有名为 {code} 的有效签名，请在系统管理 → 签名库维护",
-                    )
-                )
+    # 签名区的四列**全部可留空、全部不校验**（2026-08-05 口径，参照 WHT——
+    # WHT 的批量导入同样不碰签名，章在开票时选）。
+    #
+    # 签字人姓名不再从这里取：单据上印的名字以签名资产的 signer_name 为准
+    # （`SalaryAdvanceDocumentService._snapshot` 会覆盖掉这两列）。名字跟着章走，
+    # "印的人"和"盖的章"是不同的人这种事在结构上就不可能出现了。这两列留着只是
+    # 为了让导入原始数据可追溯，不参与出单。
+    #
+    # 签名代码同理：只是"盖哪张章"的可选提示，开具时可另选。原先这里有一整套
+    # 姓名→代码推断（龚尧文→MD_GONG_YAOWEN）、签名库存在性校验和两级硬阻断，
+    # 把开具时才定的事挡在了导入口上——整行判 invalid 之后 create_job 直接排除它，
+    # 那一行连被选中开具的机会都没有。整套已删除。
+    normalized["finance_display_name"] = normalize_text(raw.get("finance_display_name"))
+    normalized["md_display_name"] = normalize_text(raw.get("md_display_name"))
+    normalized["finance_signature_code"] = normalize_text(
+        raw.get("finance_signature_code")
+    ).upper()
+    normalized["md_signature_code"] = normalize_text(raw.get("md_signature_code")).upper()
 
     finance_date = parse_date(raw.get("finance_date")) or request_date
     md_date = parse_date(raw.get("md_date")) or request_date
-    if raw.get("finance_date") in (None, "") and finance_code:
+    if raw.get("finance_date") in (None, ""):
         warnings.append(_issue("finance_date", "DEFAULTED", "财务签字日期已默认等于申请日期"))
-    if raw.get("md_date") in (None, "") and md_code:
+    if raw.get("md_date") in (None, ""):
         warnings.append(_issue("md_date", "DEFAULTED", "总经理签字日期已默认等于申请日期"))
     normalized["finance_date"] = finance_date.isoformat() if finance_date else None
     normalized["md_date"] = md_date.isoformat() if md_date else None

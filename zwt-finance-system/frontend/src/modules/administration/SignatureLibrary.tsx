@@ -50,6 +50,17 @@ const usageColors: Record<SignatureUsage, string> = {
   salary_advance_md: "magenta",
 };
 
+/**
+ * 这张签名要不要填签名人姓名。
+ *
+ * 判据与后端 `app.core.signature_usage.requires_signer_name` 一致：只有工资预支单
+ * 会把姓名印到单据上（签名横线下方的 "( 姓名 )"），WHT / TAX INV 的单据上只有
+ * 签名图。前端这份只管显隐与即时提示，最终仍由后端按改完之后的 usage 兜底。
+ */
+function needsSignerName(usage: SignatureUsage[] | undefined): boolean {
+  return (usage ?? []).some((module) => module.startsWith("salary_advance"));
+}
+
 export function SignatureLibrary({ t }: SignatureLibraryProps) {
   const { message, modal } = AntApp.useApp();
   const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
@@ -101,6 +112,7 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
         file,
         Boolean(values.makeDefault),
         values.usage,
+        needsSignerName(values.usage) ? values.signerName : null,
       );
       message.success(t("wht.signatureUploaded"));
       setUploadOpen(false);
@@ -119,7 +131,11 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
     try {
       const values = await scopeForm.validateFields();
       setPending(true);
-      await updateSignature(scopeTarget.id, { usage: values.usage });
+      await updateSignature(scopeTarget.id, {
+        usage: values.usage,
+        // 取消勾选预支单时把姓名一并清掉，别在库里留着一个不再有意义的名字。
+        signerName: needsSignerName(values.usage) ? values.signerName : "",
+      });
       message.success(t("common.saved"));
       setScopeTarget(null);
       await reload();
@@ -299,7 +315,10 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
               icon={<TagsOutlined />}
               size="small"
               onClick={() => {
-                scopeForm.setFieldsValue({ usage: signature.usage });
+                scopeForm.setFieldsValue({
+                  usage: signature.usage,
+                  signerName: signature.signerName ?? "",
+                });
                 setScopeTarget(signature);
               }}
             >
@@ -459,6 +478,28 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
             {/* 一张签名可以同时适用于多个模块，所以是多选而不是单选。 */}
             <Checkbox.Group options={usageOptions} />
           </Form.Item>
+          {/* 签名人姓名只有工资预支单会印（签名横线下方的 "( 姓名 )"），
+              WHT / TAX INV 的单据上只有签名图。所以这一项跟着适用单据显隐，
+              勾了预支单才出现并必填——否则只用于 WHT 的签名会被逼着编个没人看的名字。 */}
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) =>
+              needsSignerName(prev.usage) !== needsSignerName(curr.usage)
+            }
+          >
+            {({ getFieldValue }) =>
+              needsSignerName(getFieldValue("usage")) ? (
+                <Form.Item
+                  name="signerName"
+                  label={t("wht.signerName")}
+                  extra={t("wht.signerNameHint")}
+                  rules={[{ required: true, message: t("wht.signerNameRequired") }]}
+                >
+                  <Input maxLength={160} />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
           <Form.Item label={t("wht.signatureFile")} required>
             <Upload
               accept=".png,.jpg,.jpeg"
@@ -495,6 +536,27 @@ export function SignatureLibrary({ t }: SignatureLibraryProps) {
             rules={[{ required: true, message: t("wht.signatureUsageRequired") }]}
           >
             <Checkbox.Group options={usageOptions} />
+          </Form.Item>
+          {/* 给存量签名补勾预支单时，姓名同样得补上——否则存进去的签名一盖到
+              预支单上就印出空括号。后端也按改完之后的状态挡一道。 */}
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) =>
+              needsSignerName(prev.usage) !== needsSignerName(curr.usage)
+            }
+          >
+            {({ getFieldValue }) =>
+              needsSignerName(getFieldValue("usage")) ? (
+                <Form.Item
+                  name="signerName"
+                  label={t("wht.signerName")}
+                  extra={t("wht.signerNameHint")}
+                  rules={[{ required: true, message: t("wht.signerNameRequired") }]}
+                >
+                  <Input maxLength={160} />
+                </Form.Item>
+              ) : null
+            }
           </Form.Item>
         </Form>
       </Modal>

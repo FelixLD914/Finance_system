@@ -549,6 +549,9 @@ async def create_signature(
     make_default: Annotated[bool, Form(alias="makeDefault")] = False,
     # multipart 里重复同名字段即数组：usage=wht&usage=salary_advance。
     usage: Annotated[list[SignatureUsage], Form()] = ["wht"],  # noqa: B006
+    # 适用单据含工资预支时必填——service 层按 usage 判定并给出可读报错，
+    # 这里不设 min_length，否则只用于 WHT 的签名也会被逼着填。
+    signer_name: Annotated[str | None, Form(alias="signerName", max_length=160)] = None,
     file: Annotated[UploadFile, File(description="Approved PNG or JPEG signature image")] = ...,
 ) -> SignatureAssetResponse:
     maximum = min(get_settings().max_file_mib, 5) * 1024 * 1024
@@ -571,6 +574,7 @@ async def create_signature(
         content=content,
         make_default=make_default,
         usage=stored_usage,
+        signer_name=signer_name,
     )
     return SignatureAssetResponse.model_validate(signature)
 

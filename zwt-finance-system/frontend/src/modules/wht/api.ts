@@ -582,6 +582,7 @@ export async function uploadSignature(
   file: File,
   makeDefault: boolean,
   usage: SignatureUsage[] = ["wht"],
+  signerName: string | null = null,
 ): Promise<SignatureAsset> {
   if (useDemoApi) {
     const timestamp = nowIso();
@@ -600,6 +601,7 @@ export async function uploadSignature(
       version: 1,
       status: "active",
       usage,
+      signerName,
       isDefault: makeDefault,
       createdByName: "系统管理员",
       updatedByName: "系统管理员",
@@ -616,6 +618,9 @@ export async function uploadSignature(
   body.append("makeDefault", String(makeDefault));
   // 适用范围是集合：重复同名字段，后端按数组接收。
   for (const module of usage) body.append("usage", module);
+  // 只在有值时附带：空字符串会被后端当成"填了但填的是空"，而只用于
+  // WHT / TAX INV 的签名本来就不需要姓名。
+  if (signerName) body.append("signerName", signerName);
   body.append("file", file);
   return request<SignatureAsset>("/v1/wht/signatures", {
     method: "POST",
@@ -665,7 +670,12 @@ export async function restoreSignature(
 
 export async function updateSignature(
   signatureId: string,
-  input: Partial<Pick<SignatureAsset, "status" | "isDefault" | "usage" | "scalePercent">>,
+  input: Partial<
+    Pick<
+      SignatureAsset,
+      "status" | "isDefault" | "usage" | "scalePercent" | "signerName"
+    >
+  >,
 ): Promise<SignatureAsset> {
   if (useDemoApi) {
     if (input.isDefault) {

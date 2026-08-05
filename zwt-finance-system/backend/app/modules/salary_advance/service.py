@@ -13,8 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.errors import ServiceError
-from app.core.models import SignatureAsset
-from app.core.signature_usage import signature_allows
 from app.modules.salary_advance import pdf_layout
 from app.modules.salary_advance.document_generator import CURRENT_RECORD_FIELDS
 from app.modules.salary_advance.importer import (
@@ -127,7 +125,6 @@ class SalaryAdvanceService:
         if existing is not None:
             return await self.get_batch(existing.id)
 
-        signature_codes = await self.active_signature_codes()
         existing_rows = (
             await self.session.execute(
                 select(SalaryAdvanceRecord.period, SalaryAdvanceRecord.emp_id).where(
@@ -141,7 +138,6 @@ class SalaryAdvanceService:
                 lambda: parse_salary_advance_workbook(
                     content,
                     period=period,
-                    active_signature_codes=signature_codes,
                     existing_keys=set(existing_rows),
                 )
             )
@@ -235,7 +231,6 @@ class SalaryAdvanceService:
         status, errors, warnings, normalized = validate_and_normalize_record(
             raw,
             batch_period=batch.period,
-            active_signature_codes=await self.active_signature_codes(),
         )
         duplicate = await self.session.scalar(
             select(SalaryAdvanceRecord.id).where(
@@ -294,13 +289,11 @@ class SalaryAdvanceService:
                 )
             ).all()
         )
-        codes = await self.active_signature_codes()
         seen: set[tuple[str, str]] = set()
         for record in records:
             status, errors, warnings, normalized = validate_and_normalize_record(
                 record.raw_data,
                 batch_period=batch.period,
-                active_signature_codes=codes,
             )
             key = (normalized.get("period", ""), normalized.get("emp_id", ""))
             if all(key) and key in seen:
@@ -426,23 +419,6 @@ class SalaryAdvanceService:
                 )
             ).all()
         )
-
-    async def active_signature_codes(self) -> set[str]:
-        # 签名代码就是共享签名库（core.signature_assets）里的名称，
-        # 且适用范围必须勾了工资预支。维护入口统一在系统管理 → 签名库，
-        # 本模块只做只读解析。
-        rows = (
-            await self.session.execute(
-                select(SignatureAsset.name, SignatureAsset.usage).where(
-                    SignatureAsset.status == "active"
-                )
-            )
-        ).all()
-        return {
-            str(name).strip().upper()
-            for name, usage in rows
-            if signature_allows(usage, "salary_advance")
-        }
 
     async def delete_batch(self, batch_id: uuid.UUID) -> None:
         batch = await self._load_batch(batch_id, for_update=True)

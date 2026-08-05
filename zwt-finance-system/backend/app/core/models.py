@@ -102,6 +102,14 @@ class SignatureAsset(Base, SoftDeleteMixin):
     # 各模块在旧工具里用的是不同的人，所以适用范围必须显式记录。
     # 解析与序列化一律走 app.core.signature_usage，别在别处 split 这个串。
     usage: Mapped[str] = mapped_column(String(60), nullable=False, default="wht")
+    # 签名人姓名。**只有工资预支单会印它**——表单在签名横线下方印 "( 姓名 )"，
+    # WHT 与 TAX INV 的单据上只有签名图、不出现姓名。所以这一列整体可空，
+    # 但适用范围勾了工资预支时必填（校验在 signature_usage.requires_signer_name
+    # 与 WhtDocumentService 的建/改两个入口）。
+    #
+    # 姓名挂在签名资产上而不是每张单据的导入行上，是为了让"印的名字"和"盖的章"
+    # 同源：以前姓名来自导入表、章来自签名解析链，两者可以是不同的人且系统拦不住。
+    signer_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     # 默认签名是"按适用范围"的：WHT 的默认和 TAX INV 的默认可以是两张不同的图。
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # 签名套印缩放比例 (%)，范围 50..200，默认 100

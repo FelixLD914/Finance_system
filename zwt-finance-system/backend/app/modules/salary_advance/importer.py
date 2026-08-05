@@ -96,7 +96,6 @@ def parse_salary_advance_workbook(
     content: bytes,
     *,
     period: str,
-    active_signature_codes: set[str],
     existing_keys: set[tuple[str, str]] | None = None,
 ) -> ParsedBatch:
     _validate_archive(content)
@@ -150,7 +149,6 @@ def parse_salary_advance_workbook(
             status, errors, warnings, normalized = validate_and_normalize_record(
                 raw,
                 batch_period=period,
-                active_signature_codes=active_signature_codes,
             )
             key = (normalized.get("period", ""), normalized.get("emp_id", ""))
             if all(key):
@@ -241,14 +239,20 @@ _TEMPLATE_NOTES: tuple[tuple[str, str], ...] = (
     ("start_date", "必填。入职日期，YYYY-MM-DD，不能晚于申请日期。"),
     ("approval_status", "可留空。Approve / Not approved / Pending，留空按 Pending。"),
     (
+        "finance_display_name",
+        "可留空。单据上印的签字人姓名取自签名库里那张签名的「签名人姓名」，不取本列。",
+    ),
+    (
+        "md_display_name",
+        "可留空。单据上印的签字人姓名取自签名库里那张签名的「签名人姓名」，不取本列。",
+    ),
+    (
         "finance_signature_code",
-        "必须是签名库中的有效代码（本业务财务固定 FIN_XING_LANHUI）。"
-        "留空时按财务签字人姓名推导，默认邢兰慧。",
+        "可留空。盖哪张章在开具时选定；这里填了签名库中的代码就按它盖。",
     ),
     (
         "md_signature_code",
-        "必须是签名库中的有效代码：龚尧文 = MD_GONG_YAOWEN，朱发坚 = MD_ZHU_FAJIAN。"
-        "留空时须能从总经理签字人姓名确定，否则整行报错。",
+        "可留空。盖哪张章在开具时选定；这里填了签名库中的代码就按它盖。",
     ),
     ("advance_amount_words_th", "可留空。系统按金额自动换算泰文大写；填了不一致会提示。"),
     ("applicant_signature_mode", "只能填 Handwritten（申请人手写签名）。"),
