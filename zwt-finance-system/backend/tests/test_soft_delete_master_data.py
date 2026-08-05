@@ -5,13 +5,14 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.models import ExchangeRate, SignatureAsset
+from app.modules.salary_advance.models import SalaryAdvanceEmployee
 from app.modules.tax_invoice.schemas import ExchangeRateUpsert, month_bounds
 from app.modules.wht.models import PayeeProfile
 
 
 @pytest.mark.parametrize(
     "model",
-    [PayeeProfile, SignatureAsset, ExchangeRate],
+    [PayeeProfile, SignatureAsset, ExchangeRate, SalaryAdvanceEmployee],
 )
 def test_master_data_models_expose_soft_delete_audit_columns(model) -> None:  # noqa: ANN001
     columns = model.__table__.columns
@@ -25,6 +26,17 @@ def test_payee_tax_id_is_unique_only_for_live_rows() -> None:
         item
         for item in PayeeProfile.__table__.indexes
         if item.name == "uq_wht_payees_tax_id_live"
+    )
+
+    assert index.unique
+    assert str(index.dialect_options["postgresql"]["where"]) == "deleted_at IS NULL"
+
+
+def test_employee_emp_id_is_unique_only_for_live_rows() -> None:
+    index = next(
+        item
+        for item in SalaryAdvanceEmployee.__table__.indexes
+        if item.name == "uq_salary_advance_employees_emp_id_live"
     )
 
     assert index.unique

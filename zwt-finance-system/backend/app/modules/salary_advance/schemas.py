@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -65,6 +66,18 @@ class SalaryAdvanceBatchDetail(ApiSchema):
 class SalaryAdvanceRecordUpdate(ApiSchema):
     version: int = Field(ge=1)
     values: dict[str, Any]
+
+
+class SingleSalaryAdvanceCreate(ApiSchema):
+    emp_id: str = Field(min_length=1, max_length=80)
+    period: str = Field(pattern=r"^\d{6}$")
+    advance_amount: Decimal = Field(gt=0)
+    monthly_deduction: Decimal | None = Field(default=None, gt=0)
+    reason: str | None = Field(default=None, max_length=100)
+    request_date: date
+    approval_status: Literal["Approve", "Not approved", "Pending"] = "Pending"
+    remark: str | None = Field(default=None)
+    output_filename: str | None = Field(default=None)
 
 
 class SalaryAdvanceLockRequest(ApiSchema):
@@ -131,4 +144,65 @@ class SalaryAdvanceJobResponse(ApiSchema):
 class SalaryAdvanceJobDetail(ApiSchema):
     job: SalaryAdvanceJobResponse
     documents: list[SalaryAdvanceDocumentResponse]
+
+
+class EmployeeCreate(ApiSchema):
+    emp_id: str = Field(min_length=1, max_length=80)
+    first_name: str | None = Field(default=None, max_length=160)
+    surname: str | None = Field(default=None, max_length=160)
+    en_name: str | None = Field(default=None, max_length=300)
+    chinese_name: str | None = Field(default=None, max_length=160)
+    department: str | None = Field(default=None, max_length=160)
+    position: str | None = Field(default=None, max_length=200)
+    start_date: date | None = None
+    is_active: bool = True
+
+
+class EmployeeUpdate(ApiSchema):
+    first_name: str | None = Field(default=None, max_length=160)
+    surname: str | None = Field(default=None, max_length=160)
+    en_name: str | None = Field(default=None, max_length=300)
+    chinese_name: str | None = Field(default=None, max_length=160)
+    department: str | None = Field(default=None, max_length=160)
+    position: str | None = Field(default=None, max_length=200)
+    start_date: date | None = None
+    is_active: bool = True
+
+
+class EmployeeResponse(ApiSchema):
+    id: uuid.UUID
+    emp_id: str
+    first_name: str | None
+    surname: str | None
+    en_name: str | None
+    chinese_name: str | None
+    department: str | None
+    position: str | None
+    start_date: date | None
+    is_active: bool
+    source_file_name: str | None
+    created_by_name: str
+    updated_by_name: str
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+    deleted_by_name: str | None = None
+
+
+class EmployeeListResponse(ApiSchema):
+    items: list[EmployeeResponse]
+    total: int
+
+
+class EmployeeDeletePreview(ApiSchema):
+    employee_id: uuid.UUID
+    emp_id: str
+    referencing_records: int
+
+
+class EmployeeImportResult(ApiSchema):
+    source_file_name: str
+    created: int
+    updated: int
+
 

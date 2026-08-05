@@ -10,6 +10,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    HTTPException,
     Query,
     Response,
     UploadFile,
@@ -26,9 +27,19 @@ from app.modules.salary_advance.document_service import (
     SalaryAdvanceDocumentService,
     run_salary_advance_job,
 )
+from app.modules.salary_advance.employee_excel import (
+    build_employee_import_template_workbook,
+    parse_employee_sheet,
+)
 from app.modules.salary_advance.importer import build_import_template_workbook
 from app.modules.salary_advance.schemas import (
     CreateSalaryAdvanceJobRequest,
+    EmployeeCreate,
+    EmployeeDeletePreview,
+    EmployeeImportResult,
+    EmployeeListResponse,
+    EmployeeResponse,
+    EmployeeUpdate,
     SalaryAdvanceBatchDetail,
     SalaryAdvanceBatchResponse,
     SalaryAdvanceDocumentResponse,
@@ -38,6 +49,7 @@ from app.modules.salary_advance.schemas import (
     SalaryAdvanceRecordResponse,
     SalaryAdvanceRecordUpdate,
     SalaryAdvanceTemplateResponse,
+    SingleSalaryAdvanceCreate,
 )
 from app.modules.salary_advance.service import (
     BatchAggregate,
@@ -127,6 +139,23 @@ def _download_response(
     )
 
 
+async def _read_xlsx(upload: UploadFile) -> tuple[bytes, str]:
+    file_name = upload.filename or "upload.xlsx"
+    if not file_name.lower().endswith(".xlsx"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="only .xlsx files are accepted",
+        )
+    maximum = get_settings().max_file_mib * 1024 * 1024
+    content = await upload.read(maximum + 1)
+    if len(content) > maximum:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"each file must not exceed {get_settings().max_file_mib} MiB",
+        )
+    return content, file_name
+
+
 @router.get("/batches", response_model=list[SalaryAdvanceBatchResponse])
 async def list_batches(
     service: SalaryAdvanceServiceDependency,
@@ -135,6 +164,20 @@ async def list_batches(
 ) -> list[SalaryAdvanceBatchResponse]:
     batches = await service.list_batches(period=period, status=batch_status)
     return [SalaryAdvanceBatchResponse.model_validate(batch) for batch in batches]
+
+
+@router.post(
+    "/single-records",
+    response_model=SalaryAdvanceBatchDetail,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def create_single_record(
+    payload: SingleSalaryAdvanceCreate,
+    service: SalaryAdvanceServiceDependency,
+) -> SalaryAdvanceBatchDetail:
+    aggregate = await service.create_single_record(payload)
+    return _batch_detail(aggregate)
 
 
 @router.post(
@@ -387,3 +430,124 @@ async def download_document(
         else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     return FileResponse(path, media_type=media_type, filename=file_name)
+
+
+# 员工主数据 Employee Master Data
+
+@router.get("/employees", response_model=EmployeeListResponse)
+async def list_employees(
+    service: SalaryAdvanceServiceDependency,
+    query: str | None = None,
+    active_only: bool = Query(default=True, alias="activeOnly"),
+    deleted: bool = Query(
+        default=False,
+        description="true 返回回收站列表，false 返回在用列表",
+    ),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500, alias="pageSize"),
+) -> EmployeeListResponse:
+    employees, total = await service.list_employees(
+        query=query,
+        active_only=active_only,
+        deleted=deleted,
+        page=page,
+        page_size=page_size,
+    )
+    return EmployeeListResponse(
+        items=[EmployeeResponse.model_validate(emp) for emp in employees],
+        total=total,
+    )
+
+
+@router.post(
+    "/employees",
+    response_model=EmployeeResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def create_employee(
+    payload: EmployeeCreate,
+    service: SalaryAdvanceServiceDependency,
+) -> EmployeeResponse:
+    return EmployeeResponse.model_validate(await service.create_employee(payload))
+
+
+@router.get("/employees/template")
+async def download_employee_template() -> Response:
+    content = build_employee_import_template_workbook()
+    filename = quote("工资预支单员工导入模板.xlsx")
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
+@router.post(
+    "/employees/import",
+    response_model=EmployeeImportResult,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def import_employees(
+    service: SalaryAdvanceServiceDependency,
+    file: Annotated[UploadFile, File(description="Excel with employee master data")],
+) -> EmployeeImportResult:
+    content, file_name = await _read_xlsx(file)
+    rows = parse_employee_sheet(content)
+    return await service.import_employees(rows, file_name)
+
+
+@router.get(
+    "/employees/{employee_id}/delete-preview",
+    response_model=EmployeeDeletePreview,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def preview_employee_deletion(
+    employee_id: uuid.UUID,
+    service: SalaryAdvanceServiceDependency,
+) -> EmployeeDeletePreview:
+    employee = await service.get_employee(employee_id, include_deleted=True)
+    count = await service.count_employee_references(employee_id)
+    return EmployeeDeletePreview(
+        employee_id=employee.id,
+        emp_id=employee.emp_id,
+        referencing_records=count,
+    )
+
+
+@router.patch(
+    "/employees/{employee_id}",
+    response_model=EmployeeResponse,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def update_employee(
+    employee_id: uuid.UUID,
+    payload: EmployeeUpdate,
+    service: SalaryAdvanceServiceDependency,
+) -> EmployeeResponse:
+    return EmployeeResponse.model_validate(await service.update_employee(employee_id, payload))
+
+
+@router.delete(
+    "/employees/{employee_id}",
+    response_model=EmployeeResponse,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def delete_employee(
+    employee_id: uuid.UUID,
+    service: SalaryAdvanceServiceDependency,
+) -> EmployeeResponse:
+    return EmployeeResponse.model_validate(await service.delete_employee(employee_id))
+
+
+@router.post(
+    "/employees/{employee_id}/restore",
+    response_model=EmployeeResponse,
+    dependencies=[Depends(require_permission("salary_advance:write"))],
+)
+async def restore_employee(
+    employee_id: uuid.UUID,
+    service: SalaryAdvanceServiceDependency,
+) -> EmployeeResponse:
+    return EmployeeResponse.model_validate(await service.restore_employee(employee_id))
+

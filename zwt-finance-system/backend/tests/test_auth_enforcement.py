@@ -80,6 +80,31 @@ MUTATING_ENDPOINTS = [
         f"/api/v1/salary-advance/batches/{FAKE_ID}",
         "salary_advance:write",
     ),
+    (
+        "post",
+        "/api/v1/salary-advance/employees",
+        "salary_advance:write",
+    ),
+    (
+        "get",
+        f"/api/v1/salary-advance/employees/{FAKE_ID}/delete-preview",
+        "salary_advance:write",
+    ),
+    (
+        "patch",
+        f"/api/v1/salary-advance/employees/{FAKE_ID}",
+        "salary_advance:write",
+    ),
+    (
+        "delete",
+        f"/api/v1/salary-advance/employees/{FAKE_ID}",
+        "salary_advance:write",
+    ),
+    (
+        "post",
+        f"/api/v1/salary-advance/employees/{FAKE_ID}/restore",
+        "salary_advance:write",
+    ),
 ]
 
 READ_ENDPOINTS = [
@@ -91,6 +116,8 @@ READ_ENDPOINTS = [
     "/api/v1/wht/number-preview?period=2026-06",
     "/api/v1/salary-advance/batches",
     "/api/v1/salary-advance/templates",
+    "/api/v1/salary-advance/employees",
+    "/api/v1/salary-advance/employees/template",
 ]
 
 

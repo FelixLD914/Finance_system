@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from anyio import to_thread
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -20,12 +20,19 @@ from app.modules.salary_advance.importer import (
     parse_salary_advance_workbook,
 )
 from app.modules.salary_advance.models import (
+    SalaryAdvanceEmployee,
     SalaryAdvanceEvent,
     SalaryAdvanceImportBatch,
     SalaryAdvanceRecord,
     SalaryAdvanceTemplate,
 )
-from app.modules.salary_advance.schemas import SalaryAdvanceRecordUpdate
+from app.modules.salary_advance.schemas import (
+    EmployeeCreate,
+    EmployeeImportResult,
+    EmployeeUpdate,
+    SalaryAdvanceRecordUpdate,
+    SingleSalaryAdvanceCreate,
+)
 from app.modules.salary_advance.validation import (
     data_fingerprint,
     validate_and_normalize_record,
@@ -213,6 +220,110 @@ class SalaryAdvanceService:
         for record in records:
             await self.session.refresh(record)
         return BatchAggregate(batch=batch, records=records)
+
+    async def create_single_record(
+        self,
+        payload: SingleSalaryAdvanceCreate,
+    ) -> BatchAggregate:
+        employee = await self.session.scalar(
+            select(SalaryAdvanceEmployee).where(
+                SalaryAdvanceEmployee.emp_id == payload.emp_id,
+                SalaryAdvanceEmployee.deleted_at.is_(None),
+            )
+        )
+        if employee is None:
+            raise SalaryAdvanceNotFoundError(f"未找到工号为 '{payload.emp_id}' 的在用员工信息")
+
+        raw_data = {
+            "period": payload.period,
+            "emp_id": employee.emp_id,
+            "first_name": employee.first_name or "",
+            "surname": employee.surname or "",
+            "en_name": employee.en_name or "",
+            "chinese_name": employee.chinese_name or "",
+            "applicant_display_name": employee.en_name or f"{employee.first_name or ''} {employee.surname or ''}".strip(),
+            "department": employee.department or "",
+            "position": employee.position or "",
+            "start_date": employee.start_date.isoformat() if employee.start_date else None,
+            "reason": payload.reason,
+            "request_date": payload.request_date.isoformat(),
+            "advance_amount": str(payload.advance_amount),
+            "monthly_deduction": str(payload.monthly_deduction) if payload.monthly_deduction is not None else str(payload.advance_amount),
+            "approval_status": payload.approval_status,
+            "remark": payload.remark or "",
+            "output_filename": payload.output_filename or "",
+        }
+
+        status, errors, warnings, normalized = validate_and_normalize_record(
+            raw_data,
+            batch_period=payload.period,
+        )
+        if status == "invalid":
+            msg = "; ".join(f"{err['field']}: {err['message']}" for err in errors)
+            raise SalaryAdvanceStateError(f"单张录入校验未通过: {msg}")
+
+        duplicate = await self.session.scalar(
+            select(SalaryAdvanceRecord.id).where(
+                SalaryAdvanceRecord.period == normalized["period"],
+                SalaryAdvanceRecord.emp_id == normalized["emp_id"],
+                SalaryAdvanceRecord.validation_status != "invalid",
+            )
+        )
+        if duplicate is not None:
+            raise SalaryAdvanceConflictError(
+                f"期间 {normalized['period']} 下已存在工号 {normalized['emp_id']} 的预支单记录"
+            )
+
+        batch_id = uuid.uuid4()
+        source_hash = data_fingerprint(normalized)
+        batch = SalaryAdvanceImportBatch(
+            id=batch_id,
+            batch_no=f"SA-SINGLE-{datetime.now(UTC):%Y%m%d%H%M%S}-{source_hash[:8].upper()}",
+            period=normalized["period"],
+            source_file_name=f"单张开具 - {normalized['emp_id']}",
+            source_storage_key=f"salary-advance/single/{batch_id}",
+            source_sha256=source_hash,
+            status="ready",
+            total_rows=1,
+            valid_rows=1 if status == "valid" else 0,
+            warning_rows=1 if status == "warning" else 0,
+            invalid_rows=0,
+            created_by_name=self.actor_name,
+        )
+        self.session.add(batch)
+
+        record = SalaryAdvanceRecord(
+            batch_id=batch.id,
+            source_row_no=1,
+            period=normalized["period"],
+            emp_id=normalized["emp_id"],
+            raw_data=raw_data,
+            normalized_data=normalized,
+            data_fingerprint=source_hash,
+            validation_status=status,
+            validation_errors=errors,
+            validation_warnings=warnings,
+            generation_status="pending",
+            created_by_name=self.actor_name,
+            updated_by_name=self.actor_name,
+        )
+        self.session.add(record)
+        self.session.add(
+            self._event(
+                "batch",
+                batch.id,
+                "single_created",
+                after_data={
+                    "period": normalized["period"],
+                    "empId": normalized["emp_id"],
+                    "advanceAmount": normalized["advance_amount"],
+                },
+            )
+        )
+        await self.session.commit()
+        await self.session.refresh(batch)
+        await self.session.refresh(record)
+        return BatchAggregate(batch=batch, records=[record])
 
     async def update_record(
         self,
@@ -530,3 +641,184 @@ class SalaryAdvanceService:
         return "".join(
             char for char in name if char not in '\\/:*?"<>|'
         )[:240] or "upload.xlsx"
+
+    async def list_employees(
+        self,
+        *,
+        query: str | None = None,
+        active_only: bool = True,
+        deleted: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[SalaryAdvanceEmployee], int]:
+        filters = []
+        if deleted:
+            filters.append(SalaryAdvanceEmployee.deleted_at.isnot(None))
+        else:
+            filters.append(SalaryAdvanceEmployee.deleted_at.is_(None))
+            if active_only:
+                filters.append(SalaryAdvanceEmployee.is_active.is_(True))
+
+        if query and query.strip():
+            pattern = f"%{query.strip()}%"
+            filters.append(
+                or_(
+                    SalaryAdvanceEmployee.emp_id.ilike(pattern),
+                    SalaryAdvanceEmployee.en_name.ilike(pattern),
+                    SalaryAdvanceEmployee.chinese_name.ilike(pattern),
+                    SalaryAdvanceEmployee.department.ilike(pattern),
+                    SalaryAdvanceEmployee.position.ilike(pattern),
+                )
+            )
+
+        total = await self.session.scalar(
+            select(func.count()).select_from(SalaryAdvanceEmployee).where(*filters)
+        )
+        employees = list(
+            (
+                await self.session.scalars(
+                    select(SalaryAdvanceEmployee)
+                    .where(*filters)
+                    .order_by(SalaryAdvanceEmployee.created_at.desc(), SalaryAdvanceEmployee.emp_id.asc())
+                    .offset((page - 1) * page_size)
+                    .limit(page_size)
+                )
+            ).all()
+        )
+        return employees, int(total or 0)
+
+    async def get_employee(
+        self,
+        employee_id: uuid.UUID,
+        *,
+        include_deleted: bool = False,
+    ) -> SalaryAdvanceEmployee:
+        return await self._load_employee(employee_id, include_deleted=include_deleted)
+
+    async def create_employee(self, payload: EmployeeCreate) -> SalaryAdvanceEmployee:
+        occupied = await self.session.scalar(
+            select(SalaryAdvanceEmployee.id).where(
+                SalaryAdvanceEmployee.emp_id == payload.emp_id,
+                SalaryAdvanceEmployee.deleted_at.is_(None),
+            )
+        )
+        if occupied is not None:
+            raise SalaryAdvanceConflictError(
+                f"empId '{payload.emp_id}' is already used by another active employee"
+            )
+
+        employee = SalaryAdvanceEmployee(
+            **payload.model_dump(by_alias=False),
+            created_by_name=self.actor_name,
+            updated_by_name=self.actor_name,
+        )
+        self.session.add(employee)
+        await self.session.commit()
+        await self.session.refresh(employee)
+        return employee
+
+    async def update_employee(
+        self,
+        employee_id: uuid.UUID,
+        payload: EmployeeUpdate,
+    ) -> SalaryAdvanceEmployee:
+        employee = await self._load_employee(employee_id, for_update=True)
+        updates = payload.model_dump(by_alias=False, exclude_unset=True)
+        for key, value in updates.items():
+            setattr(employee, key, value)
+        employee.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(employee)
+        return employee
+
+    async def delete_employee(self, employee_id: uuid.UUID) -> SalaryAdvanceEmployee:
+        employee = await self._load_employee(employee_id, for_update=True)
+        employee.deleted_at = datetime.now(UTC)
+        employee.deleted_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(employee)
+        return employee
+
+    async def restore_employee(self, employee_id: uuid.UUID) -> SalaryAdvanceEmployee:
+        employee = await self._load_employee(employee_id, for_update=True, include_deleted=True)
+        if employee.deleted_at is None:
+            raise SalaryAdvanceStateError("employee is not in the recycle bin")
+        occupied = await self.session.scalar(
+            select(SalaryAdvanceEmployee.id).where(
+                SalaryAdvanceEmployee.emp_id == employee.emp_id,
+                SalaryAdvanceEmployee.deleted_at.is_(None),
+            )
+        )
+        if occupied is not None:
+            raise SalaryAdvanceConflictError(
+                f"empId '{employee.emp_id}' is already used by another active employee; "
+                f"delete or change that one before restoring this record"
+            )
+        employee.deleted_at = None
+        employee.deleted_by_name = None
+        employee.updated_by_name = self.actor_name
+        await self.session.commit()
+        await self.session.refresh(employee)
+        return employee
+
+    async def count_employee_references(self, employee_id: uuid.UUID) -> int:
+        employee = await self._load_employee(employee_id, include_deleted=True)
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(SalaryAdvanceRecord)
+            .where(SalaryAdvanceRecord.emp_id == employee.emp_id)
+        )
+        return int(total or 0)
+
+    async def import_employees(
+        self,
+        rows: list[dict[str, Any]],
+        source_file_name: str,
+    ) -> EmployeeImportResult:
+        result = EmployeeImportResult(source_file_name=source_file_name, created=0, updated=0)
+        for row in rows:
+            emp_id = row["emp_id"]
+            employee = await self.session.scalar(
+                select(SalaryAdvanceEmployee)
+                .where(
+                    SalaryAdvanceEmployee.emp_id == emp_id,
+                    SalaryAdvanceEmployee.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if employee is None:
+                employee = SalaryAdvanceEmployee(
+                    **row,
+                    source_file_name=source_file_name,
+                    created_by_name=self.actor_name,
+                    updated_by_name=self.actor_name,
+                )
+                self.session.add(employee)
+                result.created += 1
+            else:
+                for key, val in row.items():
+                    setattr(employee, key, val)
+                employee.is_active = True
+                employee.source_file_name = source_file_name
+                employee.updated_by_name = self.actor_name
+                result.updated += 1
+        await self.session.commit()
+        return result
+
+    async def _load_employee(
+        self,
+        employee_id: uuid.UUID,
+        *,
+        for_update: bool = False,
+        include_deleted: bool = False,
+    ) -> SalaryAdvanceEmployee:
+        statement = select(SalaryAdvanceEmployee).where(SalaryAdvanceEmployee.id == employee_id)
+        if not include_deleted:
+            statement = statement.where(SalaryAdvanceEmployee.deleted_at.is_(None))
+        if for_update:
+            statement = statement.with_for_update()
+        employee = await self.session.scalar(statement)
+        if employee is None:
+            raise SalaryAdvanceNotFoundError("employee was not found")
+        return employee
+

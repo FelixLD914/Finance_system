@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -15,11 +16,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
+from app.core.soft_delete import SoftDeleteMixin
 
 
 class SalaryAdvanceTemplate(Base):
@@ -268,4 +271,43 @@ class SalaryAdvanceEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class SalaryAdvanceEmployee(Base, SoftDeleteMixin):
+    __tablename__ = "employees"
+    __table_args__ = (
+        Index(
+            "uq_salary_advance_employees_emp_id_live",
+            "emp_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index("ix_salary_advance_employees_emp_id", "emp_id"),
+        Index("ix_salary_advance_employees_en_name", "en_name"),
+        {"schema": "salary_advance"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    emp_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    first_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    surname: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    en_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    chinese_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    position: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    source_file_name: Mapped[str | None] = mapped_column(String(260), nullable=True)
+    created_by_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    updated_by_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
 

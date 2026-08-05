@@ -101,3 +101,48 @@ export interface SalaryAdvanceJobDetail {
   job: SalaryAdvanceJob;
   documents: SalaryAdvanceDocument[];
 }
+
+export interface SalaryAdvanceEmployee {
+  id: string;
+  empId: string;
+  firstName: string | null;
+  surname: string | null;
+  enName: string | null;
+  chineseName: string | null;
+  department: string | null;
+  position: string | null;
+  startDate: string | null;
+  isActive: boolean;
+  sourceFileName: string | null;
+  createdByName: string;
+  updatedByName: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  deletedByName: string | null;
+}
+
+export interface EmployeeInput {
+  empId: string;
+  firstName?: string | null;
+  surname?: string | null;
+  enName?: string | null;
+  chineseName?: string | null;
+  department?: string | null;
+  position?: string | null;
+  startDate?: string | null;
+  isActive: boolean;
+}
+
+export interface EmployeeDeletePreview {
+  employeeId: string;
+  empId: string;
+  referencingRecords: number;
+}
+
+export interface EmployeeImportResult {
+  sourceFileName: string;
+  created: number;
+  updated: number;
+}
+

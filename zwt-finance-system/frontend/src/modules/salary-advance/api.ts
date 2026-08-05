@@ -1,8 +1,12 @@
 import { fileNameFromResponse, saveBlobAsFile } from "../../shared/download";
 import { apiFetch, apiRequest } from "../../shared/http";
 import type {
+  EmployeeDeletePreview,
+  EmployeeImportResult,
+  EmployeeInput,
   SalaryAdvanceBatch,
   SalaryAdvanceBatchDetail,
+  SalaryAdvanceEmployee,
   SalaryAdvanceJob,
   SalaryAdvanceJobDetail,
   SalaryAdvanceRecord,
@@ -180,3 +184,75 @@ export function downloadSalaryAdvanceDocument(
     fileName,
   );
 }
+
+export interface EmployeeListResponse {
+  items: SalaryAdvanceEmployee[];
+  total: number;
+}
+
+export function listEmployees(
+  query?: string,
+  activeOnly: boolean = true,
+  deleted: boolean = false,
+  page: number = 1,
+  pageSize: number = 50,
+): Promise<EmployeeListResponse> {
+  const params = new URLSearchParams();
+  if (query) params.set("query", query);
+  params.set("activeOnly", String(activeOnly));
+  params.set("deleted", String(deleted));
+  params.set("page", String(page));
+  params.set("pageSize", String(pageSize));
+  return request<EmployeeListResponse>(`/v1/salary-advance/employees?${params.toString()}`);
+}
+
+export function createEmployee(payload: EmployeeInput): Promise<SalaryAdvanceEmployee> {
+  return request<SalaryAdvanceEmployee>("/v1/salary-advance/employees", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateEmployee(
+  employeeId: string,
+  payload: EmployeeInput,
+): Promise<SalaryAdvanceEmployee> {
+  return request<SalaryAdvanceEmployee>(`/v1/salary-advance/employees/${employeeId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteEmployee(employeeId: string): Promise<SalaryAdvanceEmployee> {
+  return request<SalaryAdvanceEmployee>(`/v1/salary-advance/employees/${employeeId}`, {
+    method: "DELETE",
+  });
+}
+
+export function restoreEmployee(employeeId: string): Promise<SalaryAdvanceEmployee> {
+  return request<SalaryAdvanceEmployee>(`/v1/salary-advance/employees/${employeeId}/restore`, {
+    method: "POST",
+  });
+}
+
+export function getEmployeeDeletePreview(employeeId: string): Promise<EmployeeDeletePreview> {
+  return request<EmployeeDeletePreview>(`/v1/salary-advance/employees/${employeeId}/delete-preview`);
+}
+
+export function importEmployees(file: File): Promise<EmployeeImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<EmployeeImportResult>("/v1/salary-advance/employees/import", {
+    method: "POST",
+    body: form,
+  });
+}
+
+export async function downloadEmployeeTemplate(): Promise<void> {
+  const response = await apiFetch("/v1/salary-advance/employees/template");
+  saveBlobAsFile(
+    await response.blob(),
+    fileNameFromResponse(response, "工资预支单员工导入模板.xlsx"),
+  );
+}
+

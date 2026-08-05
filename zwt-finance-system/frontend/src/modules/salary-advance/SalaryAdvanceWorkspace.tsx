@@ -64,6 +64,7 @@ import {
   revalidateSalaryAdvanceBatch,
   updateSalaryAdvanceRecord,
 } from "./api";
+import { EmployeeDirectory } from "./EmployeeDirectory";
 import { listSignatures } from "../wht/api";
 import type { SignatureAsset } from "../wht/types";
 import type {
@@ -360,6 +361,7 @@ function RecordDrawer({
 
 export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const { message, modal } = AntApp.useApp();
+  const [workspaceView, setWorkspaceView] = useState<"batches" | "employees">("batches");
   const [batches, setBatches] = useState<SalaryAdvanceBatch[]>([]);
   const [selected, setSelected] = useState<SalaryAdvanceBatchDetail | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<SalaryAdvanceRecord | null>(
@@ -1051,19 +1053,45 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         <div>
           <h1>
             <span>SALARY ADVANCE</span>
-            <small>{t("salary.title")}</small>
+            <small>
+              {workspaceView === "batches"
+                ? t("salary.title")
+                : t("salary.employeeMaster")}
+            </small>
           </h1>
           <p>{t("salary.subtitle")}</p>
         </div>
-        <Tooltip title={t("salary.noOfficeHint")}>
-          <span className="workspace-health-pill">
-            <span className="health-dot" />
-            {t("salary.noOfficePill")}
-          </span>
-        </Tooltip>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="workspace-view-switch" role="tablist">
+            <button
+              aria-selected={workspaceView === "batches"}
+              className={workspaceView === "batches" ? "is-active" : ""}
+              role="tab"
+              type="button"
+              onClick={() => setWorkspaceView("batches")}
+            >
+              {t("salary.batchLedger")}
+            </button>
+            <button
+              aria-selected={workspaceView === "employees"}
+              className={workspaceView === "employees" ? "is-active" : ""}
+              role="tab"
+              type="button"
+              onClick={() => setWorkspaceView("employees")}
+            >
+              {t("salary.employeeMaster")}
+            </button>
+          </div>
+          <Tooltip title={t("salary.noOfficeHint")}>
+            <span className="workspace-health-pill">
+              <span className="health-dot" />
+              {t("salary.noOfficePill")}
+            </span>
+          </Tooltip>
+        </div>
       </header>
 
-      {renderLedger()}
+      {workspaceView === "batches" ? renderLedger() : <EmployeeDirectory t={t} />}
 
       {selectedRecord && (
         <RecordDrawer
