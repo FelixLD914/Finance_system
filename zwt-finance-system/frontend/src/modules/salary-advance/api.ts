@@ -104,10 +104,6 @@ export function createSalaryAdvanceJob(
     mdSignatureId?: string;
     financeSignatureCode?: string;
     mdSignatureCode?: string;
-    finance_signature_id?: string;
-    md_signature_id?: string;
-    finance_signature_code?: string;
-    md_signature_code?: string;
   },
 ): Promise<SalaryAdvanceJob> {
   return request<SalaryAdvanceJob>(
@@ -200,12 +196,17 @@ export interface EmployeeListResponse {
   total: number;
 }
 
+// 后端硬上限（router.list_employees 的 pageSize le=500）。调用方必须显式传它，
+// 否则会落到默认 50 上：单张开具的下拉只装得下前 50 个人，第 51 个人开不了单
+// 且界面上完全看不出来。凡是"要列全"的地方都用这个值，并比对返回的 total。
+export const EMPLOYEE_PAGE_LIMIT = 500;
+
 export function listEmployees(
   query?: string,
   activeOnly: boolean = true,
   deleted: boolean = false,
   page: number = 1,
-  pageSize: number = 50,
+  pageSize: number = EMPLOYEE_PAGE_LIMIT,
 ): Promise<EmployeeListResponse> {
   const params = new URLSearchParams();
   if (query) params.set("query", query);

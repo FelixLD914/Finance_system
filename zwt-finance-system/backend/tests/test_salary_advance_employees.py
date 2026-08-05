@@ -6,13 +6,14 @@ from typing import Any
 
 import pytest
 from openpyxl import load_workbook
+from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.modules.salary_advance.employee_excel import (
     build_employee_import_template_workbook,
     parse_employee_sheet,
 )
-from app.modules.salary_advance.models import SalaryAdvanceEmployee
+from app.modules.salary_advance.models import SalaryAdvanceEmployee, SalaryAdvanceEvent
 from app.modules.salary_advance.schemas import EmployeeCreate, EmployeeUpdate
 from app.modules.salary_advance.service import (
     SalaryAdvanceConflictError,
@@ -24,6 +25,7 @@ from app.modules.salary_advance.service import (
 class FakeSession:
     def __init__(self) -> None:
         self.employees: dict[uuid.UUID, SalaryAdvanceEmployee] = {}
+        self.events: list[SalaryAdvanceEvent] = []
 
     def seed(self, emp: SalaryAdvanceEmployee) -> None:
         self.employees[emp.id] = emp
@@ -33,6 +35,11 @@ class FakeSession:
             if obj.id is None:
                 obj.id = uuid.uuid4()
             self.employees[obj.id] = obj
+        elif isinstance(obj, SalaryAdvanceEvent):
+            self.events.append(obj)
+
+    def event_types(self) -> list[str]:
+        return [event.event_type for event in self.events]
 
     async def flush(self) -> None:
         pass
@@ -186,7 +193,11 @@ def test_create_employee_conflict_on_duplicate_active_emp_id() -> None:
     payload = EmployeeCreate(
         emp_id="EMP001",
         first_name="Somchai",
+        surname="Saelim",
         en_name="Somchai Saelim",
+        department="IT",
+        position="Engineer",
+        start_date=date(2024, 1, 15),
     )
 
     with pytest.raises(SalaryAdvanceConflictError, match="EMP001"):
@@ -214,7 +225,12 @@ def test_create_and_update_employee_success() -> None:
     assert created.created_by_name == "TestAdmin"
 
     update_payload = EmployeeUpdate(
+        first_name="Alice",
+        surname="Smith",
+        en_name="Alice Smith",
+        department="Finance",
         position="Senior Accountant",
+        start_date=date(2025, 3, 1),
         is_active=True,
     )
     updated = asyncio.run(service.update_employee(created.id, update_payload))
@@ -322,3 +338,115 @@ def test_import_employees_upsert() -> None:
     assert result.created == 1
     assert result.updated == 1
     assert result.source_file_name == "import_test.xlsx"
+
+
+def test_import_marks_existing_employee_as_resigned() -> None:
+    """导入把在职员工改成离职必须真的生效。
+
+    原先 update 分支在写完 row 之后又硬写了一次 is_active=True，
+    模板里的「是否在职=否」被悄悄丢掉——离职的人仍然出现在单张开具的下拉里。
+    create 分支没有这个覆盖，所以两条路径的行为当时是不一致的。
+    """
+    fake_session = FakeSession()
+    service = SalaryAdvanceService(
+        session=fake_session, actor_name="TestAdmin", settings=get_settings()
+    )
+    existing = SalaryAdvanceEmployee(
+        id=uuid.uuid4(),
+        emp_id="EMP007",
+        en_name="Leaver",
+        is_active=True,
+        created_by_name="Admin",
+        updated_by_name="Admin",
+    )
+    fake_session.seed(existing)
+
+    asyncio.run(
+        service.import_employees(
+            [{"emp_id": "EMP007", "en_name": "Leaver", "is_active": False}],
+            "leavers.xlsx",
+        )
+    )
+
+    assert existing.is_active is False
+
+
+def test_employee_mutations_write_audit_events() -> None:
+    """人员库的增删改必须留痕，与本模块其他写操作一致。
+
+    员工资料直接决定预支单上印的姓名/部门/职位/入职日期，
+    改动无痕等于单据来源不可追溯。
+    """
+    fake_session = FakeSession()
+    service = SalaryAdvanceService(
+        session=fake_session, actor_name="TestAdmin", settings=get_settings()
+    )
+
+    created = asyncio.run(
+        service.create_employee(
+            EmployeeCreate(
+                emp_id="EMP008",
+                first_name="Eve",
+                surname="Stone",
+                department="Finance",
+                position="Analyst",
+                start_date=date(2024, 6, 1),
+            )
+        )
+    )
+    asyncio.run(service.delete_employee(created.id))
+    asyncio.run(service.restore_employee(created.id))
+
+    assert fake_session.event_types() == ["created", "deleted", "restored"]
+    assert all(event.actor_name == "TestAdmin" for event in fake_session.events)
+
+
+def test_create_employee_rejects_record_that_could_never_be_issued() -> None:
+    """人员库按开单口径必填：存得下、开不出来的员工不该存在。
+
+    这五个字段是预支单上要印的内容，validate_and_normalize_record 当作必填。
+    在录入这一步拦下来，报错才落在有修改入口的地方。
+    """
+    with pytest.raises(ValidationError):
+        EmployeeCreate(emp_id="EMP009", first_name="Only", surname="Name")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("是", True), ("否", False), ("YES", True), ("no", False), (None, True)],
+)
+def test_parse_employee_sheet_reads_is_active_both_ways(value: object, expected: bool) -> None:
+    wb = load_workbook(BytesIO(build_employee_import_template_workbook()))
+    ws = wb.active
+    ws.cell(row=2, column=9, value=value)
+    buf = BytesIO()
+    wb.save(buf)
+
+    assert parse_employee_sheet(buf.getvalue())[0]["is_active"] is expected
+
+
+def test_parse_employee_sheet_rejects_unreadable_date() -> None:
+    """认不出的日期要当场退回，不能静默变 None。
+
+    静默的代价出现在别处：导入报"成功"，等到开预支单时才炸出
+    "入职日期缺失或无法解析"，那时人已经不在导入这一步了。
+    """
+    wb = load_workbook(BytesIO(build_employee_import_template_workbook()))
+    ws = wb.active
+    ws.cell(row=2, column=8, value="15 Jan 2024")
+    buf = BytesIO()
+    wb.save(buf)
+
+    with pytest.raises(SalaryAdvanceStateError, match="15 Jan 2024"):
+        parse_employee_sheet(buf.getvalue())
+
+
+def test_parse_employee_sheet_rejects_unreadable_is_active() -> None:
+    wb = load_workbook(BytesIO(build_employee_import_template_workbook()))
+    ws = wb.active
+    ws.cell(row=2, column=9, value="待定")
+    buf = BytesIO()
+    wb.save(buf)
+
+    with pytest.raises(SalaryAdvanceStateError, match="待定"):
+        parse_employee_sheet(buf.getvalue())

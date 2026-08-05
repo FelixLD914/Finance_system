@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
-  AutoComplete,
-  Button,
+  Alert,
+  App as AntApp,
   DatePicker,
   Form,
   Input,
@@ -9,11 +9,14 @@ import {
   Modal,
   Select,
   Typography,
-  message,
 } from "antd";
 import dayjs from "dayjs";
 import { useI18n } from "../../i18n";
-import { createSingleSalaryAdvanceRecord, listEmployees } from "./api";
+import {
+  EMPLOYEE_PAGE_LIMIT,
+  createSingleSalaryAdvanceRecord,
+  listEmployees,
+} from "./api";
 import type { SalaryAdvanceBatchDetail, SalaryAdvanceEmployee } from "./types";
 
 const { Text } = Typography;
@@ -41,45 +44,55 @@ export function SingleIssuanceModal({
   onSuccess,
 }: SingleIssuanceModalProps) {
   const { t } = useI18n();
+  const { message } = AntApp.useApp();
   const [form] = Form.useForm<FormValues>();
   const [loading, setLoading] = useState(false);
   const [employees, setEmployees] = useState<SalaryAdvanceEmployee[]>([]);
+  const [truncatedTotal, setTruncatedTotal] = useState(0);
   const [selectedEmp, setSelectedEmp] = useState<SalaryAdvanceEmployee | null>(null);
 
   useEffect(() => {
-    if (open) {
-      form.resetFields();
-      setSelectedEmp(null);
-      const currentPeriod = dayjs().format("YYYYMM");
-      form.setFieldsValue({
-        period: currentPeriod,
-        requestDate: dayjs(),
-        approvalStatus: "Pending",
-      });
-      fetchEmployees();
-    }
-  }, [open, form]);
+    if (!open) return;
+    form.resetFields();
+    setSelectedEmp(null);
+    form.setFieldsValue({
+      period: dayjs().format("YYYYMM"),
+      requestDate: dayjs(),
+      approvalStatus: "Pending",
+    });
 
-  const fetchEmployees = async () => {
-    try {
-      const res = await listEmployees(undefined, true);
-      setEmployees(res.items);
-    } catch {
-      message.error("无法获取员工列表");
-    }
-  };
+    const fetchEmployees = async () => {
+      try {
+        const res = await listEmployees(undefined, true, false, 1, EMPLOYEE_PAGE_LIMIT);
+        setEmployees(res.items);
+        // 人数超过一页时必须说出来：下拉里选不到的人和"这个人不存在"长得一模一样。
+        setTruncatedTotal(res.total > res.items.length ? res.total : 0);
+      } catch (err) {
+        setTruncatedTotal(0);
+        message.error(
+          err instanceof Error ? err.message : t("salary.employeeListLoadFailed"),
+        );
+      }
+    };
+    void fetchEmployees();
+  }, [open, form, message, t]);
 
   const handleSelectEmployee = (empId: string) => {
-    const found = employees.find((e) => e.empId === empId) || null;
-    setSelectedEmp(found);
+    setSelectedEmp(employees.find((e) => e.empId === empId) ?? null);
   };
 
   const handleSubmit = async () => {
+    let values: FormValues;
     try {
-      const values = await form.validateFields();
-      setLoading(true);
+      values = await form.validateFields();
+    } catch {
+      // antd 已经把错误标在字段上了，这里不用再弹一次。
+      return;
+    }
 
-      const payload = {
+    setLoading(true);
+    try {
+      const result = await createSingleSalaryAdvanceRecord({
         empId: values.empId,
         period: values.period,
         requestDate: values.requestDate.format("YYYY-MM-DD"),
@@ -88,19 +101,12 @@ export function SingleIssuanceModal({
         reason: values.reason,
         approvalStatus: values.approvalStatus,
         remark: values.remark,
-      };
-
-      const result = await createSingleSalaryAdvanceRecord(payload);
+      });
       message.success(t("salary.createSingleSuccess"));
       onSuccess(result);
       onClose();
-    } catch (err: unknown) {
-      if (err && typeof err === "object" && "detail" in err) {
-        const detail = (err as { detail: string }).detail;
-        message.error(detail);
-      } else if (err && typeof err === "object" && "message" in err) {
-        message.error((err as { message: string }).message);
-      }
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -122,10 +128,22 @@ export function SingleIssuanceModal({
       onOk={handleSubmit}
       confirmLoading={loading}
       width={650}
-      okText="提交录入"
-      cancelText="取消"
+      okText={t("salary.singleIssuanceSubmit")}
+      cancelText={t("common.cancel")}
     >
       <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        {truncatedTotal > 0 && (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginBottom: 16 }}
+            message={t("salary.employeeListTruncated", {
+              total: truncatedTotal,
+              shown: employees.length,
+            })}
+          />
+        )}
+
         <Form.Item
           name="empId"
           label={t("salary.selectEmployee")}
@@ -192,7 +210,7 @@ export function SingleIssuanceModal({
           <Form.Item
             name="requestDate"
             label={t("salary.requestDate")}
-            rules={[{ required: true, message: "请选择申请日期" }]}
+            rules={[{ required: true, message: t("salary.requestDateRequired") }]}
           >
             <DatePicker style={{ width: "100%" }} format="YYYY-MM-DD" />
           </Form.Item>
@@ -202,7 +220,7 @@ export function SingleIssuanceModal({
           <Form.Item
             name="advanceAmount"
             label={t("salary.advanceAmount")}
-            rules={[{ required: true, message: "请输入预支金额" }]}
+            rules={[{ required: true, message: t("salary.advanceAmountRequired") }]}
           >
             <InputNumber
               id="advanceAmount"
@@ -218,28 +236,28 @@ export function SingleIssuanceModal({
               style={{ width: "100%" }}
               min={0.01}
               precision={2}
-              placeholder="默认等于预支金额"
+              placeholder={t("salary.monthlyDeductionPlaceholder")}
             />
           </Form.Item>
         </div>
 
         <Form.Item name="reason" label={t("salary.reason")}>
-          <Input maxLength={100} placeholder="请输入预支原因" />
+          <Input maxLength={100} placeholder={t("salary.reasonPlaceholder")} />
         </Form.Item>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <Form.Item name="approvalStatus" label={t("salary.approvalStatus")}>
             <Select
               options={[
-                { value: "Pending", label: "Pending (待确定)" },
-                { value: "Approve", label: "Approve (已批准)" },
-                { value: "Not approved", label: "Not approved (未批准)" },
+                { value: "Pending", label: t("salary.approvalPending") },
+                { value: "Approve", label: t("salary.approvalApprove") },
+                { value: "Not approved", label: t("salary.approvalNotApproved") },
               ]}
             />
           </Form.Item>
 
-          <Form.Item name="remark" label="备注">
-            <Input placeholder="可选备注" />
+          <Form.Item name="remark" label={t("salary.remark")}>
+            <Input placeholder={t("salary.remarkPlaceholder")} />
           </Form.Item>
         </div>
       </Form>
