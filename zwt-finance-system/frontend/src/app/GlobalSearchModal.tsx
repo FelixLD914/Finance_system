@@ -8,9 +8,9 @@ import {
   SettingOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { Empty, Input, Modal, Tag } from "antd";
+import { Empty, Input, Modal } from "antd";
 
-import type { Translate } from "../i18n";
+import type { Locale, Translate } from "../i18n";
 import type { ModuleKey } from "../modules/registry";
 
 interface SearchResultItem {
@@ -19,7 +19,6 @@ interface SearchResultItem {
   title: string;
   subtitle: string;
   category: string;
-  tag?: { text: string; color: string };
   icon: React.ReactNode;
 }
 
@@ -27,6 +26,7 @@ interface GlobalSearchModalProps {
   open: boolean;
   onClose: () => void;
   onNavigate: (module: ModuleKey) => void;
+  locale: Locale;
   t: Translate;
 }
 
@@ -34,9 +34,11 @@ export function GlobalSearchModal({
   open,
   onClose,
   onNavigate,
+  locale,
   t,
 }: GlobalSearchModalProps) {
   const [query, setQuery] = useState("");
+  const isEn = locale === "en-US";
 
   const searchableItems: SearchResultItem[] = useMemo(
     () => [
@@ -44,98 +46,108 @@ export function GlobalSearchModal({
       {
         id: "wht-ledger",
         moduleKey: "wht",
-        title: "WHT 预扣税单据台账",
-        subtitle: "查看与复核 WHT 凭证草稿、待出具及历史开票记录",
-        category: "WHT 开票",
-        tag: { text: "核心功能", color: "gold" },
+        title: isEn ? "WHT Withholding Tax Ledger" : "WHT 预扣税单据台账",
+        subtitle: isEn
+          ? "View and review WHT drafts, pending issuance, and history records"
+          : "查看与复核 WHT 凭证草稿、待出具及历史开票记录",
+        category: isEn ? "WHT Issuance" : "WHT 开票",
         icon: <FileTextOutlined />,
       },
       {
         id: "wht-payee",
         moduleKey: "wht",
-        title: "收款方主数据档案",
-        subtitle: "维护泰国供应商 13 位税号、泰文名称、泰文地址及申报表类型",
-        category: "WHT 开票",
-        tag: { text: "主数据", color: "cyan" },
+        title: isEn ? "Payee Master Data Directory" : "收款方主数据档案",
+        subtitle: isEn
+          ? "Maintain 13-digit Tax ID, Thai name, Thai address, and form type for Thai suppliers"
+          : "维护泰国供应商 13 位税号、泰文名称、泰文地址及申报表类型",
+        category: isEn ? "WHT Issuance" : "WHT 开票",
         icon: <UserOutlined />,
       },
       {
         id: "wht-batch",
         moduleKey: "wht",
-        title: "WHT 批量开具与 Excel 导入",
-        subtitle: "按标准 Excel 模板一次导入多条 WHT 草稿并逐行校验",
-        category: "WHT 开票",
-        tag: { text: "工具", color: "blue" },
+        title: isEn ? "WHT Batch Issuance & Excel Import" : "WHT 批量开具与 Excel 导入",
+        subtitle: isEn
+          ? "Import multiple WHT drafts at once using standard Excel template with line validation"
+          : "按标准 Excel 模板一次导入多条 WHT 草稿并逐行校验",
+        category: isEn ? "WHT Issuance" : "WHT 开票",
         icon: <FileDoneOutlined />,
       },
       // TAX INV Items
       {
         id: "tax-ledger",
         moduleKey: "tax-invoice",
-        title: "TAX INV 税票台账与月份视图",
-        subtitle: "Export Sales Tax Invoice 出口税票台账与 18 行限制校验",
-        category: "TAX INV 税票",
-        tag: { text: "核心功能", color: "purple" },
+        title: isEn ? "TAX INV Ledger & Monthly View" : "TAX INV 税票台账与月份视图",
+        subtitle: isEn
+          ? "Export Sales Tax Invoice ledger with 18-line item limit validation"
+          : "Export Sales Tax Invoice 出口税票台账与 18 行限制校验",
+        category: isEn ? "TAX INV" : "TAX INV 税票",
         icon: <AuditOutlined />,
       },
       {
         id: "tax-dual",
         moduleKey: "tax-invoice",
-        title: "发票 + 报关单双文件智能匹配",
-        subtitle: "上传 Export Invoice 与 Thailand Customs PDF 自动配对识别",
-        category: "TAX INV 税票",
-        tag: { text: "智能识别", color: "green" },
+        title: isEn ? "Invoice + Customs PDF Smart Pairing" : "发票 + 报关单双文件智能匹配",
+        subtitle: isEn
+          ? "Upload Export Invoice & Thailand Customs PDF for auto pairing and field reconciliation"
+          : "上传 Export Invoice 与 Thailand Customs PDF 自动配对识别",
+        category: isEn ? "TAX INV" : "TAX INV 税票",
         icon: <FileDoneOutlined />,
       },
       {
         id: "tax-rates",
         moduleKey: "tax-invoice",
-        title: "BOT 泰国央行汇率中心",
-        subtitle: "USD 每日 Buying Transfer 汇率自动同步与手工维护",
-        category: "TAX INV 税票",
-        tag: { text: "汇率中心", color: "geekblue" },
+        title: isEn ? "BOT Exchange Rate Center" : "BOT 泰国央行汇率中心",
+        subtitle: isEn
+          ? "USD daily Buying Transfer rate auto-sync and manual maintenance"
+          : "USD 每日 Buying Transfer 汇率自动同步与手工维护",
+        category: isEn ? "TAX INV" : "TAX INV 税票",
         icon: <SettingOutlined />,
       },
       // Salary Advance Items
       {
         id: "salary-ledger",
         moduleKey: "salary-advance",
-        title: "工资预支单据台账",
-        subtitle: "薪资预支批次管理、全字段校验与审批流程追踪",
-        category: "工资预支单",
-        tag: { text: "核心功能", color: "magenta" },
+        title: isEn ? "Salary Advance Ledger" : "工资预支单据台账",
+        subtitle: isEn
+          ? "Batch management, full field validation, and approval workflow tracking"
+          : "薪资预支批次管理、全字段校验与审批流程追踪",
+        category: isEn ? "Salary Advance" : "工资预支单",
         icon: <FileTextOutlined />,
       },
       {
         id: "salary-employees",
         moduleKey: "salary-advance",
-        title: "员工人员库档案",
-        subtitle: "维护工号、中英文姓名、部门及职位，保障预支单引用准确",
-        category: "工资预支单",
-        tag: { text: "人员库", color: "lime" },
+        title: isEn ? "Employee Directory" : "员工人员库档案",
+        subtitle: isEn
+          ? "Maintain employee ID, English/Chinese name, department, and position"
+          : "维护工号、中英文姓名、部门及职位，保障预支单引用准确",
+        category: isEn ? "Salary Advance" : "工资预支单",
         icon: <UserOutlined />,
       },
       // Administration Items
       {
         id: "admin-signatures",
         moduleKey: "administration",
-        title: "签名图库与套印印鉴",
-        subtitle: "上传财务负责人与总经理签名图片，配置适用单据与默认版本",
-        category: "系统管理",
-        tag: { text: "印鉴管理", color: "volcano" },
+        title: isEn ? "Signature Asset Library & Stamp" : "签名图库与套印印鉴",
+        subtitle: isEn
+          ? "Upload supervisor & MD signatures, configure scope and default version"
+          : "上传财务负责人与总经理签名图片，配置适用单据与默认版本",
+        category: isEn ? "System Admin" : "系统管理",
         icon: <SettingOutlined />,
       },
       {
         id: "admin-audit",
         moduleKey: "administration",
-        title: "审计日志与回收站",
-        subtitle: "操作全轨迹留痕记录，以及物理删除保护与主数据一键恢复",
-        category: "系统管理",
-        tag: { text: "安全审计", color: "orange" },
+        title: isEn ? "Audit Log & Recycle Bin" : "审计日志与回收站",
+        subtitle: isEn
+          ? "Track operation logs, physical deletion protection, and one-click data restore"
+          : "操作全轨迹留痕记录，以及物理删除保护与主数据一键恢复",
+        category: isEn ? "System Admin" : "系统管理",
         icon: <AuditOutlined />,
       },
     ],
-    [],
+    [isEn],
   );
 
   const filteredResults = useMemo(() => {
@@ -159,7 +171,9 @@ export function GlobalSearchModal({
       open={open}
       footer={null}
       title={null}
+      closeIcon={null}
       width={640}
+      style={{ top: 50 }}
       destroyOnClose
       onCancel={onClose}
       className="global-search-modal"
@@ -167,7 +181,11 @@ export function GlobalSearchModal({
       <div style={{ padding: "8px 0 16px 0" }}>
         <Input
           prefix={<SearchOutlined style={{ color: "#a0988e", fontSize: 18 }} />}
-          placeholder="全局搜索功能模块、单据台账、主数据或设置..."
+          placeholder={
+            isEn
+              ? "Search modules, ledgers, master data or settings..."
+              : "全局搜索功能模块、单据台账、主数据或设置..."
+          }
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           allowClear
@@ -192,7 +210,11 @@ export function GlobalSearchModal({
         {filteredResults.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="没有找到匹配的功能或数据"
+            description={
+              isEn
+                ? "No matching functions or data found"
+                : "没有找到匹配的功能或数据"
+            }
           />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -242,17 +264,9 @@ export function GlobalSearchModal({
                         fontSize: 14,
                         fontWeight: 600,
                         color: "#2a2622",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
                       }}
                     >
-                      <span>{item.title}</span>
-                      {item.tag && (
-                        <Tag color={item.tag.color} style={{ margin: 0 }}>
-                          {item.tag.text}
-                        </Tag>
-                      )}
+                      {item.title}
                     </div>
                     <div style={{ fontSize: 12, color: "#877f76", marginTop: 2 }}>
                       {item.subtitle}
@@ -279,8 +293,12 @@ export function GlobalSearchModal({
           fontSize: 12,
         }}
       >
-        <span>提示：点击任意选项即可直接跳转对应功能</span>
-        <span>按 ESC 键关闭</span>
+        <span>
+          {isEn
+            ? "Tip: Click any item to navigate directly"
+            : "提示：点击任意选项即可直接跳转对应功能"}
+        </span>
+        <span>{isEn ? "Press ESC to close" : "按 ESC 键关闭"}</span>
       </div>
     </Modal>
   );

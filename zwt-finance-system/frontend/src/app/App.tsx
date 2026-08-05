@@ -35,7 +35,14 @@ export function App() {
       <ConfigProvider locale={antdLocale} theme={financeTheme}>
         <main className="app-bootstrap">
           {/* antd 6 里 Spin 的 tip 已弃用，改用 description。 */}
-          <Spin size="large" description={t("common.loadFailed") ? (locale === "en-US" ? "Checking login status..." : "正在确认登录状态") : "正在确认登录状态"} />
+          <Spin
+            size="large"
+            description={
+              locale === "en-US"
+                ? "Checking login status..."
+                : "正在确认登录状态"
+            }
+          />
         </main>
       </ConfigProvider>
     );
@@ -91,6 +98,7 @@ export function App() {
           open={searchOpen}
           onClose={() => setSearchOpen(false)}
           onNavigate={setActiveModule}
+          locale={locale}
           t={t}
         />
 
@@ -98,16 +106,17 @@ export function App() {
           open={notificationsOpen}
           onClose={() => setNotificationsOpen(false)}
           onNavigate={setActiveModule}
+          locale={locale}
           t={t}
         />
 
         <HelpModal
           open={helpOpen}
           onClose={() => setHelpOpen(false)}
+          locale={locale}
           t={t}
         />
       </AppShell>
     </ConfigProvider>
   );
 }
-

@@ -6,14 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GlobalSearchModal } from "./GlobalSearchModal";
 import { HelpModal } from "./HelpModal";
 import { NotificationsDrawer } from "./NotificationsDrawer";
-import { resources } from "../i18n";
 
-const t = (key: string) => (resources["zh-CN"] as Record<string, string>)[key] ?? key;
+const t = (key: string) => key;
 
 describe("App Header Controls", () => {
   afterEach(() => cleanup());
 
-  it("renders GlobalSearchModal and supports query filtering", () => {
+  it("renders GlobalSearchModal and supports query filtering & i18n", () => {
     const onNavigate = vi.fn();
     const onClose = vi.fn();
 
@@ -22,6 +21,7 @@ describe("App Header Controls", () => {
         open={true}
         onClose={onClose}
         onNavigate={onNavigate}
+        locale="zh-CN"
         t={t}
       />,
     );
@@ -44,6 +44,7 @@ describe("App Header Controls", () => {
         open={true}
         onClose={onClose}
         onNavigate={onNavigate}
+        locale="zh-CN"
         t={t}
       />,
     );
@@ -57,10 +58,12 @@ describe("App Header Controls", () => {
     expect(screen.getByText("未读 (0)")).toBeTruthy();
   });
 
-  it("renders HelpModal and displays module business logic and operations", () => {
+  it("renders HelpModal and displays module business logic and operations in zh-CN and en-US", () => {
     const onClose = vi.fn();
 
-    render(<HelpModal open={true} onClose={onClose} t={t} />);
+    const { rerender } = render(
+      <HelpModal open={true} onClose={onClose} locale="zh-CN" t={t} />,
+    );
 
     expect(screen.getByText("ZWT Finance 业务逻辑与操作指南")).toBeTruthy();
     expect(screen.getByText("WHT 预扣税开票管理 (Withholding Tax)")).toBeTruthy();
@@ -73,5 +76,11 @@ describe("App Header Controls", () => {
 
     expect(screen.getByText("TAX INV 出口税票管理 (Export Sales Tax Invoice)")).toBeTruthy();
     expect(screen.getByText("单张凭证 18 行商品限制")).toBeTruthy();
+
+    // Rerender in EN
+    rerender(<HelpModal open={true} onClose={onClose} locale="en-US" t={t} />);
+    expect(
+      screen.getByText("ZWT Finance Business Logic & Operation Guide"),
+    ).toBeTruthy();
   });
 });

@@ -1,24 +1,24 @@
 import { useState } from "react";
 import {
-  AuditOutlined,
-  BellOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  DeleteOutlined,
-  FileTextOutlined,
   InfoCircleOutlined,
   RightOutlined,
 } from "@ant-design/icons";
-import { Badge, Button, Drawer, Empty, Segmented, Space, Tag } from "antd";
+import { Badge, Button, Drawer, Empty, Segmented, Space } from "antd";
+import { BellOutlined } from "@ant-design/icons";
 
-import type { Translate } from "../i18n";
+import type { Locale, Translate } from "../i18n";
 import type { ModuleKey } from "../modules/registry";
 
 export interface SystemNotification {
   id: string;
-  title: string;
-  description: string;
-  timestamp: string;
+  titleZh: string;
+  titleEn: string;
+  descZh: string;
+  descEn: string;
+  timeZh: string;
+  timeEn: string;
   read: boolean;
   type: "action" | "info" | "success";
   moduleKey: ModuleKey;
@@ -28,42 +28,55 @@ interface NotificationsDrawerProps {
   open: boolean;
   onClose: () => void;
   onNavigate: (module: ModuleKey) => void;
+  locale: Locale;
   t: Translate;
 }
 
 const INITIAL_NOTIFICATIONS: SystemNotification[] = [
   {
     id: "notif-1",
-    title: "WHT 待复核单据提醒",
-    description: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
-    timestamp: "10 分钟前",
+    titleZh: "WHT 待复核单据提醒",
+    titleEn: "WHT Draft Pending Review",
+    descZh: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
+    descEn: "2 WHT certificate drafts submitted, awaiting supervisor review & formal number allocation",
+    timeZh: "10 分钟前",
+    timeEn: "10 mins ago",
     read: false,
     type: "action",
     moduleKey: "wht",
   },
   {
     id: "notif-2",
-    title: "TAX INV BOT 汇率更新成功",
-    description: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
-    timestamp: "1 小时前",
+    titleZh: "TAX INV BOT 汇率更新成功",
+    titleEn: "TAX INV BOT Rate Sync Succeeded",
+    descZh: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
+    descEn: "Latest BOT USD buying transfer exchange rate synced from API successfully",
+    timeZh: "1 小时前",
+    timeEn: "1 hour ago",
     read: false,
     type: "success",
     moduleKey: "tax-invoice",
   },
   {
     id: "notif-3",
-    title: "工资预支单数据待校验",
-    description: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
-    timestamp: "2 小时前",
+    titleZh: "工资预支单数据待校验",
+    titleEn: "Salary Advance Data Validation Pending",
+    descZh: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
+    descEn: "Newly imported Salary Advance batch 202608 has 1 employee record needing name check",
+    timeZh: "2 小时前",
+    timeEn: "2 hours ago",
     read: false,
     type: "action",
     moduleKey: "salary-advance",
   },
   {
     id: "notif-4",
-    title: "签名图库默认版本提示",
-    description: "系统管理中已更新财务负责人与总经理印鉴签名图片",
-    timestamp: "昨天 16:30",
+    titleZh: "签名图库默认版本提示",
+    titleEn: "Default Signature Version Updated",
+    descZh: "系统管理中已更新财务负责人与总经理印鉴签名图片",
+    descEn: "Default signature image assets for supervisor and MD updated in System Admin",
+    timeZh: "昨天 16:30",
+    timeEn: "Yesterday 16:30",
     read: true,
     type: "info",
     moduleKey: "administration",
@@ -74,12 +87,14 @@ export function NotificationsDrawer({
   open,
   onClose,
   onNavigate,
+  locale,
   t,
 }: NotificationsDrawerProps) {
   const [notifications, setNotifications] = useState<SystemNotification[]>(
     INITIAL_NOTIFICATIONS,
   );
   const [filterType, setFilterType] = useState<"all" | "unread" | "action">("all");
+  const isEn = locale === "en-US";
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -112,7 +127,9 @@ export function NotificationsDrawer({
       title={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BellOutlined style={{ color: "#8c6b3f", fontSize: 20 }} />
-          <span style={{ fontSize: 16, fontWeight: 600 }}>系统通知中心</span>
+          <span style={{ fontSize: 16, fontWeight: 600 }}>
+            {isEn ? "Notification Center" : "系统通知中心"}
+          </span>
           {unreadCount > 0 && (
             <Badge count={unreadCount} style={{ backgroundColor: "#b85d19" }} />
           )}
@@ -121,10 +138,10 @@ export function NotificationsDrawer({
       extra={
         <Space size={4}>
           <Button size="small" type="text" onClick={markAllAsRead}>
-            全部已读
+            {isEn ? "Mark all as read" : "全部已读"}
           </Button>
           <Button size="small" type="text" danger onClick={clearAll}>
-            清空
+            {isEn ? "Clear" : "清空"}
           </Button>
         </Space>
       }
@@ -137,10 +154,20 @@ export function NotificationsDrawer({
           value={filterType}
           onChange={(val) => setFilterType(val as "all" | "unread" | "action")}
           options={[
-            { label: `全部 (${notifications.length})`, value: "all" },
-            { label: `未读 (${unreadCount})`, value: "unread" },
             {
-              label: `待办事项 (${notifications.filter((n) => n.type === "action").length})`,
+              label: isEn
+                ? `All (${notifications.length})`
+                : `全部 (${notifications.length})`,
+              value: "all",
+            },
+            {
+              label: isEn ? `Unread (${unreadCount})` : `未读 (${unreadCount})`,
+              value: "unread",
+            },
+            {
+              label: isEn
+                ? `Action (${notifications.filter((n) => n.type === "action").length})`
+                : `待办事项 (${notifications.filter((n) => n.type === "action").length})`,
               value: "action",
             },
           ]}
@@ -150,7 +177,7 @@ export function NotificationsDrawer({
       {filteredNotifications.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="暂无符合条件的通知"
+          description={isEn ? "No notifications found" : "暂无符合条件的通知"}
         />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -221,7 +248,7 @@ export function NotificationsDrawer({
                       color: "#2a2622",
                     }}
                   >
-                    {n.title}
+                    {isEn ? n.titleEn : n.titleZh}
                   </div>
                   <div
                     style={{
@@ -231,7 +258,7 @@ export function NotificationsDrawer({
                       lineHeight: 1.4,
                     }}
                   >
-                    {n.description}
+                    {isEn ? n.descEn : n.descZh}
                   </div>
                   <div
                     style={{
@@ -243,9 +270,10 @@ export function NotificationsDrawer({
                       color: "#9e9488",
                     }}
                   >
-                    <span>{n.timestamp}</span>
+                    <span>{isEn ? n.timeEn : n.timeZh}</span>
                     <span style={{ color: "#8c6b3f", fontWeight: 600 }}>
-                      去查看 <RightOutlined style={{ fontSize: 10 }} />
+                      {isEn ? "View details" : "去查看"}{" "}
+                      <RightOutlined style={{ fontSize: 10 }} />
                     </span>
                   </div>
                 </div>

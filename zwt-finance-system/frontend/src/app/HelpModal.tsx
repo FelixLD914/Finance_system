@@ -7,14 +7,12 @@ import {
   FileTextOutlined,
   InfoCircleOutlined,
   QuestionCircleOutlined,
-  SafetyCertificateOutlined,
   SearchOutlined,
   SettingOutlined,
-  UserOutlined,
 } from "@ant-design/icons";
-import { Alert, Card, Input, Modal, Segmented, Space, Tag } from "antd";
+import { Alert, Card, Input, Modal, Segmented, Tag } from "antd";
 
-import type { Translate } from "../i18n";
+import type { Locale, Translate } from "../i18n";
 import type { ModuleKey } from "../modules/registry";
 
 interface HelpSection {
@@ -28,226 +26,369 @@ interface HelpSection {
 interface HelpModalProps {
   open: boolean;
   onClose: () => void;
+  locale: Locale;
   t: Translate;
 }
 
-export function HelpModal({ open, onClose, t }: HelpModalProps) {
+export function HelpModal({ open, onClose, locale, t }: HelpModalProps) {
   const [activeTab, setActiveTab] = useState<ModuleKey>("wht");
   const [searchQuery, setSearchQuery] = useState("");
+  const isEn = locale === "en-US";
 
   const helpData: Partial<Record<ModuleKey, HelpSection>> = useMemo(
     () => ({
       wht: {
-        title: "WHT 预扣税开票管理 (Withholding Tax)",
-        badge: "PND3 / PND53 预扣税凭证",
+        title: isEn
+          ? "WHT Withholding Tax Management"
+          : "WHT 预扣税开票管理 (Withholding Tax)",
+        badge: isEn ? "PND3 / PND53 Certificates" : "PND3 / PND53 预扣税凭证",
         logicRules: [
           {
-            title: "正式凭证编号生成机制",
-            desc: "正式 WHT 凭证编号只在财务主管点击「批准」时由后端数据库事务安全分配，前端不允许指定或修改编号。草稿阶段无编号，确保顺序连贯、防错重号。",
+            title: isEn
+              ? "Formal Certificate Number Allocation"
+              : "正式凭证编号生成机制",
+            desc: isEn
+              ? "Formal WHT numbers are securely allocated by backend database transactions only when the supervisor approves. Manual edit of numbers is forbidden."
+              : "正式 WHT 凭证编号只在财务主管点击「批准」时由后端数据库事务安全分配，前端不允许指定或修改编号。草稿阶段无编号，确保顺序连贯、防错重号。",
             important: true,
           },
           {
-            title: "金额计算与 ROUND_HALF_UP 舍入",
-            desc: "预扣税额 = 不含税金额 × 预扣税率（%）。计算结果按标准的 ROUND_HALF_UP（四舍五入）精确保留两位小数，与服务器计算逻辑一致。",
+            title: isEn
+              ? "Tax Calculation & ROUND_HALF_UP"
+              : "金额计算与 ROUND_HALF_UP 舍入",
+            desc: isEn
+              ? "Tax Amount = Net Amount × Tax Rate (%). Rounded to 2 decimal places using standard ROUND_HALF_UP matching server logic."
+              : "预扣税额 = 不含税金额 × 预扣税率（%）。计算结果按标准的 ROUND_HALF_UP（四舍五入）精扣保留两位小数，与服务器计算逻辑一致。",
           },
           {
-            title: "法定税率目录与偏离理由",
-            desc: "各收入类型对应法定预扣税率（如服务费 3%、租金 5%）。当手工修改为非法定税率时，系统要求必须填写「偏离理由」，并永久写入凭证日志备查。",
+            title: isEn
+              ? "Statutory Rate Catalogue & Deviation Reason"
+              : "法定税率目录与偏离理由",
+            desc: isEn
+              ? "Each income type has a statutory rate (e.g. Services 3%, Rent 5%). Non-statutory rates require an explicit reason logged permanently."
+              : "各收入类型对应法定预扣税率（如服务费 3%、租金 5%）。当手工修改为非法定税率时，系统要求必须填写「偏离理由」，并永久写入凭证日志备查。",
           },
           {
-            title: "补开（BK）与历史凭证迁移",
-            desc: "支持补开（BK）序号标记；迁移旧系统历史台账时会完整保留旧凭证原编号，导入即为「已出具」状态。",
+            title: isEn
+              ? "Supplement (BK) & Migration"
+              : "补开（BK）与历史凭证迁移",
+            desc: isEn
+              ? "Supports Supplement (BK) run sequence; historical migration retains legacy numbers and is imported directly as Issued."
+              : "支持补开（BK）序号标记；迁移旧系统历史台账时会完整保留旧凭证原编号，导入即为「已出具」状态。",
           },
         ],
         steps: [
           {
-            step: "步骤 1",
-            text: "选择开票路径：点击「新建 WHT 任务」单张录入，或选择「批量开具」上传 Excel。",
+            step: isEn ? "Step 1" : "步骤 1",
+            text: isEn
+              ? "Choose Path: Click 'New WHT Task' for single entry or 'Batch Issuance' for Excel upload."
+              : "选择开票路径：点击「新建 WHT 任务」单张录入，或选择「批量开具」上传 Excel。",
           },
           {
-            step: "步骤 2",
-            text: "匹配或补录收款方：支持由 13 位税号搜索泰文名称、泰文地址，主数据未收录时可实时手工补录。",
+            step: isEn ? "Step 2" : "步骤 2",
+            text: isEn
+              ? "Match Payee: Search Thai supplier name and address by 13-digit Tax ID, or enter inline."
+              : "匹配或补录收款方：支持由 13 位税号搜索泰文名称、泰文地址，主数据未收录时可实时手工补录。",
           },
           {
-            step: "步骤 3",
-            text: "提交复核与批准取号：确认不含税金额与税率无误后提交复核；主管批准即分配正式编号。",
+            step: isEn ? "Step 3" : "步骤 3",
+            text: isEn
+              ? "Submit & Approve: Confirm amounts and rates, submit for review. Supervisor approval allocates number."
+              : "提交复核与批准取号：确认不含税金额与税率无误后提交复核；主管批准即分配正式编号。",
           },
           {
-            step: "步骤 4",
-            text: "套印签名与生成 PDF/Excel：选择经批准的默认签名，一键生成正式凭证并导出。",
+            step: isEn ? "Step 4" : "步骤 4",
+            text: isEn
+              ? "Stamp & Export: Select default approved signature, generate official PDF/Excel."
+              : "套印签名与生成 PDF/Excel：选择经批准的默认签名，一键生成正式凭证并导出。",
           },
         ],
         faqs: [
           {
-            q: "问：为什么填写的税率被拒绝提交？",
-            a: "答：若填写的税率偏离法定标准（如 3% 改为 5%），必须在「改用非法定税率的理由」文本框中填写说明（例如：合同约定专条备查），否则提交会被退回。",
+            q: isEn
+              ? "Q: Why is my custom tax rate rejected?"
+              : "问：为什么填写的税率被拒绝提交？",
+            a: isEn
+              ? "A: Non-statutory rates require a non-empty reason in the 'Rate Override Reason' field."
+              : "答：若填写的税率偏离法定标准（如 3% 改为 5%），必须在「改用非法定税率的理由」文本框中填写说明（例如：合同约定专条备查），否则提交会被退回。",
           },
           {
-            q: "问：批量开具 Excel 模板为什么不能填凭证编号？",
-            a: "答：根据系统审计要求，所有新发凭证编号必须由数据库事务统一发放。批量 Excel 中请留空编号列，系统会在批准时按序号自动生成。",
+            q: isEn
+              ? "Q: Why can't I fill certificate numbers in batch Excel?"
+              : "问：批量开具 Excel 模板为什么不能填凭证编号？",
+            a: isEn
+              ? "A: Numbers must be generated by database transaction upon approval to guarantee audit sequence."
+              : "答：根据系统审计要求，所有新发凭证编号必须由数据库事务统一发放。批量 Excel 中请留空编号列，系统会在批准时按序号自动生成。",
           },
         ],
       },
       "tax-invoice": {
-        title: "TAX INV 出口税票管理 (Export Sales Tax Invoice)",
-        badge: "报关单与发票自动识别对账",
+        title: isEn
+          ? "TAX INV Export Sales Tax Invoice Management"
+          : "TAX INV 出口税票管理 (Export Sales Tax Invoice)",
+        badge: isEn
+          ? "Invoice & Customs PDF Pairing"
+          : "报关单与发票自动识别对账",
         logicRules: [
           {
-            title: "双文件（发票 + 报关单）智能配对",
-            desc: "上传 Export Invoice (.xlsx) 与 Thailand Customs PDF，系统通过 C/I No. 自动跨格式配对，比对 FOB 金额、报关提交日及货代信息。",
+            title: isEn
+              ? "Dual File Smart Pairing"
+              : "双文件（发票 + 报关单）智能配对",
+            desc: isEn
+              ? "Upload Export Invoice (.xlsx) & Thailand Customs PDF. Auto-pairs by C/I No. across formats to compare FOB and dates."
+              : "上传 Export Invoice (.xlsx) 与 Thailand Customs PDF，系统通过 C/I No. 自动跨格式配对，比对 FOB 金额、报关提交日及货代信息。",
             important: true,
           },
           {
-            title: "BOT 泰国央行汇率自动匹配",
-            desc: "开票取 USD 的 BOT buying transfer 汇率，按报关单提交日自动匹配当日央行汇率，自动换算成泰铢 FOB THB 金额。",
+            title: isEn
+              ? "BOT Exchange Rate Auto-Matching"
+              : "BOT 泰国央行汇率自动匹配",
+            desc: isEn
+              ? "Uses USD BOT Buying Transfer rate matched to the Customs submission date to convert to FOB THB."
+              : "开票取 USD 的 BOT buying transfer 汇率，按报关单提交日自动匹配当日央行汇率，自动换算成泰铢 FOB THB 金额。",
           },
           {
-            title: "单张凭证 18 行商品限制",
-            desc: "单张 TAX INV 出口税票模板容量严格限制为最多 18 条商品明细。若批量表格中同一关单超过 18 行，系统将禁止批准并提醒拆单。",
+            title: isEn
+              ? "18 Line Items Limit Per Invoice"
+              : "单张凭证 18 行商品限制",
+            desc: isEn
+              ? "Template capacity is strictly capped at 18 line items per invoice. Batches exceeding 18 lines require splitting."
+              : "单张 TAX INV 出口税票模板容量严格限制为最多 18 条商品明细。若批量表格中同一关单超过 18 行，系统将禁止批准并提醒拆单。",
           },
           {
-            title: "作废与更正单（Credit Note / Debit Note）",
-            desc: "已开具的税票不可直接物理删除；作废后原编号永久保留。若内容需修改，可生成关联更正单并分配新编号。",
+            title: isEn
+              ? "Void & Correction Invoices"
+              : "作废与更正单（Credit Note / Debit Note）",
+            desc: isEn
+              ? "Issued invoices cannot be deleted. Voiding retains number permanently; changes require an associated correction invoice."
+              : "已开具的税票不可直接物理删除；作废后原编号永久保留。若内容需修改，可生成关联更正单并分配新编号。",
           },
         ],
         steps: [
           {
-            step: "步骤 1",
-            text: "汇率就绪确认：先在「BOT 汇率中心」确认当月汇率已入库，支持一键 API 同步或 Excel 导入。",
+            step: isEn ? "Step 1" : "步骤 1",
+            text: isEn
+              ? "Check Rate Readiness: Ensure monthly BOT exchange rates are synced via API or Excel."
+              : "汇率就绪确认：先在「BOT 汇率中心」确认当月汇率已入库，支持一键 API 同步或 Excel 导入。",
           },
           {
-            step: "步骤 2",
-            text: "双文件导入识别：把发票 Excel 与报关单 PDF 一起拖入向导，系统完成 C/I 智能匹配。",
+            step: isEn ? "Step 2" : "步骤 2",
+            text: isEn
+              ? "Dual File Drag & Drop: Drag Invoice Excel and Customs PDF together into the wizard for smart pairing."
+              : "双文件导入识别：把发票 Excel 与报关单 PDF 一起拖入向导，系统完成 C/I 智能匹配。",
           },
           {
-            step: "步骤 3",
-            text: "批次对账复核：在复核台逐行比对发票与关单 FOB USD 差异，警示提示确认无误后点击批量批准。",
+            step: isEn ? "Step 3" : "步骤 3",
+            text: isEn
+              ? "Reconcile & Review: Inspect FOB USD differences line-by-line before batch approval."
+              : "批次对账复核：在复核台逐行比对发票与关单 FOB USD 差异，警示提示确认无误后点击批量批准。",
           },
           {
-            step: "步骤 4",
-            text: "打包导出正式文件：主管批准后直接导出盖章版 Excel/PDF 或按整期一键打包导出 ZIP。",
+            step: isEn ? "Step 4" : "步骤 4",
+            text: isEn
+              ? "Export Official Files: Export stamped Excel/PDF or package full period as ZIP archive."
+              : "打包导出正式文件：主管批准后直接导出盖章版 Excel/PDF 或按整期一键打包导出 ZIP。",
           },
         ],
         faqs: [
           {
-            q: "问：发票与报关单的 FOB USD 金额不一致怎么办？",
-            a: "答：复核台会红字标出差异行。请开抽屉核对发票明细与报关单，若是关单修改导致，可在对账界面修改发票数据后再行批准。",
+            q: isEn
+              ? "Q: What if FOB USD amounts mismatch?"
+              : "问：发票与报关单的 FOB USD 金额不一致怎么办？",
+            a: isEn
+              ? "A: Reconciliation view highlights differences in red. Open drawer to inspect and correct invoice data."
+              : "答：复核台会红字标出差异行。请开抽屉核对发票明细与报关单，若是关单修改导致，可在对账界面修改发票数据后再行批准。",
           },
           {
-            q: "问：如何处理缺少当月 BOT 汇率的报关单？",
-            a: "答：若报关提交日未抓到央行汇率，凭证会停在「待匹配汇率」。请点击「从 BOT API 同步」或手工补录汇率即可解除停滞。",
+            q: isEn
+              ? "Q: How to handle missing BOT exchange rates?"
+              : "问：如何处理缺少当月 BOT 汇率的报关单？",
+            a: isEn
+              ? "A: Click 'Sync from BOT API' or manually enter rates for that month to unblock processing."
+              : "答：若报关提交日未抓到央行汇率，凭证会停在「待匹配汇率」。请点击「从 BOT API 同步」或手工补录汇率即可解除停滞。",
           },
         ],
       },
       "salary-advance": {
-        title: "SALARY ADVANCE 工资预支单管理",
-        badge: "全字段校验与多重印鉴防伪",
+        title: isEn
+          ? "Salary Advance Management"
+          : "SALARY ADVANCE 工资预支单管理",
+        badge: isEn
+          ? "Full Validation & Multi-Stamp"
+          : "全字段校验与多重印鉴防伪",
         logicRules: [
           {
-            title: "Excel 全字段强校验与人员库匹配",
-            desc: "导入工资预支 Excel 时，系统自动核查工号是否在人员库中在职，自动校验申请金额与月扣额逻辑，确保无缺失错漏。",
+            title: isEn
+              ? "Strict Excel Validation & Employee Match"
+              : "Excel 全字段强校验与人员库匹配",
+            desc: isEn
+              ? "Automatically checks employee active status in directory and validates requested vs monthly deduction amounts."
+              : "导入工资预支 Excel 时，系统自动核查工号是否在人员库中在职，自动校验申请金额与月扣额逻辑，确保无缺失错漏。",
             important: true,
           },
           {
-            title: "财务负责人与总经理/董事双重签名策略",
-            desc: "预支单正式文件印鉴需同时包含财务负责人与总经理/董事签名。支持按适用单据指定默认签名版本。",
+            title: isEn
+              ? "Finance Supervisor & MD Dual Signatures"
+              : "财务负责人与总经理/董事双重签名策略",
+            desc: isEn
+              ? "Advance documents include both finance supervisor and managing director signature stamps."
+              : "预支单正式文件印鉴需同时包含财务负责人与总经理/董事签名。支持按适用单据指定默认签名版本。",
           },
           {
-            title: "数据指纹（Fingerprint）与全链路防伪留痕",
-            desc: "每张预支单生成时会计算全局数据哈希指纹，正式 PDF 文件底部打印验证指纹与生成版本，避免人工篡改。",
+            title: isEn
+              ? "Data Fingerprint Anti-Tampering"
+              : "数据指纹（Fingerprint）与全链路防伪留痕",
+            desc: isEn
+              ? "Computes global SHA-256 fingerprint for each advance voucher, printed at document footer."
+              : "每张预支单生成时会计算全局数据哈希指纹，正式 PDF 文件底部打印验证指纹与生成版本，避免人工篡改。",
           },
           {
-            title: "纯 Python 引擎（无 Office 依赖）",
-            desc: "后端采用 ReportLab + pypdf 高性能渲染 PDF，服务器完全脱离 Office/WPS 依赖，毫秒级快速生成凭证。",
+            title: isEn
+              ? "Python Rendering Engine"
+              : "纯 Python 引擎（无 Office 依赖）",
+            desc: isEn
+              ? "Uses ReportLab + pypdf for high performance PDF rendering without Office or WPS dependencies."
+              : "后端采用 ReportLab + pypdf 高性能渲染 PDF，服务器完全脱离 Office/WPS 依赖，毫秒级快速生成凭证。",
           },
         ],
         steps: [
           {
-            step: "步骤 1",
-            text: "维护员工人员库：确认申请员工工号、中英文姓名、部门及职位已在人员库中完成登记。",
+            step: isEn ? "Step 1" : "步骤 1",
+            text: isEn
+              ? "Register Employees: Ensure employee IDs, names, departments, and positions are registered."
+              : "维护员工人员库：确认申请员工工号、中英文姓名、部门及职位已在人员库中完成登记。",
           },
           {
-            step: "步骤 2",
-            text: "导入预支表批次：选择标准 Excel 文件上传，系统自动校验并标记有效与异常记录。",
+            step: isEn ? "Step 2" : "步骤 2",
+            text: isEn
+              ? "Import Advance Sheet: Upload Excel batch. System validates data and highlights errors."
+              : "导入预支表批次：选择标准 Excel 文件上传，系统自动校验并标记有效与异常记录。",
           },
           {
-            step: "步骤 3",
-            text: "选择多重签名印鉴：选定财务负责人与总经理/董事的签名版本。",
+            step: isEn ? "Step 3" : "步骤 3",
+            text: isEn
+              ? "Select Signature Assets: Choose active signature assets for finance and MD."
+              : "选择多重签名印鉴：选定财务负责人与总经理/董事的签名版本。",
           },
           {
-            step: "步骤 4",
-            text: "批量出具与下载：提交生成任务，完成后可下载单张 PDF/Excel 或一键导出合并 PDF 与 ZIP 包。",
+            step: isEn ? "Step 4" : "步骤 4",
+            text: isEn
+              ? "Generate & Download: Download individual PDFs/Excels or batch merged ZIP packages."
+              : "批量出具与下载：提交生成任务，完成后可下载单张 PDF/Excel 或一键导出合并 PDF 与 ZIP 包。",
           },
         ],
         faqs: [
           {
-            q: "问：为什么预支单提示「工号未在人员库中找到」？",
-            a: "答：系统为防范冒领及财务风险，要求所有预支人员必须先在「员工人员库」建档。请先在人员库新增该员工后再重新校验。",
+            q: isEn
+              ? "Q: Why does it say 'Employee ID not in directory'?"
+              : "问：为什么预支单提示「工号未在人员库中找到」？",
+            a: isEn
+              ? "A: System requires all applicants to be registered in Employee Directory prior to advance creation."
+              : "答：系统为防范冒领及财务风险，要求所有预支人员必须先在「员工人员库」建档。请先在人员库新增该员工后再重新校验。",
           },
           {
-            q: "问：申请金额与月扣额填错了如何更正？",
-            a: "答：在批次单据列表中点击「修改记录」，调整金额并确认后，系统会自动重新计算校验状态并更新指纹。",
+            q: isEn
+              ? "Q: How to correct wrong advance amounts?"
+              : "问：申请金额与月扣额填错了如何更正？",
+            a: isEn
+              ? "A: Click 'Edit Record' in batch list, adjust amounts, and save to recompute validation and fingerprint."
+              : "答：在批次单据列表中点击「修改记录」，调整金额并确认后，系统会自动重新计算校验状态并更新指纹。",
           },
         ],
       },
       administration: {
-        title: "SHARED & ADMIN 共享数据与系统管理",
-        badge: "主数据别名、签名图库与审计日志",
+        title: isEn
+          ? "Shared Data & System Administration"
+          : "SHARED & ADMIN 共享数据与系统管理",
+        badge: isEn
+          ? "Aliases, Signatures & Audit Logs"
+          : "主数据别名、签名图库与审计日志",
         logicRules: [
           {
-            title: "收款方主数据别名（Alias）智能匹配",
-            desc: "针对同家公司存在多种泰文/英文写法，支持维护 Alias 别名库。批量导入时可通过别名自动归集到统一 13 位税号主数据。",
+            title: isEn
+              ? "Payee Alias Smart Matching"
+              : "收款方主数据别名（Alias）智能匹配",
+            desc: isEn
+              ? "Maintains alias names for Thai suppliers, auto-consolidating variations into unified 13-digit Tax ID profile."
+              : "针对同家公司存在多种泰文/英文写法，支持维护 Alias 别名库。批量导入时可通过别名自动归集到统一 13 位税号主数据。",
             important: true,
           },
           {
-            title: "签名图库多模块通用与适用范围划分",
-            desc: "一张签名支持勾选适用单据（WHT、TAX INV、工资预支单）。工资预支单勾选时要求填写「签名人姓名」，套印在签名线下方。",
+            title: isEn
+              ? "Multi-Module Signature Scope"
+              : "签名图库多模块通用与适用范围划分",
+            desc: isEn
+              ? "Signature image specifies applicable voucher modules (WHT, TAX INV, Salary Advance). Requires signer name for salary advance."
+              : "一张签名支持勾选适用单据（WHT、TAX INV、工资预支单）。工资预支单勾选时要求填写「签名人姓名」，套印在签名线下方。",
           },
           {
-            title: "软删除与回收站恢复保障",
-            desc: "删除主数据或签名图库时仅放入「回收站」，历史单据快照与关联永不受破坏，可随时从回收站一键无损恢复。",
+            title: isEn
+              ? "Soft Delete & Recycle Bin"
+              : "软删除与回收站恢复保障",
+            desc: isEn
+              ? "Deletions move items to Recycle Bin without breaking historical voucher links, restorable anytime."
+              : "删除主数据或签名图库时仅放入「回收站」，历史单据快照与关联永不受破坏，可随时从回收站一键无损恢复。",
           },
           {
-            title: "审计日志（Audit Log）不可篡改追踪",
-            desc: "系统记录所有关键业务操作（新建、批准、作废、修订、签名修改），记录包含操作人真实姓名、时间戳与变动内容。",
+            title: isEn
+              ? "Immutable Audit Log Tracking"
+              : "审计日志（Audit Log）不可篡改追踪",
+            desc: isEn
+              ? "Logs all key business actions (creation, approval, voiding, revision, signature change) with actor name and timestamp."
+              : "系统记录所有关键业务操作（新建、批准、作废、修订、签名修改），记录包含操作人真实姓名、时间戳与变动内容。",
           },
         ],
         steps: [
           {
-            step: "步骤 1",
-            text: "上传签名印鉴：在系统管理上传 PNG/JPEG 透明背景图片（不超过 5 MiB）。",
+            step: isEn ? "Step 1" : "步骤 1",
+            text: isEn
+              ? "Upload Signature Image: Upload PNG/JPEG with transparent background (under 5 MiB)."
+              : "上传签名印鉴：在系统管理上传 PNG/JPEG 透明背景图片（不超过 5 MiB）。",
           },
           {
-            step: "步骤 2",
-            text: "设置适用范围：勾选签名适用的单据模块，并设定是否作为该模块的默认签名。",
+            step: isEn ? "Step 2" : "步骤 2",
+            text: isEn
+              ? "Set Scope & Default: Check applicable modules and toggle default status."
+              : "设置适用范围：勾选签名适用的单据模块，并设定是否作为该模块的默认签名。",
           },
           {
-            step: "步骤 3",
-            text: "管理回收站：误删的主数据或签名，可通过系统管理/主数据页面的「回收站」视图点击恢复。",
+            step: isEn ? "Step 3" : "步骤 3",
+            text: isEn
+              ? "Recycle Bin Recovery: Restore deleted payees, signatures, or employees from Recycle Bin view."
+              : "管理回收站：误删的主数据或签名，可通过系统管理/主数据页面的「回收站」视图点击恢复。",
           },
           {
-            step: "步骤 4",
-            text: "查看审计追溯：所有审批与修改记录可在各模块明细面板的「流程记录」中查看。",
+            step: isEn ? "Step 4" : "步骤 4",
+            text: isEn
+              ? "Audit History Review: Inspect workflow records in inspector drawers across all modules."
+              : "查看审计追溯：所有审批与修改记录可在各模块明细面板的「流程记录」中查看。",
           },
         ],
         faqs: [
           {
-            q: "问：为什么删除收款方提示「有历史单据引用」？",
-            a: "答：系统采用主数据快照机制，移入回收站不会破坏已生成的历史凭证，您可以随时从回收站安全恢复该档案。",
+            q: isEn
+              ? "Q: Why does deleting payee warn about historical vouchers?"
+              : "问：为什么删除收款方提示「有历史单据引用」？",
+            a: isEn
+              ? "A: Master data snapshot guarantees legacy vouchers remain intact even if profile is in Recycle Bin."
+              : "答：系统采用主数据快照机制，移入回收站不会破坏已生成的历史凭证，您可以随时从回收站安全恢复该档案。",
           },
           {
-            q: "问：如何让不同模块使用不同的默认签名？",
-            a: "答：每张签名图片可设置适用模块。系统按「WHT」、「TAX INV」、「工资预支单」各自维护独立的默认签名，互不冲突。",
+            q: isEn
+              ? "Q: How to set different default signatures per module?"
+              : "问：如何让不同模块使用不同的默认签名？",
+            a: isEn
+              ? "A: Each signature asset can specify applicable modules. WHT, TAX INV, and Salary Advance manage defaults independently."
+              : "答：每张签名图片可设置适用模块。系统按「WHT」、「TAX INV」、「工资预支单」各自维护独立的默认签名，互不冲突。",
           },
         ],
       },
     }),
-    [],
+    [isEn],
   );
 
   const currentSection = helpData[activeTab] ?? helpData.wht!;
 
-  // 搜索过滤 logicRules, steps, faqs
   const filteredRules = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return currentSection.logicRules;
@@ -277,11 +418,14 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
       onCancel={onClose}
       footer={null}
       width={860}
+      style={{ top: 40 }}
       title={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <QuestionCircleOutlined style={{ color: "#8c6b3f", fontSize: 22 }} />
           <span style={{ fontSize: 18, fontWeight: 700 }}>
-            ZWT Finance 业务逻辑与操作指南
+            {isEn
+              ? "ZWT Finance Business Logic & Operation Guide"
+              : "ZWT Finance 业务逻辑与操作指南"}
           </span>
         </div>
       }
@@ -290,7 +434,11 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
       <div style={{ marginBottom: 16 }}>
         <Input
           prefix={<SearchOutlined style={{ color: "#9e9488" }} />}
-          placeholder="在业务逻辑与提示中搜索关键字（如：税率、编号、签名、配对...）"
+          placeholder={
+            isEn
+              ? "Search business logic & tips (e.g. rate, sequence, signature...)"
+              : "在业务逻辑与提示中搜索关键字（如：税率、编号、签名、配对...）"
+          }
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           allowClear
@@ -304,15 +452,23 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
           value={activeTab}
           onChange={(val) => setActiveTab(val as ModuleKey)}
           options={[
-            { label: "WHT 预扣税", value: "wht", icon: <FileTextOutlined /> },
-            { label: "TAX INV 税票", value: "tax-invoice", icon: <AuditOutlined /> },
             {
-              label: "工资预支单",
+              label: isEn ? "WHT Tax" : "WHT 预扣税",
+              value: "wht",
+              icon: <FileTextOutlined />,
+            },
+            {
+              label: isEn ? "TAX INV" : "TAX INV 税票",
+              value: "tax-invoice",
+              icon: <AuditOutlined />,
+            },
+            {
+              label: isEn ? "Salary Advance" : "工资预支单",
               value: "salary-advance",
               icon: <FileDoneOutlined />,
             },
             {
-              label: "共享数据与系统管理",
+              label: isEn ? "Shared Data & Admin" : "共享数据与系统管理",
               value: "administration",
               icon: <SettingOutlined />,
             },
@@ -369,7 +525,8 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
               gap: 6,
             }}
           >
-            <BookOutlined /> 核心业务逻辑与核算规范
+            <BookOutlined />{" "}
+            {isEn ? "Core Business Logic & Standards" : "核心业务逻辑与核算规范"}
           </h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {filteredRules.map((rule, idx) => (
@@ -396,7 +553,7 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
                   <span>{rule.title}</span>
                   {rule.important && (
                     <Tag color="volcano" style={{ fontSize: 11 }}>
-                      关键规则
+                      {isEn ? "Key Rule" : "关键规则"}
                     </Tag>
                   )}
                 </div>
@@ -421,7 +578,8 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
               gap: 6,
             }}
           >
-            <CheckCircleOutlined /> 标准业务操作流程
+            <CheckCircleOutlined />{" "}
+            {isEn ? "Standard Operation Workflow" : "标准业务操作流程"}
           </h3>
           <div
             style={{
@@ -474,7 +632,10 @@ export function HelpModal({ open, onClose, t }: HelpModalProps) {
               gap: 6,
             }}
           >
-            <InfoCircleOutlined /> 常见问题与操作提示 (FAQ)
+            <InfoCircleOutlined />{" "}
+            {isEn
+              ? "FAQs & Operation Tips"
+              : "常见问题与操作提示 (FAQ)"}
           </h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {filteredFaqs.map((faq, idx) => (
