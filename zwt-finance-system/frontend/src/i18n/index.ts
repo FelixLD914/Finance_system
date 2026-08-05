@@ -931,6 +931,14 @@ const resources = {
     "salary.downloadPdf": "下载 PDF",
     "salary.closeDetail": "关闭明细",
 
+    "salary.singleIssuanceModalTitle": "单张开具工资预支单",
+    "salary.singleIssuanceButton": "单张开具",
+    "salary.selectEmployee": "选择员工",
+    "salary.selectEmployeePlaceholder": "搜索工号或姓名选择员工",
+    "salary.selectEmployeeRequired": "请选择员工",
+    "salary.employeeNotFound": "未找到所选员工",
+    "salary.createSingleSuccess": "单张预支单已成功开具并生成批次记录",
+
     "salary.importTitle": "导入工资预支数据",
     "salary.importOk": "上传并校验",
     "salary.importSafety": "只读取 .xlsx，不执行宏或外部链接",
@@ -1918,6 +1926,14 @@ const resources = {
     "salary.downloadXlsx": "Download XLSX",
     "salary.downloadPdf": "Download PDF",
     "salary.closeDetail": "Close detail",
+
+    "salary.singleIssuanceModalTitle": "Single Salary Advance Slip",
+    "salary.singleIssuanceButton": "Single Slip",
+    "salary.selectEmployee": "Select Employee",
+    "salary.selectEmployeePlaceholder": "Search by employee ID or name",
+    "salary.selectEmployeeRequired": "Please select an employee",
+    "salary.employeeNotFound": "Selected employee not found",
+    "salary.createSingleSuccess": "Single salary advance slip created successfully",
 
     "salary.importTitle": "Import salary advance data",
     "salary.importOk": "Upload and validate",

@@ -46,6 +46,8 @@ class FakeSession:
     async def scalar(self, statement: Any) -> Any:
         where_clause = str(getattr(statement, "whereclause", ""))
         stmt_str = str(statement).lower()
+        if "records" in stmt_str or "salary_advance.records" in stmt_str:
+            return None
         is_count = "count(" in stmt_str
         live_only = "deleted_at is null" in where_clause.lower() or "deleted_at is null" in stmt_str
 

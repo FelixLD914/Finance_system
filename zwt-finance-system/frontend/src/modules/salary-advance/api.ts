@@ -10,9 +10,19 @@ import type {
   SalaryAdvanceJob,
   SalaryAdvanceJobDetail,
   SalaryAdvanceRecord,
+  SingleSalaryAdvanceInput,
 } from "./types";
 
 const request = apiRequest;
+
+export function createSingleSalaryAdvanceRecord(
+  payload: SingleSalaryAdvanceInput,
+): Promise<SalaryAdvanceBatchDetail> {
+  return request<SalaryAdvanceBatchDetail>("/v1/salary-advance/single-records", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
 
 export function listSalaryAdvanceBatches(
   period?: string,

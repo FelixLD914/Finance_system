@@ -56,6 +56,18 @@ export interface SalaryAdvanceBatchDetail {
   records: SalaryAdvanceRecord[];
 }
 
+export interface SingleSalaryAdvanceInput {
+  empId: string;
+  period: string;
+  advanceAmount: number;
+  monthlyDeduction?: number;
+  reason?: string;
+  requestDate: string;
+  approvalStatus?: "Approve" | "Not approved" | "Pending";
+  remark?: string;
+  outputFilename?: string;
+}
+
 export interface SalaryAdvanceDocument {
   id: string;
   jobId: string;

@@ -10,6 +10,7 @@ import {
   FilePdfOutlined,
   FileProtectOutlined,
   LockOutlined,
+  PlusOutlined,
   ReloadOutlined,
   RetweetOutlined,
   SafetyCertificateOutlined,
@@ -65,6 +66,7 @@ import {
   updateSalaryAdvanceRecord,
 } from "./api";
 import { EmployeeDirectory } from "./EmployeeDirectory";
+import { SingleIssuanceModal } from "./SingleIssuanceModal";
 import { listSignatures } from "../wht/api";
 import type { SignatureAsset } from "../wht/types";
 import type {
@@ -374,6 +376,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const [period, setPeriod] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>();
   const [importOpen, setImportOpen] = useState(false);
+  const [singleOpen, setSingleOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
@@ -824,6 +827,9 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         />
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void reload()}>
           {t("salary.query")}
+        </Button>
+        <Button icon={<PlusOutlined />} onClick={() => setSingleOpen(true)}>
+          {t("salary.singleIssuanceButton")}
         </Button>
         <Button icon={<UploadOutlined />} type="primary" onClick={() => setImportOpen(true)}>
           {t("salary.import")}
@@ -1346,6 +1352,16 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         </Space>
       </Modal>
 
+      <SingleIssuanceModal
+        open={singleOpen}
+        onClose={() => setSingleOpen(false)}
+        onSuccess={async (detail) => {
+          setSingleOpen(false);
+          setPeriod(detail.batch.period);
+          await reload();
+          await loadBatch(detail.batch.id);
+        }}
+      />
     </section>
   );
 }
