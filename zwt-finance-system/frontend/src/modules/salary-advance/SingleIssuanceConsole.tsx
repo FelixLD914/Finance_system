@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import {
   Alert,
   App as AntApp,
+  Button,
   DatePicker,
   Form,
   Input,
   InputNumber,
-  Modal,
   Select,
   Typography,
 } from "antd";
@@ -38,7 +38,7 @@ interface FormValues {
   remark?: string;
 }
 
-export function SingleIssuanceModal({
+export function SingleIssuanceConsole({
   open,
   onClose,
   onSuccess,
@@ -49,7 +49,9 @@ export function SingleIssuanceModal({
   const [loading, setLoading] = useState(false);
   const [employees, setEmployees] = useState<SalaryAdvanceEmployee[]>([]);
   const [truncatedTotal, setTruncatedTotal] = useState(0);
-  const [selectedEmp, setSelectedEmp] = useState<SalaryAdvanceEmployee | null>(null);
+  const [selectedEmp, setSelectedEmp] = useState<SalaryAdvanceEmployee | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -63,14 +65,22 @@ export function SingleIssuanceModal({
 
     const fetchEmployees = async () => {
       try {
-        const res = await listEmployees(undefined, true, false, 1, EMPLOYEE_PAGE_LIMIT);
+        const res = await listEmployees(
+          undefined,
+          true,
+          false,
+          1,
+          EMPLOYEE_PAGE_LIMIT,
+        );
         setEmployees(res.items);
         // 人数超过一页时必须说出来：下拉里选不到的人和"这个人不存在"长得一模一样。
         setTruncatedTotal(res.total > res.items.length ? res.total : 0);
       } catch (err) {
         setTruncatedTotal(0);
         message.error(
-          err instanceof Error ? err.message : t("salary.employeeListLoadFailed"),
+          err instanceof Error
+            ? err.message
+            : t("salary.employeeListLoadFailed"),
         );
       }
     };
@@ -113,7 +123,10 @@ export function SingleIssuanceModal({
   };
 
   const employeeOptions = employees.map((emp) => {
-    const name = emp.enName || emp.chineseName || `${emp.firstName || ""} ${emp.surname || ""}`.trim();
+    const name =
+      emp.enName ||
+      emp.chineseName ||
+      `${emp.firstName || ""} ${emp.surname || ""}`.trim();
     return {
       value: emp.empId,
       label: `${emp.empId} - ${name} (${emp.department || "-"})`,
@@ -121,17 +134,24 @@ export function SingleIssuanceModal({
   });
 
   return (
-    <Modal
-      title={t("salary.singleIssuanceModalTitle")}
-      open={open}
-      onCancel={onClose}
-      onOk={handleSubmit}
-      confirmLoading={loading}
-      width={650}
-      okText={t("salary.singleIssuanceSubmit")}
-      cancelText={t("common.cancel")}
+    <div
+      className="issuance-console"
+      style={{ background: "#fff", padding: 24, borderRadius: 8 }}
     >
-      <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 24,
+        }}
+      >
+        <Typography.Title level={4} style={{ margin: 0 }}>
+          {t("salary.singleIssuanceModalTitle")}
+        </Typography.Title>
+      </div>
+
+      <Form form={form} layout="vertical">
         {truncatedTotal > 0 && (
           <Alert
             showIcon
@@ -147,7 +167,9 @@ export function SingleIssuanceModal({
         <Form.Item
           name="empId"
           label={t("salary.selectEmployee")}
-          rules={[{ required: true, message: t("salary.selectEmployeeRequired") }]}
+          rules={[
+            { required: true, message: t("salary.selectEmployeeRequired") },
+          ]}
         >
           <Select
             showSearch
@@ -170,7 +192,13 @@ export function SingleIssuanceModal({
               border: "1px solid #f0f0f0",
             }}
           >
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+              }}
+            >
               <div>
                 <Text type="secondary">{t("salary.applicant")}: </Text>
                 <Text strong>
@@ -195,7 +223,9 @@ export function SingleIssuanceModal({
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
+        >
           <Form.Item
             name="period"
             label={t("salary.importPeriod")}
@@ -210,17 +240,23 @@ export function SingleIssuanceModal({
           <Form.Item
             name="requestDate"
             label={t("salary.requestDate")}
-            rules={[{ required: true, message: t("salary.requestDateRequired") }]}
+            rules={[
+              { required: true, message: t("salary.requestDateRequired") },
+            ]}
           >
             <DatePicker style={{ width: "100%" }} format="YYYY-MM-DD" />
           </Form.Item>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
+        >
           <Form.Item
             name="advanceAmount"
             label={t("salary.advanceAmount")}
-            rules={[{ required: true, message: t("salary.advanceAmountRequired") }]}
+            rules={[
+              { required: true, message: t("salary.advanceAmountRequired") },
+            ]}
           >
             <InputNumber
               id="advanceAmount"
@@ -231,7 +267,10 @@ export function SingleIssuanceModal({
             />
           </Form.Item>
 
-          <Form.Item name="monthlyDeduction" label={t("salary.monthlyDeduction")}>
+          <Form.Item
+            name="monthlyDeduction"
+            label={t("salary.monthlyDeduction")}
+          >
             <InputNumber
               style={{ width: "100%" }}
               min={0.01}
@@ -245,13 +284,18 @@ export function SingleIssuanceModal({
           <Input maxLength={100} placeholder={t("salary.reasonPlaceholder")} />
         </Form.Item>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
+        >
           <Form.Item name="approvalStatus" label={t("salary.approvalStatus")}>
             <Select
               options={[
                 { value: "Pending", label: t("salary.approvalPending") },
                 { value: "Approve", label: t("salary.approvalApprove") },
-                { value: "Not approved", label: t("salary.approvalNotApproved") },
+                {
+                  value: "Not approved",
+                  label: t("salary.approvalNotApproved"),
+                },
               ]}
             />
           </Form.Item>
@@ -260,7 +304,21 @@ export function SingleIssuanceModal({
             <Input placeholder={t("salary.remarkPlaceholder")} />
           </Form.Item>
         </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 24,
+          }}
+        >
+          <Button onClick={onClose}>{t("common.cancel")}</Button>
+          <Button type="primary" loading={loading} onClick={handleSubmit}>
+            {t("salary.singleIssuanceSubmit")}
+          </Button>
+        </div>
       </Form>
-    </Modal>
+    </div>
   );
 }

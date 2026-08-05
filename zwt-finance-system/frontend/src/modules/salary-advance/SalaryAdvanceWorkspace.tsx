@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeftOutlined,
+  DownOutlined,
+  FilterOutlined,
+  RightOutlined,
+  UpOutlined,
   CheckCircleOutlined,
   CloudDownloadOutlined,
   DeleteOutlined,
@@ -66,7 +71,7 @@ import {
   updateSalaryAdvanceRecord,
 } from "./api";
 import { EmployeeDirectory } from "./EmployeeDirectory";
-import { SingleIssuanceModal } from "./SingleIssuanceModal";
+import { SingleIssuanceConsole } from "./SingleIssuanceConsole";
 import { listSignatures } from "../wht/api";
 import type { SignatureAsset } from "../wht/types";
 import type {
@@ -136,7 +141,13 @@ function BatchStatusTag({ status, t }: { status: BatchStatus; t: Translate }) {
   );
 }
 
-function ValidationTag({ status, t }: { status: ValidationStatus; t: Translate }) {
+function ValidationTag({
+  status,
+  t,
+}: {
+  status: ValidationStatus;
+  t: Translate;
+}) {
   return (
     <FinanceStatusBadge
       label={t(`salary.validationStatus.${status}` as TranslationKey)}
@@ -162,10 +173,7 @@ interface RecordDrawerProps {
   onClose: () => void;
   onEdit: () => void;
   onPreview: () => void;
-  onDownload: (
-    document: SalaryAdvanceDocument,
-    format: "xlsx" | "pdf",
-  ) => void;
+  onDownload: (document: SalaryAdvanceDocument, format: "xlsx" | "pdf") => void;
 }
 
 function RecordDrawer({
@@ -195,7 +203,12 @@ function RecordDrawer({
           >
             {t("salary.preview")}
           </Button>
-          <Button block disabled={busy} icon={<EditOutlined />} onClick={onEdit}>
+          <Button
+            block
+            disabled={busy}
+            icon={<EditOutlined />}
+            onClick={onEdit}
+          >
             {t("salary.editRecord")}
           </Button>
         </div>
@@ -356,32 +369,39 @@ function RecordDrawer({
           />
         )}
       </section>
-
     </FinanceRecordDrawer>
   );
 }
 
 export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const { message, modal } = AntApp.useApp();
-  const [workspaceView, setWorkspaceView] = useState<"batches" | "employees">("batches");
+  const [workspaceView, setWorkspaceView] = useState<
+    "batches" | "employees" | "single"
+  >("batches");
   const [batches, setBatches] = useState<SalaryAdvanceBatch[]>([]);
-  const [selected, setSelected] = useState<SalaryAdvanceBatchDetail | null>(null);
-  const [selectedRecord, setSelectedRecord] = useState<SalaryAdvanceRecord | null>(
+  const [selected, setSelected] = useState<SalaryAdvanceBatchDetail | null>(
     null,
   );
-  const [jobDetail, setJobDetail] = useState<SalaryAdvanceJobDetail | null>(null);
+  const [selectedRecord, setSelectedRecord] =
+    useState<SalaryAdvanceRecord | null>(null);
+  const [jobDetail, setJobDetail] = useState<SalaryAdvanceJobDetail | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<FinanceLifecyclePhase>("pending");
-  const [period, setPeriod] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>();
+  const [filters, setFilters] = useState({ period: "all", status: "all" });
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
-  const [singleOpen, setSingleOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [signatures, setSignatures] = useState<SignatureAsset[]>([]);
-  const [selectedFinanceSigId, setSelectedFinanceSigId] = useState<string | undefined>(undefined);
-  const [selectedMdSigId, setSelectedMdSigId] = useState<string | undefined>(undefined);
+  const [selectedFinanceSigId, setSelectedFinanceSigId] = useState<
+    string | undefined
+  >(undefined);
+  const [selectedMdSigId, setSelectedMdSigId] = useState<string | undefined>(
+    undefined,
+  );
   const [importFiles, setImportFiles] = useState<UploadFile[]>([]);
   const [importForm] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -443,7 +463,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     setJobDetail(latest ? await getSalaryAdvanceJob(latest.id) : null);
     setSelectedRecord((current) =>
       current
-        ? detail.records.find((record) => record.id === current.id) ?? null
+        ? (detail.records.find((record) => record.id === current.id) ?? null)
         : null,
     );
   }, []);
@@ -451,7 +471,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const next = await listSalaryAdvanceBatches(period || undefined, statusFilter);
+      const next = await listSalaryAdvanceBatches(undefined, undefined);
       setBatches(next);
       const currentId = selected?.batch.id;
       if (currentId && next.some((batch) => batch.id === currentId)) {
@@ -467,7 +487,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     } finally {
       setLoading(false);
     }
-  }, [loadBatch, message, period, selected?.batch.id, statusFilter]);
+  }, [loadBatch, message, selected?.batch.id]);
 
   useEffect(() => {
     void reload();
@@ -512,14 +532,87 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
     return counts;
   }, [batches]);
 
-  const visibleBatches = useMemo(
-    () =>
+  const visibleBatches = useMemo(() => {
+    let result =
       phase === "all"
         ? batches
         : batches.filter(
             (batch) => LIFECYCLE_BY_STATUS[batch.status] === phase,
-          ),
-    [batches, phase],
+          );
+    if (filters.status !== "all") {
+      result = result.filter((b) => b.status === filters.status);
+    }
+    return result;
+  }, [batches, phase, filters.status]);
+
+  const periodSummaryRows = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        period: string;
+        batchCount: number;
+        totalRows: number;
+        validRows: number;
+        invalidRows: number;
+      }
+    >();
+    for (const batch of visibleBatches) {
+      let entry = map.get(batch.period);
+      if (!entry) {
+        entry = {
+          period: batch.period,
+          batchCount: 0,
+          totalRows: 0,
+          validRows: 0,
+          invalidRows: 0,
+        };
+        map.set(batch.period, entry);
+      }
+      entry.batchCount += 1;
+      entry.totalRows += batch.totalRows;
+      entry.validRows += batch.validRows;
+      entry.invalidRows += batch.invalidRows;
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      b.period.localeCompare(a.period),
+    );
+  }, [visibleBatches]);
+
+  const periodColumns = useMemo<ColumnsType<any>>(
+    () => [
+      {
+        title: t("salary.period"),
+        dataIndex: "period",
+        width: 140,
+        render: (period: string) => <strong>{period}</strong>,
+      },
+      { title: t("salary.importBatches"), dataIndex: "batchCount", width: 120 },
+      { title: t("salary.totalRows"), dataIndex: "totalRows", width: 120 },
+      { title: t("salary.validRows"), dataIndex: "validRows", width: 120 },
+      {
+        title: t("salary.invalidRows"),
+        dataIndex: "invalidRows",
+        width: 120,
+        render: (val: number) => (
+          <span className={val ? "error-copy" : ""}>{val}</span>
+        ),
+      },
+      {
+        title: t("common.actions"),
+        key: "actions",
+        width: 120,
+        render: (_, record) => (
+          <Button
+            type="link"
+            icon={<RightOutlined />}
+            onClick={() => setFilters((f) => ({ ...f, period: record.period }))}
+          >
+            {t("wht.viewDetails")}
+          </Button>
+        ),
+      },
+    ],
+    [t],
   );
 
   const run = async (action: () => Promise<unknown>, success: string) => {
@@ -564,7 +657,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       setImportOpen(false);
       setImportFiles([]);
       importForm.resetFields();
-      setPeriod(values.period);
+      setFilters((f) => ({ ...f, period: values.period }));
       await reload();
       await loadBatch(detail.batch.id);
     } catch (error) {
@@ -739,7 +832,9 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
       title: t("salary.validation"),
       dataIndex: "validationStatus",
       width: 96,
-      render: (value: ValidationStatus) => <ValidationTag status={value} t={t} />,
+      render: (value: ValidationStatus) => (
+        <ValidationTag status={value} t={t} />
+      ),
     },
     {
       title: t("salary.document"),
@@ -803,65 +898,179 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         }}
         onChange={(nextPhase) => {
           setPhase(nextPhase);
-          setStatusFilter(undefined);
+          setSelected(null);
+          setSelectedRecord(null);
+          setFilters((f) => ({ ...f, status: "all", period: "all" }));
         }}
       />
-      <div className="salary-filter-bar">
-        <Input
-          maxLength={6}
-          placeholder={t("salary.periodPlaceholder")}
-          prefix={<FileProtectOutlined />}
-          value={period}
-          onChange={(event) => setPeriod(event.target.value.replace(/\D/g, ""))}
-          onPressEnter={() => void reload()}
-        />
-        <Select
-          allowClear
-          placeholder={t("salary.allBatchStatuses")}
-          value={statusFilter}
-          options={BATCH_STATUSES.map((value) => ({
-            value,
-            label: t(`salary.batchStatus.${value}` as TranslationKey),
-          }))}
-          onChange={setStatusFilter}
-        />
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void reload()}>
-          {t("salary.query")}
-        </Button>
-        <Button icon={<PlusOutlined />} onClick={() => setSingleOpen(true)}>
-          {t("salary.singleIssuanceButton")}
-        </Button>
-        <Button icon={<UploadOutlined />} type="primary" onClick={() => setImportOpen(true)}>
-          {t("salary.import")}
-        </Button>
-      </div>
-
-      <section className="salary-table-card">
-        <div className="salary-section-heading">
-          <div>
-            <span>IMPORT BATCHES</span>
-            <strong>{t("salary.importBatches")}</strong>
+      {filtersCollapsed ? (
+        <div
+          className="filter-bar-collapsed"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "12px 16px",
+            background: "#fff",
+            borderRadius: 8,
+            marginBottom: 16,
+          }}
+        >
+          <div className="collapsed-left" style={{ display: "flex", gap: 8 }}>
+            <Button
+              icon={<PlusOutlined />}
+              type="primary"
+              onClick={() => setWorkspaceView("single")}
+            >
+              {t("salary.singleIssuanceButton")}
+            </Button>
+            <Button
+              icon={<UploadOutlined />}
+              onClick={() => setImportOpen(true)}
+            >
+              {t("salary.import")}
+            </Button>
+            {filters.period !== "all" && (
+              <Button
+                size="small"
+                type="link"
+                onClick={() => {
+                  setFilters((f) => ({ ...f, period: "all" }));
+                  setSelected(null);
+                }}
+              >
+                {t("wht.resetFilters")}
+              </Button>
+            )}
           </div>
-          <small>{t("salary.batchCount", { count: visibleBatches.length })}</small>
+          <Button
+            icon={<FilterOutlined />}
+            onClick={() => setFiltersCollapsed(false)}
+          >
+            {t("wht.moreFilters")} <DownOutlined />
+          </Button>
         </div>
-        <Table<SalaryAdvanceBatch>
-          columns={batchColumns}
-          dataSource={visibleBatches}
-          loading={loading}
-          pagination={{ pageSize: 5, hideOnSinglePage: true }}
-          rowClassName={(batch) =>
-            batch.id === selected?.batch.id ? "selected-table-row" : ""
-          }
-          rowKey="id"
-          size="small"
-          onRow={(batch) => ({
-            onClick: () => void loadBatch(batch.id),
-          })}
-        />
-      </section>
+      ) : (
+        <div
+          className="salary-filter-bar"
+          style={{
+            display: "flex",
+            gap: 16,
+            padding: "12px 16px",
+            background: "#fff",
+            borderRadius: 8,
+            marginBottom: 16,
+            alignItems: "center",
+          }}
+        >
+          <Input
+            maxLength={6}
+            placeholder={t("salary.periodPlaceholder")}
+            prefix={<FileProtectOutlined />}
+            value={filters.period === "all" ? "" : filters.period}
+            onChange={(event) =>
+              setFilters((f) => ({
+                ...f,
+                period: event.target.value.replace(/\D/g, "") || "all",
+              }))
+            }
+          />
+          <Select
+            allowClear
+            placeholder={t("salary.allBatchStatuses")}
+            value={filters.status === "all" ? undefined : filters.status}
+            options={BATCH_STATUSES.map((value) => ({
+              value,
+              label: t(`salary.batchStatus.${value}` as TranslationKey),
+            }))}
+            onChange={(val) =>
+              setFilters((f) => ({ ...f, status: val || "all" }))
+            }
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            loading={loading}
+            onClick={() => void reload()}
+          >
+            {t("salary.query")}
+          </Button>
+          <Button
+            icon={<UpOutlined />}
+            onClick={() => setFiltersCollapsed(true)}
+          >
+            {t("wht.collapseFilters")}
+          </Button>
+        </div>
+      )}
+
+      {filters.period === "all" ? (
+        <section className="salary-table-card">
+          <div className="salary-section-heading">
+            <div>
+              <span>SUMMARY</span>
+              <strong>{t("wht.period")}</strong>
+            </div>
+          </div>
+          <Table
+            columns={periodColumns}
+            dataSource={periodSummaryRows}
+            loading={loading}
+            pagination={{ pageSize: 10 }}
+            rowKey="period"
+            size="small"
+            onRow={(record) => ({
+              onClick: () =>
+                setFilters((f) => ({ ...f, period: record.period })),
+            })}
+          />
+        </section>
+      ) : !selected ? (
+        <section className="salary-table-card">
+          <div className="salary-section-heading">
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <Button
+                icon={<ArrowLeftOutlined />}
+                onClick={() => setFilters((f) => ({ ...f, period: "all" }))}
+              >
+                {t("wht.backToAllPeriods")}
+              </Button>
+              <div>
+                <span>IMPORT BATCHES</span>
+                <strong>{filters.period}</strong>
+              </div>
+            </div>
+            <small>
+              {t("salary.batchCount", {
+                count: visibleBatches.filter((b) => b.period === filters.period)
+                  .length,
+              })}
+            </small>
+          </div>
+          <Table<SalaryAdvanceBatch>
+            columns={batchColumns}
+            dataSource={visibleBatches.filter(
+              (b) => b.period === filters.period,
+            )}
+            loading={loading}
+            pagination={{ pageSize: 5, hideOnSinglePage: true }}
+            rowKey="id"
+            size="small"
+            onRow={(item) => ({
+              onClick: () => void loadBatch(item.id),
+            })}
+          />
+        </section>
+      ) : null}
 
       {selected ? (
         <section className="salary-table-card">
+          <div style={{ marginBottom: 16 }}>
+            <Button
+              icon={<ArrowLeftOutlined />}
+              onClick={() => setSelected(null)}
+            >
+              {t("wht.backToLedger")}
+            </Button>
+          </div>
           <div className="salary-batch-toolbar">
             <div>
               <span>{selected.batch.batchNo}</span>
@@ -890,7 +1099,11 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
                 {t("salary.deleteBatch")}
               </Button>
               <Button
-                disabled={!["ready", "validation_failed"].includes(selected.batch.status)}
+                disabled={
+                  !["ready", "validation_failed"].includes(
+                    selected.batch.status,
+                  )
+                }
                 icon={<RetweetOutlined />}
                 loading={busy}
                 onClick={() =>
@@ -929,7 +1142,9 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
                 type="primary"
                 onClick={() => {
                   startGeneration().catch((err) => {
-                    message.error(err instanceof Error ? err.message : String(err));
+                    message.error(
+                      err instanceof Error ? err.message : String(err),
+                    );
                   });
                 }}
               >
@@ -975,7 +1190,8 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
                 percent={
                   jobDetail.job.totalCount
                     ? Math.round(
-                        ((jobDetail.job.successCount + jobDetail.job.failedCount) /
+                        ((jobDetail.job.successCount +
+                          jobDetail.job.failedCount) /
                           jobDetail.job.totalCount) *
                           100,
                       )
@@ -1074,9 +1290,22 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
               className={workspaceView === "batches" ? "is-active" : ""}
               role="tab"
               type="button"
-              onClick={() => setWorkspaceView("batches")}
+              onClick={() => {
+                setWorkspaceView("batches");
+                setSelected(null);
+                setFilters((f) => ({ ...f, period: "all" }));
+              }}
             >
               {t("salary.batchLedger")}
+            </button>
+            <button
+              aria-selected={workspaceView === "single"}
+              className={workspaceView === "single" ? "is-active" : ""}
+              role="tab"
+              type="button"
+              onClick={() => setWorkspaceView("single")}
+            >
+              {t("salary.singleIssuanceButton")}
             </button>
             <button
               aria-selected={workspaceView === "employees"}
@@ -1097,7 +1326,30 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
         </div>
       </header>
 
-      {workspaceView === "batches" ? renderLedger() : <EmployeeDirectory t={t} />}
+      <div className="workspace-view-host" hidden={workspaceView !== "batches"}>
+        {renderLedger()}
+      </div>
+      <div className="workspace-view-host" hidden={workspaceView !== "single"}>
+        <SingleIssuanceConsole
+          open={workspaceView === "single"}
+          onClose={() => setWorkspaceView("batches")}
+          onSuccess={(detail) => {
+            setWorkspaceView("batches");
+            setFilters((f) => ({
+              ...f,
+              period: detail.batch.period,
+              status: "all",
+            }));
+            loadBatch(detail.batch.id);
+          }}
+        />
+      </div>
+      <div
+        className="workspace-view-host"
+        hidden={workspaceView !== "employees"}
+      >
+        <EmployeeDirectory t={t} />
+      </div>
 
       {selectedRecord && (
         <RecordDrawer
@@ -1111,8 +1363,8 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
               document.id,
               format,
               format === "xlsx"
-                ? document.xlsxFileName ?? "salary-advance.xlsx"
-                : document.pdfFileName ?? "salary-advance.pdf",
+                ? (document.xlsxFileName ?? "salary-advance.xlsx")
+                : (document.pdfFileName ?? "salary-advance.pdf"),
             )
           }
           onEdit={openEdit}
@@ -1143,7 +1395,11 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           title={t("salary.importSafety")}
         />
         <div className="salary-template-download">
-          <Button icon={<DownloadOutlined />} size="small" onClick={() => void downloadTemplate()}>
+          <Button
+            icon={<DownloadOutlined />}
+            size="small"
+            onClick={() => void downloadTemplate()}
+          >
             {t("salary.downloadImportTemplate")}
           </Button>
           <small>{t("salary.importTemplateHint")}</small>
@@ -1167,7 +1423,9 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
               maxCount={1}
               onChange={({ fileList }) => setImportFiles(fileList)}
             >
-              <Button icon={<UploadOutlined />}>{t("salary.selectXlsx")}</Button>
+              <Button icon={<UploadOutlined />}>
+                {t("salary.selectXlsx")}
+              </Button>
             </Upload>
           </Form.Item>
         </Form>
@@ -1262,14 +1520,20 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
               options={[
                 { value: "Pending", label: t("salary.approvalPending") },
                 { value: "Approve", label: t("salary.approvalApprove") },
-                { value: "Not approved", label: t("salary.approvalNotApproved") },
+                {
+                  value: "Not approved",
+                  label: t("salary.approvalNotApproved"),
+                },
               ]}
             />
           </Form.Item>
           {/* 签名两列刻意不必填（2026-08-05 口径，参照 WHT）：章在开具时选，
               这里填的只是"盖哪张章"的可选提示。设成必填会把开具时才定的事
               挡在编辑这一步，正是当初从 validation.py 删掉整套签名校验的原因。 */}
-          <Form.Item label={t("salary.financeCode")} name="finance_signature_code">
+          <Form.Item
+            label={t("salary.financeCode")}
+            name="finance_signature_code"
+          >
             <Select
               allowClear
               showSearch
@@ -1315,7 +1579,11 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           });
         }}
       >
-        <Space direction="vertical" style={{ width: "100%", marginTop: 8 }} size="large">
+        <Space
+          direction="vertical"
+          style={{ width: "100%", marginTop: 8 }}
+          size="large"
+        >
           <div>
             <div style={{ marginBottom: 6, fontWeight: 500 }}>
               {t("salary.financeSignature")}
@@ -1349,17 +1617,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
           </div>
         </Space>
       </Modal>
-
-      <SingleIssuanceModal
-        open={singleOpen}
-        onClose={() => setSingleOpen(false)}
-        onSuccess={async (detail) => {
-          setSingleOpen(false);
-          setPeriod(detail.batch.period);
-          await reload();
-          await loadBatch(detail.batch.id);
-        }}
-      />
     </section>
   );
 }

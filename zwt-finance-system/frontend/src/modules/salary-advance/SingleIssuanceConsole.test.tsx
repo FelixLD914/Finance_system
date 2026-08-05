@@ -4,7 +4,7 @@ import { StyleProvider } from "@ant-design/cssinjs";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { SingleIssuanceModal } from "./SingleIssuanceModal";
+import { SingleIssuanceConsole } from "./SingleIssuanceConsole";
 
 const mockListEmployees = vi.fn();
 const mockCreateSingleRecord = vi.fn();
@@ -49,8 +49,8 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-describe("SingleIssuanceModal", () => {
-  it("renders single issuance modal and triggers cancel", async () => {
+describe("SingleIssuanceConsole", () => {
+  it("renders single issuance console and triggers cancel", async () => {
     mockListEmployees.mockResolvedValue({
       items: [
         {
@@ -73,7 +73,7 @@ describe("SingleIssuanceModal", () => {
     render(
       <StyleProvider mock="server">
         <AntApp>
-          <SingleIssuanceModal open={true} onClose={handleClose} onSuccess={handleSuccess} />
+          <SingleIssuanceConsole open={true} onClose={handleClose} onSuccess={handleSuccess} />
         </AntApp>
       </StyleProvider>,
     );
@@ -98,7 +98,7 @@ describe("SingleIssuanceModal", () => {
     render(
       <StyleProvider mock="server">
         <AntApp>
-          <SingleIssuanceModal open onClose={vi.fn()} onSuccess={vi.fn()} />
+          <SingleIssuanceConsole open onClose={vi.fn()} onSuccess={vi.fn()} />
         </AntApp>
       </StyleProvider>,
     );
@@ -116,7 +116,7 @@ describe("SingleIssuanceModal", () => {
     render(
       <StyleProvider mock="server">
         <AntApp>
-          <SingleIssuanceModal open onClose={vi.fn()} onSuccess={vi.fn()} />
+          <SingleIssuanceConsole open onClose={vi.fn()} onSuccess={vi.fn()} />
         </AntApp>
       </StyleProvider>,
     );
