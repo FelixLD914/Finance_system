@@ -13,15 +13,15 @@ import type { ModuleKey } from "../modules/registry";
 
 export interface SystemNotification {
   id: string;
-  title: string;
-  description: string;
-  timestamp: string;
-  titleEn?: string;
-  descriptionEn?: string;
-  timestampEn?: string;
+  createdAt: string;
   read: boolean;
   type: "action" | "info" | "success";
   moduleKey: ModuleKey;
+  // Optional custom titles/descriptions if added dynamically
+  title?: string;
+  description?: string;
+  titleEn?: string;
+  descriptionEn?: string;
 }
 
 interface NotificationsDrawerProps {
@@ -32,60 +32,116 @@ interface NotificationsDrawerProps {
   t: Translate;
 }
 
+const NOTIFICATION_DICTIONARY: Record<
+  string,
+  { titleZh: string; titleEn: string; descZh: string; descEn: string }
+> = {
+  "notif-1": {
+    titleZh: "WHT 待复核单据提醒",
+    titleEn: "WHT Draft Pending Review",
+    descZh: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
+    descEn:
+      "2 WHT certificate drafts submitted, awaiting supervisor review & formal number allocation",
+  },
+  "notif-2": {
+    titleZh: "TAX INV BOT 汇率更新成功",
+    titleEn: "TAX INV BOT Rate Sync Succeeded",
+    descZh: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
+    descEn:
+      "Latest BOT USD buying transfer exchange rate synced from API successfully",
+  },
+  "notif-3": {
+    titleZh: "工资预支单数据待校验",
+    titleEn: "Salary Advance Data Validation Pending",
+    descZh: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
+    descEn:
+      "Newly imported Salary Advance batch 202608 has 1 employee record needing name check",
+  },
+  "notif-4": {
+    titleZh: "签名图库默认版本提示",
+    titleEn: "Default Signature Version Updated",
+    descZh: "系统管理中已更新财务负责人与总经理印鉴签名图片",
+    descEn:
+      "Default signature image assets for supervisor and MD updated in System Admin",
+  },
+};
+
+const NOW = Date.now();
+
 const INITIAL_NOTIFICATIONS: SystemNotification[] = [
   {
     id: "notif-1",
-    title: "WHT 待复核单据提醒",
-    description: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
-    timestamp: "10 分钟前",
-    titleEn: "WHT Draft Pending Review",
-    descriptionEn:
-      "2 WHT certificate drafts submitted, awaiting supervisor review & formal number allocation",
-    timestampEn: "10 mins ago",
+    createdAt: new Date(NOW - 10 * 60 * 1000).toISOString(), // 10 mins ago
     read: false,
     type: "action",
     moduleKey: "wht",
   },
   {
     id: "notif-2",
-    title: "TAX INV BOT 汇率更新成功",
-    description: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
-    timestamp: "1 小时前",
-    titleEn: "TAX INV BOT Rate Sync Succeeded",
-    descriptionEn:
-      "Latest BOT USD buying transfer exchange rate synced from API successfully",
-    timestampEn: "1 hour ago",
+    createdAt: new Date(NOW - 60 * 60 * 1000).toISOString(), // 1 hour ago
     read: false,
     type: "success",
     moduleKey: "tax-invoice",
   },
   {
     id: "notif-3",
-    title: "工资预支单数据待校验",
-    description: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
-    timestamp: "2 小时前",
-    titleEn: "Salary Advance Data Validation Pending",
-    descriptionEn:
-      "Newly imported Salary Advance batch 202608 has 1 employee record needing name check",
-    timestampEn: "2 hours ago",
+    createdAt: new Date(NOW - 120 * 60 * 1000).toISOString(), // 2 hours ago
     read: false,
     type: "action",
     moduleKey: "salary-advance",
   },
   {
     id: "notif-4",
-    title: "签名图库默认版本提示",
-    description: "系统管理中已更新财务负责人与总经理印鉴签名图片",
-    timestamp: "昨天 16:30",
-    titleEn: "Default Signature Version Updated",
-    descriptionEn:
-      "Default signature image assets for supervisor and MD updated in System Admin",
-    timestampEn: "Yesterday 16:30",
+    createdAt: new Date(NOW - (24 * 60 + 5 * 60) * 60 * 1000).toISOString(), // Yesterday
     read: true,
     type: "info",
     moduleKey: "administration",
   },
 ];
+
+/**
+ * 根据 ISO 时间戳与当前语言动态计算相对时间文本（例如：10 分钟前 / 10 mins ago）
+ */
+function formatRelativeTime(isoString: string, isEn: boolean): string {
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) {
+    return isEn ? "Recently" : "近期";
+  }
+
+  const now = new Date();
+  const diffMs = Math.max(0, now.getTime() - date.getTime());
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) {
+    return isEn ? "Just now" : "刚刚";
+  }
+  if (diffMins < 60) {
+    return isEn
+      ? `${diffMins} min${diffMins > 1 ? "s" : ""} ago`
+      : `${diffMins} 分钟前`;
+  }
+  if (diffHours < 24) {
+    return isEn
+      ? `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`
+      : `${diffHours} 小时前`;
+  }
+  if (diffDays === 1) {
+    const hours = String(date.getHours()).padStart(2, "0");
+    const mins = String(date.getMinutes()).padStart(2, "0");
+    return isEn ? `Yesterday ${hours}:${mins}` : `昨天 ${hours}:${mins}`;
+  }
+
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const mins = String(date.getMinutes()).padStart(2, "0");
+  return isEn
+    ? `${month}/${day} ${hours}:${mins}`
+    : `${month}月${day}日 ${hours}:${mins}`;
+}
 
 export function NotificationsDrawer({
   open,
@@ -186,11 +242,15 @@ export function NotificationsDrawer({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {filteredNotifications.map((n) => {
-            const title = isEn ? n.titleEn || n.title : n.title;
+            const dict = NOTIFICATION_DICTIONARY[n.id];
+            const title = isEn
+              ? dict?.titleEn || n.titleEn || n.title
+              : dict?.titleZh || n.title;
             const description = isEn
-              ? n.descriptionEn || n.description
-              : n.description;
-            const time = isEn ? n.timestampEn || n.timestamp : n.timestamp;
+              ? dict?.descEn || n.descriptionEn || n.description
+              : dict?.descZh || n.description;
+
+            const formattedTime = formatRelativeTime(n.createdAt, isEn);
 
             return (
               <div
@@ -291,7 +351,7 @@ export function NotificationsDrawer({
                         color: "#9e9488",
                       }}
                     >
-                      <span>{time}</span>
+                      <span>{formattedTime}</span>
                       <span style={{ color: "#8c6b3f", fontWeight: 600 }}>
                         {isEn ? "View details" : "去查看"}{" "}
                         <RightOutlined style={{ fontSize: 10 }} />
