@@ -4,7 +4,7 @@
     "wht-template-bg.webp": {
       "source": "WHT-Template.pdf",
       "sourceSha256": "391ea5409fb4eaa79057f0f596b99e4fe332185597ddc8ea0e758f6f5fd8b31f",
-      "layoutSha256": "541efb1de39f9a449259cc187f48163f33562b9afd26f19afb78502c194a9b79"
+      "layoutSha256": "a4bd7946416610019eb0c8c1cf962a555e210ff6f6dc16f96da8766e32385de6"
     },
     "tax-inv-template-bg.webp": {
       "source": "TAX-INV-Template.pdf",
@@ -14,7 +14,7 @@
     "salary-advance-template-bg.webp": {
       "source": "Salary-Advance-Template.pdf",
       "sourceSha256": "a384529a36420970ae02933f840db2931732b6718f7c793bbfbbd90b1a4cb1e6",
-      "layoutSha256": "8735d9cd114c7ad48b45a049df9fac09aa937ace220d054a4817d38ad992cd03"
+      "layoutSha256": "981f04d8830c5614b8106ad417363a8c4438f4b8b9a9577a9f57fd4cc1d21821"
     }
   }
 }

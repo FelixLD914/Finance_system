@@ -80,14 +80,6 @@ interface TemplateConfig {
   title: string;
   /** 这张底版上的签名位。工资预支单一页两个位（财务负责人 + 董事/总经理）。 */
   stamps: { usage: SignatureUsage; label: string }[];
-  /**
-   * 出票前是否先跑 build_blue_signature——把图裁到墨迹外接框再转成蓝色墨水。
-   * WHT / TAX INV 跑（wht.document_generator.build_blue_signature），
-   * 工资预支不跑（salary_advance.document_generator._draw_signature 直接用原图），
-   * 所以同一张带留白的签名图，在工资预支单上印出来会明显更小——这是真实差异，
-   * 预览必须照着演，不能三个单据都画成一样。
-   */
-  inkPrepared: boolean;
 }
 
 const TEMPLATE_CONFIGS: Record<TemplateTab, TemplateConfig> = {
@@ -95,13 +87,11 @@ const TEMPLATE_CONFIGS: Record<TemplateTab, TemplateConfig> = {
     bgImage: "/wht-template-bg.webp",
     title: "WHT 扣缴凭证 (P.N.D.53/3 正式文件底板)",
     stamps: [{ usage: "wht", label: "ผู้จ่ายเงิน 付款方签名" }],
-    inkPrepared: true,
   },
   tax_inv: {
     bgImage: "/tax-inv-template-bg.webp",
     title: "TAX INV 增值税发票 (正式文件底板)",
     stamps: [{ usage: "tax_inv", label: "ผู้มีอำนาจลงนาม 授权签字人" }],
-    inkPrepared: true,
   },
   salary_advance: {
     bgImage: "/salary-advance-template-bg.webp",
@@ -110,7 +100,6 @@ const TEMPLATE_CONFIGS: Record<TemplateTab, TemplateConfig> = {
       { usage: "salary_advance_finance", label: "财务负责人 Finance Director" },
       { usage: "salary_advance_md", label: "董事/总经理 Managing Director" },
     ],
-    inkPrepared: false,
   },
 };
 
@@ -361,6 +350,7 @@ export function SignaturePreviewModal({
     : null;
 
   // 蓝笔化+裁剪只跟签名图有关，与当前看哪张底版、拖到多少比例无关，算一次即可。
+  // 三个单据现在走同一份 core.signature_image，所以这里也只有一种处理。
   const ink = usePreparedInk(signatureSrc, open);
 
   const templateOptions = useMemo(
@@ -413,12 +403,8 @@ export function SignaturePreviewModal({
   };
 
   const currentCfg = TEMPLATE_CONFIGS[activeTemplate];
-  // 出票时进 drawImage 的图：WHT/TAX INV 是裁过的蓝墨，工资预支是原图。
-  const stampSrc = currentCfg.inkPrepared
-    ? ink.status === "ready"
-      ? ink.dataUrl
-      : null
-    : signatureSrc;
+  // 出票时进 drawImage 的就是这张裁过的蓝墨图，三个单据都一样。
+  const stampSrc = ink.status === "ready" ? ink.dataUrl : null;
 
   return (
     <Modal
@@ -565,7 +551,7 @@ export function SignaturePreviewModal({
             />
           </div>
 
-          {currentCfg.inkPrepared && ink.status === "failed" && (
+          {ink.status === "failed" && (
             <Alert
               className="signature-preview-alert"
               description={`${ink.reason}。这里显示的是未经处理的原图位置，与实际出票会有出入，请勿据此调整比例。`}
@@ -617,9 +603,8 @@ export function SignaturePreviewModal({
           </div>
 
           <small className="template-fidelity-note">
-            {currentCfg.inkPrepared
-              ? "出票前会先剔除近白背景与扫描下划线、裁到墨迹外接框并转为蓝色墨水，此处已按同一口径渲染。"
-              : "工资预支单直接套印原图（不裁白边、不转蓝），因此四周留白会占用签名框空间——此处按同一口径渲染。"}
+            出票前会先剔除近白背景与扫描下划线、裁到墨迹外接框并转为蓝色墨水，
+            三种单据口径一致，此处按同一口径渲染。
           </small>
         </div>
       </div>

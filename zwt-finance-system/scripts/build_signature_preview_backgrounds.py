@@ -171,18 +171,11 @@ def _tax_inv_pdf(output: Path) -> None:
     )
 
 
-def _salary_advance_pdf(output: Path, workspace: Path) -> None:
-    from PIL import Image
-
+def _salary_advance_pdf(output: Path) -> None:
     from app.modules.salary_advance.document_generator import (
         GenerationSnapshot,
         export_pdf_from_template,
     )
-
-    # 两个签名位都要给一张能打开的图（_validate_signature 会拦不存在的文件）。
-    # 用 1x1 全透明：画上去等于什么都没画，底图因此保持"未盖章"。
-    blank = workspace / "blank-signature.png"
-    Image.new("RGBA", (1, 1), (255, 255, 255, 0)).save(blank)
 
     snapshot = GenerationSnapshot(
         normalized_data={
@@ -211,8 +204,9 @@ def _salary_advance_pdf(output: Path, workspace: Path) -> None:
             "applicant_signature_mode": "Handwritten",
             "output_filename": "signature-preview-sample",
         },
-        finance_signature_path=blank,
-        md_signature_path=blank,
+        # None = 不盖章。签名由预览自己叠，才能跟着滑块实时动。
+        finance_signature_path=None,
+        md_signature_path=None,
         finance_signature_version={},
         md_signature_version={},
     )
@@ -225,13 +219,13 @@ def _salary_advance_pdf(output: Path, workspace: Path) -> None:
     )
 
 
-def build_sample_pdf(png_name: str, output: Path, workspace: Path) -> None:
+def build_sample_pdf(png_name: str, output: Path) -> None:
     if png_name == "wht-template-bg.webp":
         _wht_pdf(output)
     elif png_name == "tax-inv-template-bg.webp":
         _tax_inv_pdf(output)
     else:
-        _salary_advance_pdf(output, workspace)
+        _salary_advance_pdf(output)
 
 
 def render(pdf_path: Path, image_path: Path) -> tuple[int, int]:
@@ -276,7 +270,7 @@ def build(*, check_only: bool = False) -> int:
                 stale.append(image_name)
                 if not check_only:
                     sample = workspace / f"{image_name}.pdf"
-                    build_sample_pdf(image_name, sample, workspace)
+                    build_sample_pdf(image_name, sample)
                     width, height = render(sample, PUBLIC_DIR / image_name)
                     size_kb = (PUBLIC_DIR / image_name).stat().st_size / 1024
                     print(

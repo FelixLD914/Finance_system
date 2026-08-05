@@ -10,6 +10,8 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+from app.core.signature_image import SignatureImageError
+from app.core.signature_image import build_blue_signature as prepare_signature_stamp
 from app.modules.wht.branching import display_payee_name
 from app.modules.wht.models import WhtTask
 
@@ -246,67 +248,15 @@ def validate_signature_image(content: bytes) -> tuple[str, str]:
 
 
 def build_blue_signature(source_path: Path, target_path: Path) -> None:
+    """三种单据共用的签名处理，实现在 app.core.signature_image。
+
+    这里保留同名薄封装：TAX INV 与既有测试都从这里 import，且调用方期待的是
+    本模块的 DocumentGenerationError。
+    """
     try:
-        from PIL import Image
-
-        with Image.open(source_path) as image:
-            rgba = image.convert("RGBA")
-            width, height = rgba.size
-            flattened_data = getattr(rgba, "get_flattened_data", None)
-            pixels = list(flattened_data() if flattened_data is not None else rgba.getdata())
-
-            def is_ink(pixel: tuple[int, int, int, int]) -> bool:
-                red, green, blue, alpha = pixel
-                return alpha > 0 and not (red >= 245 and green >= 245 and blue >= 245)
-
-            ink_mask = [is_ink(pixel) for pixel in pixels]
-            # 扫描并剔除扫描件/截图里常见的签名下划线。规则只处理横跨至少
-            # 45% 图片、且像素高度很薄的近水平连续线，不会把普通签名字迹抹掉。
-            minimum_rule_width = max(24, int(width * 0.45))
-            removed_pixels: set[int] = set()
-            for y in range(height):
-                row_start = y * width
-                run_start: int | None = None
-                for x in range(width + 1):
-                    occupied = x < width and ink_mask[row_start + x]
-                    if occupied and run_start is None:
-                        run_start = x
-                    if occupied or run_start is None:
-                        continue
-                    if x - run_start >= minimum_rule_width:
-                        removed_pixels.update(range(row_start + run_start, row_start + x))
-                    run_start = None
-
-            converted = []
-            for index, (red, green, blue, alpha) in enumerate(pixels):
-                if index in removed_pixels or not ink_mask[index]:
-                    converted.append((255, 255, 255, 0))
-                    continue
-                luminance = (299 * red + 587 * green + 114 * blue) // 1000
-                ink_strength = 255 - luminance
-                if ink_strength < 14:
-                    converted.append((255, 255, 255, 0))
-                    continue
-                converted.append(
-                    (
-                        20,
-                        70,
-                        min(255, 210 + int((ink_strength / 255) * 25)),
-                        max(alpha, min(255, int(ink_strength * 1.7))),
-                    )
-                )
-            rgba.putdata(converted)
-            alpha_box = rgba.getchannel("A").getbbox()
-            if alpha_box is None:
-                raise DocumentGenerationError("signature image contains no usable ink")
-            padding = 2
-            left = max(0, alpha_box[0] - padding)
-            top = max(0, alpha_box[1] - padding)
-            right = min(width, alpha_box[2] + padding)
-            bottom = min(height, alpha_box[3] + padding)
-            rgba.crop((left, top, right, bottom)).save(target_path, format="PNG")
-    except Exception as exc:
-        raise DocumentGenerationError("signature image preparation failed") from exc
+        prepare_signature_stamp(source_path, target_path)
+    except SignatureImageError as exc:
+        raise DocumentGenerationError(str(exc)) from exc
 
 
 def export_pdf_from_template(
