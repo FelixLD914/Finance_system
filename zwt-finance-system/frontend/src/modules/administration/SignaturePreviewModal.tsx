@@ -67,12 +67,18 @@ const TEMPLATE_CONFIGS: Record<
       heightPercent: 5.46,
     },
   },
+  // 工资预支底版在 2026-08-04 重制了四轮（缩左边距、抬首行、重并 H37:J37）。
+  // leftPercent 当时跟着更新了，bottomPercent 没有，于是预览里的签名比实际出票
+  // 低了约 12.9pt（4.5mm）。现按 pdf_layout.SIGNATURE_BOXES 重算：
+  //   finance (294.88, 304.91, 90, 28) -> 304.91/841.85 = 36.219%
+  //   md      (294.82, 201.96, 90, 28) -> 201.96/841.85 = 23.990%
+  // tests/test_signature_preview_alignment.py 会把这四组数钉在后端坐标上。
   salary_advance: {
     bgImage: "/salary-advance-template-bg.png",
     title: "工资预支单凭证 (财务负责人签名位置)",
     sigBox: {
       leftPercent: 49.54,
-      bottomPercent: 34.69,
+      bottomPercent: 36.22,
       widthPercent: 15.12,
       heightPercent: 3.33,
     },
@@ -82,7 +88,7 @@ const TEMPLATE_CONFIGS: Record<
     title: "工资预支单凭证 (财务负责人签名位置)",
     sigBox: {
       leftPercent: 49.54,
-      bottomPercent: 34.69,
+      bottomPercent: 36.22,
       widthPercent: 15.12,
       heightPercent: 3.33,
     },
@@ -92,7 +98,7 @@ const TEMPLATE_CONFIGS: Record<
     title: "工资预支单凭证 (董事/总经理签名位置)",
     sigBox: {
       leftPercent: 49.53,
-      bottomPercent: 22.49,
+      bottomPercent: 23.99,
       widthPercent: 15.12,
       heightPercent: 3.33,
     },

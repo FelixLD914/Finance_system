@@ -987,19 +987,41 @@ def _cross_check(parsed: ParsedDeclaration) -> list[str]:
         "报关单 FOB THB",
     )
 
-    # 泰铢 = 美元 × 海关汇率。允许 1 泰铢的进位差：海关按行折算再加总，
-    # 我们按合计折算，末位进位方向可能不同，超过 1 泰铢才是真不一致。
+    # 泰铢 = 美元 × 海关汇率。**零容差**（业务口径 2026-08-05：1 泰铢都不许差）。
+    #
+    # 原实现留了 1 泰铢容差，理由是"海关按行折算再加总，我们按合计折算，末位进位
+    # 方向可能不同"。这个理由本身成立，但放宽阈值是错的解法——放宽之后，真的差
+    # 了 1 泰铢的单子也一起被放过了，而那才是要人看的。
+    #
+    # 正确的解法是按海关的算法算：有完整行级美元时逐行折算再加总（进位方向与
+    # 报关单一致，压根不会产生那个差），没有行级数据才退回按合计折算。两条路都
+    # 精确比对，不设阈值。
     rate = parsed.value("customs_exchange_rate")
-    usd = parsed.value("customs_fob_usd_printed_total") or parsed.value(
-        "customs_fob_usd_line_total"
-    )
     thb = parsed.value("customs_fob_thb_printed_total") or parsed.value(
         "customs_fob_thb_line_total"
     )
-    if rate and usd and thb:
+    if not rate or thb is None:
+        return warnings
+
+    line_usd = [item.fob_usd for item in parsed.items if item.fob_usd is not None]
+    if parsed.items and len(line_usd) == len(parsed.items):
+        expected = sum(
+            ((amount * rate).quantize(MONEY, rounding=ROUND_HALF_UP) for amount in line_usd),
+            start=Decimal("0"),
+        )
+        basis = f"逐行按海关汇率 {rate} 折算后加总"
+    else:
+        usd = parsed.value("customs_fob_usd_printed_total") or parsed.value(
+            "customs_fob_usd_line_total"
+        )
+        if usd is None:
+            return warnings
         expected = (usd * rate).quantize(MONEY, rounding=ROUND_HALF_UP)
-        if abs(expected - thb) > Decimal("1.00"):
-            warnings.append(
-                f"报关单泰铢金额 {thb} 与 USD {usd} × 海关汇率 {rate} = {expected} 不一致"
-            )
+        basis = f"合计 USD {usd} × 海关汇率 {rate}"
+
+    if expected != thb:
+        warnings.append(
+            f"报关单泰铢金额 {thb} 与{basis}得到的 {expected} 不一致"
+            f"（相差 {thb - expected}）"
+        )
     return warnings

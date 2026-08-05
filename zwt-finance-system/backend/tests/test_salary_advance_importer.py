@@ -24,6 +24,9 @@ HEADERS = (
     "每月扣款金额",
     "审批结果",
     "申请人签名方式",
+    # 签字人姓名印在单据上，是必填项；签名代码不印、可留空（章在开具时选）。
+    "财务签字人",
+    "总经理签字人",
     "财务签名代码",
     "总经理签名代码",
 )
@@ -56,6 +59,8 @@ def _row(emp_id: str, period: str = "202607") -> tuple[object, ...]:
         1000,
         "Approve",
         "Handwritten",
+        "邢兰慧",
+        "龚尧文",
         "FIN_TEST",
         "MD_TEST",
     )
@@ -65,7 +70,6 @@ def test_import_filters_period_and_keeps_source_row_numbers() -> None:
     parsed = parse_salary_advance_workbook(
         _workbook_bytes([_row("E001"), _row("E002", "202608")]),
         period="202607",
-        active_signature_codes={"FIN_TEST", "MD_TEST"},
     )
 
     assert len(parsed.records) == 1
@@ -79,7 +83,6 @@ def test_import_marks_batch_and_existing_duplicates() -> None:
     parsed = parse_salary_advance_workbook(
         _workbook_bytes([_row("E001"), _row("E001"), _row("E002")]),
         period="202607",
-        active_signature_codes={"FIN_TEST", "MD_TEST"},
         existing_keys={("202607", "E002")},
     )
 
@@ -98,7 +101,6 @@ def test_import_rejects_non_xlsx_zip_content() -> None:
         parse_salary_advance_workbook(
             b"not-an-xlsx",
             period="202607",
-            active_signature_codes=set(),
         )
 
 
@@ -123,7 +125,6 @@ def test_generated_template_round_trips_through_parser() -> None:
     parsed = parse_salary_advance_workbook(
         build_import_template_workbook(),
         period="202607",
-        active_signature_codes={"FIN_XING_LANHUI", "MD_GONG_YAOWEN"},
     )
 
     assert len(parsed.records) == 1

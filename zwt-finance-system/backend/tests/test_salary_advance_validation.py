@@ -49,26 +49,28 @@ def test_header_aliases_accept_approved_bilingual_template() -> None:
     }
 
 
+BASE_ROW = {
+    "period": "202607",
+    "emp_id": "E001",
+    "first_name": "SOMCHAI",
+    "surname": "TEST",
+    "department": "Finance",
+    "position": "Accountant",
+    "start_date": "2024-01-15",
+    "request_date": "2026-07-20",
+    "advance_amount": "12,500.50",
+    "monthly_deduction": "2,500.10",
+    "approval_status": "Approve",
+    "applicant_signature_mode": "Handwritten",
+    "finance_display_name": "邢兰慧",
+    "md_display_name": "龚尧文",
+}
+
+
 def test_valid_record_is_normalized_without_real_signature_files() -> None:
     status, errors, warnings, normalized = validate_and_normalize_record(
-        {
-            "period": "202607",
-            "emp_id": "E001",
-            "first_name": "SOMCHAI",
-            "surname": "TEST",
-            "department": "Finance",
-            "position": "Accountant",
-            "start_date": "2024-01-15",
-            "request_date": "2026-07-20",
-            "advance_amount": "12,500.50",
-            "monthly_deduction": "2,500.10",
-            "approval_status": "Approve",
-            "applicant_signature_mode": "Handwritten",
-            "finance_signature_code": "FIN_TEST",
-            "md_signature_code": "MD_TEST",
-        },
+        dict(BASE_ROW),
         batch_period="202607",
-        active_signature_codes={"FIN_TEST", "MD_TEST"},
     )
 
     assert status == "warning"
@@ -80,98 +82,93 @@ def test_valid_record_is_normalized_without_real_signature_files() -> None:
     assert normalized["applicant_signature_mode"] == "Handwritten"
 
 
-def test_invalid_signature_mode_and_unbound_codes_are_blocking() -> None:
+def test_invalid_signature_mode_is_blocking() -> None:
     status, errors, _, normalized = validate_and_normalize_record(
-        {
-            "period": "202607",
-            "emp_id": "E002",
-            "first_name": "A",
-            "surname": "B",
-            "department": "Finance",
-            "position": "Officer",
-            "start_date": "2024-01-01",
-            "request_date": "2026-07-01",
-            "advance_amount": "1000",
-            "monthly_deduction": "100",
-            "applicant_signature_mode": "Digital",
-            "finance_signature_code": "FIN_MISSING",
-            "md_signature_code": "MD_MISSING",
-        },
+        {**BASE_ROW, "applicant_signature_mode": "Digital"},
         batch_period="202607",
-        active_signature_codes=set(),
     )
 
     assert status == "invalid"
-    assert {issue["code"] for issue in errors} >= {
-        "INVALID_MODE",
-        "SIGNATURE_NOT_FOUND",
-    }
+    assert {issue["code"] for issue in errors} >= {"INVALID_MODE"}
     assert normalized["applicant_signature_mode"] == "Handwritten"
 
 
-def test_md_signer_is_derived_from_display_name_not_guessed() -> None:
-    """签名代码可从签字人姓名确定性映射；无法确定时必须报错而不是猜。"""
-    base = {
-        "period": "202602",
-        "emp_id": "E003",
-        "first_name": "A",
-        "surname": "B",
-        "department": "Finance",
-        "position": "Officer",
-        "start_date": "2024-01-01",
-        "request_date": "2026-02-01",
-        "advance_amount": "1000",
-        "monthly_deduction": "100",
-        "approval_status": "Approve",
-    }
+def test_signature_columns_never_block_the_import() -> None:
+    """签名区四列全部可留空——导入侧完全不管签名。
 
-    _, _, _, normalized = validate_and_normalize_record(
-        {**base, "md_display_name": "龚尧文", "finance_display_name": "邢兰慧"},
-        batch_period="202602",
-        active_signature_codes={"FIN_XING_LANHUI", "MD_GONG_YAOWEN"},
-    )
-    assert normalized["md_signature_code"] == "MD_GONG_YAOWEN"
-    assert normalized["finance_signature_code"] == "FIN_XING_LANHUI"
-
-    # 总经理签字人缺失/不认识：不允许按期间月份之类的旁证猜签名人。
-    status, errors, _, _ = validate_and_normalize_record(
-        base,
-        batch_period="202602",
-        active_signature_codes={"FIN_XING_LANHUI"},
-    )
-    assert status == "invalid"
-    assert any(
-        issue["field"] == "md_signature_code" and issue["code"] == "SIGNER_UNKNOWN"
-        for issue in errors
-    )
-
-
-def test_signature_codes_resolve_against_shared_library_names() -> None:
-    """active_signature_codes 现在就是共享签名库里 active 资产的名称集合。"""
-    status, errors, _, _ = validate_and_normalize_record(
+    单据上印的签字人姓名取自签名资产的 signer_name（见
+    SalaryAdvanceDocumentService._snapshot），不取导入行；盖哪张章在开具时选。
+    所以这四列缺任何一个都不该把整行判成 invalid——那样 create_job 会直接排除它
+    （只取 validation_status != "invalid"），这一行连被选中开具的机会都没有。
+    """
+    status, errors, _, normalized = validate_and_normalize_record(
         {
-            "period": "202607",
-            "emp_id": "E004",
-            "first_name": "A",
-            "surname": "B",
-            "department": "Finance",
-            "position": "Officer",
-            "start_date": "2024-01-01",
-            "request_date": "2026-07-01",
-            "advance_amount": "1000",
-            "monthly_deduction": "100",
-            "approval_status": "Approve",
+            **BASE_ROW,
+            "finance_display_name": "",
+            "md_display_name": "",
+            "finance_signature_code": "",
+            "md_signature_code": "",
+        },
+        batch_period="202607",
+    )
+
+    assert status != "invalid"
+    assert errors == []
+    for field in (
+        "finance_display_name",
+        "md_display_name",
+        "finance_signature_code",
+        "md_signature_code",
+    ):
+        assert normalized[field] == ""
+
+
+def test_signature_codes_are_optional_and_never_inferred() -> None:
+    """签名代码不再从签字人姓名推断，也不再校验是否存在于签名库。
+
+    2026-08-05 口径（参照 WHT）：导入只校验单据要印的信息，盖哪张章在开具时选。
+    原先有一整套「龚尧文→MD_GONG_YAOWEN」推断 + 签名库存在性校验 + 两级硬阻断，
+    把一件开具时才定的事挡在了导入口上——整行判 invalid 之后 create_job 直接
+    排除它，那一行连被选中开具的机会都没有。
+    """
+    # 完全不填代码：照样能过，不推断、不报错。
+    status, errors, _, normalized = validate_and_normalize_record(
+        dict(BASE_ROW),
+        batch_period="202607",
+    )
+    assert status != "invalid"
+    assert errors == []
+    assert normalized["finance_signature_code"] == ""
+    assert normalized["md_signature_code"] == ""
+
+    # 填了库里没有的代码：也不挡导入（签名库随时可补，开具时也能改选）。
+    status, errors, _, normalized = validate_and_normalize_record(
+        {
+            **BASE_ROW,
             "finance_signature_code": "fin_xing_lanhui",
             "md_signature_code": "MD_NOT_IN_LIBRARY",
         },
         batch_period="202607",
-        active_signature_codes={"FIN_XING_LANHUI"},
     )
-    assert status == "invalid"
-    codes = {(issue["field"], issue["code"]) for issue in errors}
-    # 小写输入被规范成大写后命中签名库；不在库里的必须拦下。
-    assert ("finance_signature_code", "SIGNATURE_NOT_FOUND") not in codes
-    assert ("md_signature_code", "SIGNATURE_NOT_FOUND") in codes
+    assert status != "invalid"
+    assert errors == []
+    # 原样收下，只做大小写规范化——开具时按它去签名库找。
+    assert normalized["finance_signature_code"] == "FIN_XING_LANHUI"
+    assert normalized["md_signature_code"] == "MD_NOT_IN_LIBRARY"
+
+
+def test_signer_names_are_kept_verbatim_as_source_data() -> None:
+    """姓名照抄留档，不做任何"标准签字人"替换。
+
+    留的是导入原始数据（可追溯），**不参与出单**——出单时
+    `_snapshot` 会用签名资产上的 signer_name 覆盖这两列。
+    """
+    _, _, _, normalized = validate_and_normalize_record(
+        {**BASE_ROW, "md_display_name": "朱发坚", "finance_display_name": "张三"},
+        batch_period="202607",
+    )
+    assert normalized["md_display_name"] == "朱发坚"
+    assert normalized["finance_display_name"] == "张三"
 
 
 def test_excel_formula_prefix_is_escaped() -> None:

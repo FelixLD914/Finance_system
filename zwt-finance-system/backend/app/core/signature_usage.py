@@ -58,3 +58,19 @@ def signature_usages_overlap(left: str | None, right: str | None) -> bool:
     """两张签名的适用范围是否有交集——默认签名互斥就按这个判定。"""
     return bool(parse_signature_usage(left) & parse_signature_usage(right))
 
+
+# 会把签名人姓名印在单据上的模块。目前只有工资预支单：它在签名横线下方印
+# "( 姓名 )"；WHT 与 TAX INV 的单据上只有签名图，不出现姓名。
+SIGNER_NAME_MODULES: Final[frozenset[str]] = frozenset(
+    {"salary_advance", "salary_advance_finance", "salary_advance_md"}
+)
+
+
+def requires_signer_name(value: str | None) -> bool:
+    """这张签名要不要填签名人姓名。
+
+    判据是适用范围里有没有会印姓名的单据——勾了工资预支就必须填，因为那个名字
+    要原样印到单据上；只用于 WHT / TAX INV 的签名不需要，强制填只会造无用数据。
+    """
+    return bool(parse_signature_usage(value) & SIGNER_NAME_MODULES)
+

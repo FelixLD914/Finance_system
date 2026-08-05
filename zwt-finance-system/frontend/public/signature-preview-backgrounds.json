@@ -1,0 +1,17 @@
+{
+  "renderDpi": 150,
+  "backgrounds": {
+    "wht-template-bg.png": {
+      "source": "WHT-Template.pdf",
+      "sourceSha256": "391ea5409fb4eaa79057f0f596b99e4fe332185597ddc8ea0e758f6f5fd8b31f"
+    },
+    "tax-inv-template-bg.png": {
+      "source": "TAX-INV-Template.pdf",
+      "sourceSha256": "8c14bbdc611ecc94cb946921e1c46f95f66eca51cace5e824924932e1e000663"
+    },
+    "salary-advance-template-bg.png": {
+      "source": "Salary-Advance-Template.pdf",
+      "sourceSha256": "a384529a36420970ae02933f840db2931732b6718f7c793bbfbbd90b1a4cb1e6"
+    }
+  }
+}

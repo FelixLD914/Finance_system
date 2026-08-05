@@ -407,6 +407,10 @@ class SignatureAssetUpdate(ApiSchema):
     status: Literal["active", "inactive"] | None = None
     is_default: bool | None = None
     usage: list[SignatureUsage] | None = Field(default=None, min_length=1)
+    # 适用单据含工资预支时必填（服务端按改完之后的状态判，见
+    # WhtDocumentService._clean_signer_name）。这里不设 min_length：
+    # 只改缩放比例的请求不该被姓名规则连坐。
+    signer_name: str | None = Field(default=None, max_length=160)
     scale_percent: int | None = Field(default=None, ge=50, le=200)
 
 
@@ -419,6 +423,8 @@ class SignatureAssetResponse(ApiSchema):
     version: int
     status: Literal["active", "inactive"]
     usage: list[SignatureUsage]
+    # 只有工资预支单会印它；WHT / TAX INV 的签名这一项为空是正常的。
+    signer_name: str | None = None
     is_default: bool
     scale_percent: int = 100
     created_by_name: str

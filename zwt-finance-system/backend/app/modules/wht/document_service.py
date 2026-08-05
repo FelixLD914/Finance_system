@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.models import SignatureAsset
 from app.core.signature_usage import (
     format_signature_usage,
+    requires_signer_name,
     signature_allows,
     signature_usages_overlap,
 )
@@ -68,6 +69,24 @@ class WhtDocumentService:
             ]
         return signatures
 
+    @staticmethod
+    def _clean_signer_name(usage: str | None, signer_name: str | None) -> str | None:
+        """签名人姓名：勾了工资预支就必填，其余单据不需要。
+
+        只有工资预支单会把这个名字印到单据上（签名横线下方的 "( 姓名 )"），
+        WHT 与 TAX INV 的单据上只有签名图。所以不按"所有签名都要填"处理——
+        那会逼着只用于 WHT 的签名去编一个没人看的名字。
+        """
+        cleaned = (signer_name or "").strip()
+        if requires_signer_name(usage):
+            if not cleaned:
+                raise WhtStateError(
+                    "适用单据含「工资预支单」的签名必须填写签名人姓名："
+                    "这个名字会原样印在工资预支单的签名下方"
+                )
+            return cleaned
+        return cleaned or None
+
     async def create_signature(
         self,
         *,
@@ -76,10 +95,12 @@ class WhtDocumentService:
         content: bytes,
         make_default: bool,
         usage: str = "wht",
+        signer_name: str | None = None,
     ) -> SignatureAsset:
         clean_name = name.strip()
         if not clean_name:
             raise WhtStateError("signature name is required")
+        clean_signer = self._clean_signer_name(usage, signer_name)
         try:
             mime_type, suffix = validate_signature_image(content)
         except DocumentGenerationError as exc:
@@ -110,6 +131,7 @@ class WhtDocumentService:
             id=signature_id,
             usage=usage,
             name=clean_name,
+            signer_name=clean_signer,
             storage_key=storage_key,
             original_file_name=Path(original_file_name).name[:260],
             sha256=hashlib.sha256(content).hexdigest(),
@@ -146,8 +168,17 @@ class WhtDocumentService:
                 signature.is_default = False
         if payload.usage is not None:
             signature.usage = format_signature_usage(payload.usage)
+        if payload.signer_name is not None:
+            signature.signer_name = payload.signer_name
         if payload.scale_percent is not None:
             signature.scale_percent = payload.scale_percent
+        # 按**改完之后**的状态判：把适用单据勾上工资预支，就必须同时有姓名。
+        # 只看 payload 会漏掉"这次只改 usage、姓名一直是空"这条路径——
+        # 那样存进去的签名一盖到预支单上就印出空括号。
+        signature.signer_name = self._clean_signer_name(
+            signature.usage,
+            signature.signer_name,
+        )
         if payload.is_default is True or (signature.is_default and payload.usage is not None):
             if signature.status != "active":
                 raise WhtStateError("an inactive signature cannot be the default")

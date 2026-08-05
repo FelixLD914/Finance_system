@@ -13,10 +13,29 @@ from app.core.signature_usage import (
     SIGNATURE_MODULES,
     format_signature_usage,
     parse_signature_usage,
+    requires_signer_name,
     signature_allows,
     signature_usages_overlap,
 )
 from app.modules.tax_invoice.document_generator import SIGNATURE_BOX
+
+
+def test_only_salary_advance_needs_a_signer_name() -> None:
+    """工资预支单在签名下方印 "( 姓名 )"；WHT / TAX INV 的单据上只有签名图。
+
+    所以姓名不是"所有签名都要填"——那会逼着只用于 WHT 的签名去编一个没人看的名字。
+    """
+    assert requires_signer_name(format_signature_usage(["salary_advance"]))
+    assert requires_signer_name(format_signature_usage(["salary_advance_finance"]))
+    assert requires_signer_name(format_signature_usage(["salary_advance_md"]))
+    # 一张兼用的签名，只要沾了工资预支就要有姓名。
+    assert requires_signer_name(format_signature_usage(["wht", "salary_advance_md"]))
+
+    assert not requires_signer_name(format_signature_usage(["wht"]))
+    assert not requires_signer_name(format_signature_usage(["tax_inv"]))
+    assert not requires_signer_name(format_signature_usage(["wht", "tax_inv"]))
+    assert not requires_signer_name("both")  # 迁移前的旧值 = wht + tax_inv
+    assert not requires_signer_name(None)
 
 
 def test_legacy_both_still_reads_as_wht_plus_tax_inv() -> None:
