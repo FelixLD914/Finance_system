@@ -1,24 +1,24 @@
 import { useState } from "react";
 import {
+  BellOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   InfoCircleOutlined,
   RightOutlined,
 } from "@ant-design/icons";
 import { Badge, Button, Drawer, Empty, Segmented, Space } from "antd";
-import { BellOutlined } from "@ant-design/icons";
 
 import type { Locale, Translate } from "../i18n";
 import type { ModuleKey } from "../modules/registry";
 
 export interface SystemNotification {
   id: string;
-  titleZh: string;
-  titleEn: string;
-  descZh: string;
-  descEn: string;
-  timeZh: string;
-  timeEn: string;
+  title: string;
+  description: string;
+  timestamp: string;
+  titleEn?: string;
+  descriptionEn?: string;
+  timestampEn?: string;
   read: boolean;
   type: "action" | "info" | "success";
   moduleKey: ModuleKey;
@@ -35,48 +35,52 @@ interface NotificationsDrawerProps {
 const INITIAL_NOTIFICATIONS: SystemNotification[] = [
   {
     id: "notif-1",
-    titleZh: "WHT 待复核单据提醒",
+    title: "WHT 待复核单据提醒",
+    description: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
+    timestamp: "10 分钟前",
     titleEn: "WHT Draft Pending Review",
-    descZh: "有 2 张 WHT 凭证草稿已提交，等待财务主管复核并生成正式编号",
-    descEn: "2 WHT certificate drafts submitted, awaiting supervisor review & formal number allocation",
-    timeZh: "10 分钟前",
-    timeEn: "10 mins ago",
+    descriptionEn:
+      "2 WHT certificate drafts submitted, awaiting supervisor review & formal number allocation",
+    timestampEn: "10 mins ago",
     read: false,
     type: "action",
     moduleKey: "wht",
   },
   {
     id: "notif-2",
-    titleZh: "TAX INV BOT 汇率更新成功",
+    title: "TAX INV BOT 汇率更新成功",
+    description: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
+    timestamp: "1 小时前",
     titleEn: "TAX INV BOT Rate Sync Succeeded",
-    descZh: "泰国央行 BOT API 最新 USD buying transfer 汇率已同步入库",
-    descEn: "Latest BOT USD buying transfer exchange rate synced from API successfully",
-    timeZh: "1 小时前",
-    timeEn: "1 hour ago",
+    descriptionEn:
+      "Latest BOT USD buying transfer exchange rate synced from API successfully",
+    timestampEn: "1 hour ago",
     read: false,
     type: "success",
     moduleKey: "tax-invoice",
   },
   {
     id: "notif-3",
-    titleZh: "工资预支单数据待校验",
+    title: "工资预支单数据待校验",
+    description: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
+    timestamp: "2 小时前",
     titleEn: "Salary Advance Data Validation Pending",
-    descZh: "新导入 202608 期工资预支表，有 1 条员工记录需要补齐中英文姓名",
-    descEn: "Newly imported Salary Advance batch 202608 has 1 employee record needing name check",
-    timeZh: "2 小时前",
-    timeEn: "2 hours ago",
+    descriptionEn:
+      "Newly imported Salary Advance batch 202608 has 1 employee record needing name check",
+    timestampEn: "2 hours ago",
     read: false,
     type: "action",
     moduleKey: "salary-advance",
   },
   {
     id: "notif-4",
-    titleZh: "签名图库默认版本提示",
+    title: "签名图库默认版本提示",
+    description: "系统管理中已更新财务负责人与总经理印鉴签名图片",
+    timestamp: "昨天 16:30",
     titleEn: "Default Signature Version Updated",
-    descZh: "系统管理中已更新财务负责人与总经理印鉴签名图片",
-    descEn: "Default signature image assets for supervisor and MD updated in System Admin",
-    timeZh: "昨天 16:30",
-    timeEn: "Yesterday 16:30",
+    descriptionEn:
+      "Default signature image assets for supervisor and MD updated in System Admin",
+    timestampEn: "Yesterday 16:30",
     read: true,
     type: "info",
     moduleKey: "administration",
@@ -181,105 +185,123 @@ export function NotificationsDrawer({
         />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filteredNotifications.map((n) => (
-            <div
-              key={n.id}
-              onClick={() => handleItemClick(n)}
-              style={{
-                padding: "12px 14px",
-                borderRadius: 8,
-                border: "1px solid",
-                borderColor: n.read ? "#eae2d8" : "#d8c2a8",
-                background: n.read ? "#faf7f4" : "#fffcf7",
-                cursor: "pointer",
-                position: "relative",
-                transition: "all 0.15s ease",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "#c6a982";
-                e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.05)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = n.read ? "#eae2d8" : "#d8c2a8";
-                e.currentTarget.style.boxShadow = "none";
-              }}
-            >
-              {!n.read && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    right: 12,
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    backgroundColor: "#b85d19",
-                  }}
-                />
-              )}
+          {filteredNotifications.map((n) => {
+            const title = isEn ? n.titleEn || n.title : n.title;
+            const description = isEn
+              ? n.descriptionEn || n.description
+              : n.description;
+            const time = isEn ? n.timestampEn || n.timestamp : n.timestamp;
 
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            return (
+              <div
+                key={n.id}
+                onClick={() => handleItemClick(n)}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 8,
+                  border: "1px solid",
+                  borderColor: n.read ? "#eae2d8" : "#d8c2a8",
+                  background: n.read ? "#faf7f4" : "#fffcf7",
+                  cursor: "pointer",
+                  position: "relative",
+                  transition: "all 0.15s ease",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = "#c6a982";
+                  e.currentTarget.style.boxShadow =
+                    "0 2px 8px rgba(0,0,0,0.05)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = n.read
+                    ? "#eae2d8"
+                    : "#d8c2a8";
+                  e.currentTarget.style.boxShadow = "none";
+                }}
+              >
+                {!n.read && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 12,
+                      right: 12,
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      backgroundColor: "#b85d19",
+                    }}
+                  />
+                )}
+
                 <div
                   style={{
-                    marginTop: 2,
-                    fontSize: 16,
-                    color:
-                      n.type === "action"
-                        ? "#b85d19"
-                        : n.type === "success"
-                          ? "#389e0d"
-                          : "#1890ff",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
                   }}
                 >
-                  {n.type === "action" ? (
-                    <ClockCircleOutlined />
-                  ) : n.type === "success" ? (
-                    <CheckCircleOutlined />
-                  ) : (
-                    <InfoCircleOutlined />
-                  )}
-                </div>
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 16,
+                      flexShrink: 0,
+                      color:
+                        n.type === "action"
+                          ? "#b85d19"
+                          : n.type === "success"
+                            ? "#389e0d"
+                            : "#1890ff",
+                    }}
+                  >
+                    {n.type === "action" ? (
+                      <ClockCircleOutlined />
+                    ) : n.type === "success" ? (
+                      <CheckCircleOutlined />
+                    ) : (
+                      <InfoCircleOutlined />
+                    )}
+                  </div>
 
-                <div style={{ flex: 1, paddingRight: 12 }}>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: n.read ? 500 : 700,
-                      color: "#2a2622",
-                    }}
-                  >
-                    {isEn ? n.titleEn : n.titleZh}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "#736b62",
-                      marginTop: 4,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {isEn ? n.descEn : n.descZh}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginTop: 8,
-                      fontSize: 11,
-                      color: "#9e9488",
-                    }}
-                  >
-                    <span>{isEn ? n.timeEn : n.timeZh}</span>
-                    <span style={{ color: "#8c6b3f", fontWeight: 600 }}>
-                      {isEn ? "View details" : "去查看"}{" "}
-                      <RightOutlined style={{ fontSize: 10 }} />
-                    </span>
+                  <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: n.read ? 500 : 700,
+                        color: "#2a2622",
+                      }}
+                    >
+                      {title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#736b62",
+                        marginTop: 4,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {description}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginTop: 8,
+                        fontSize: 11,
+                        color: "#9e9488",
+                      }}
+                    >
+                      <span>{time}</span>
+                      <span style={{ color: "#8c6b3f", fontWeight: 600 }}>
+                        {isEn ? "View details" : "去查看"}{" "}
+                        <RightOutlined style={{ fontSize: 10 }} />
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Drawer>
