@@ -3191,24 +3191,11 @@ select {
   display: block;
 }
 
-.overlay-sample-layer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.pdf-field {
-  position: absolute;
-  font-family: Sarabun, Helvetica, Arial, sans-serif;
-  font-size: 10px;
-  font-weight: 600;
-  color: #101828;
-  transform: translate(-50%, -50%);
-  white-space: nowrap;
-}
+/* 底图已经是后端真出的那一页（带样例数据），叠加层只剩签名一个。
+   `.overlay-sample-layer` / `.pdf-field` 那套按百分比手工摆的样例文字已删：
+   字体、断词、列宽全靠猜，与底版必然对不上（TAX INV 的品名被裁掉半个字、
+   工资预支的金额盖住表单印刷字）。要改样例数据请改
+   scripts/build_signature_preview_backgrounds.py 并重出底图。 */
 
 /* 核心签名套印图层：与后端 ReportLab PDF 坐标 100% 同比例定位。
  *
@@ -3216,8 +3203,7 @@ select {
  * （后端 drawImage 的 x/y 就是左下角），以前挂着一句 translate(-50%, 50%)，
  * 于是预览把签名整体左移半个框宽、下移半个框高：WHT 差 47.5pt/21pt
  * (16.8mm/7.4mm)，TAX INV 差 75pt/23pt。位移量还随缩放比变化，
- * 越调越对不上。上面那行 .pdf-field 的 translate(-50%,-50%) 是对的——
- * 那些样例文字是按中心定位的，两者不要互相抄。 */
+ * 越调越对不上。 */
 .exact-signature-overlay-box {
   position: absolute;
   display: flex;

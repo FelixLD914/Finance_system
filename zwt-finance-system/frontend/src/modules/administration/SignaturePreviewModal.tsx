@@ -71,6 +71,11 @@ const SIGNATURE_BOXES_PT: Record<SignatureUsage, SignatureBoxPt> = {
 type TemplateTab = "wht" | "tax_inv" | "salary_advance";
 
 interface TemplateConfig {
+  /**
+   * 底图 = 后端生成器真出的那一页（彩色、填了样例数据、未盖章），
+   * 由 scripts/build_signature_preview_backgrounds.py 渲染。
+   * 彩色是必需的：TAX INV 与工资预支底版左上角是公司 logo，出票就是彩的。
+   */
   bgImage: string;
   title: string;
   /** 这张底版上的签名位。工资预支单一页两个位（财务负责人 + 董事/总经理）。 */
@@ -87,19 +92,19 @@ interface TemplateConfig {
 
 const TEMPLATE_CONFIGS: Record<TemplateTab, TemplateConfig> = {
   wht: {
-    bgImage: "/wht-template-bg.png",
+    bgImage: "/wht-template-bg.webp",
     title: "WHT 扣缴凭证 (P.N.D.53/3 正式文件底板)",
     stamps: [{ usage: "wht", label: "ผู้จ่ายเงิน 付款方签名" }],
     inkPrepared: true,
   },
   tax_inv: {
-    bgImage: "/tax-inv-template-bg.png",
+    bgImage: "/tax-inv-template-bg.webp",
     title: "TAX INV 增值税发票 (正式文件底板)",
     stamps: [{ usage: "tax_inv", label: "ผู้มีอำนาจลงนาม 授权签字人" }],
     inkPrepared: true,
   },
   salary_advance: {
-    bgImage: "/salary-advance-template-bg.png",
+    bgImage: "/salary-advance-template-bg.webp",
     title: "工资预支单凭证 (财务负责人 + 董事/总经理签名位置)",
     stamps: [
       { usage: "salary_advance_finance", label: "财务负责人 Finance Director" },
@@ -571,7 +576,12 @@ export function SignaturePreviewModal({
             />
           )}
 
-          {/* 真实系统 PDF 模板底图 + 精确 ReportLab 坐标叠加渲染 */}
+          {/* 底图就是后端真出的那一页（彩色、带样例数据、未盖章），
+              所以这里除了签名之外什么都不用画。
+              以前这一段有三块按百分比手工摆的样例文字，字体、断词、列宽全靠猜，
+              必然对不上底版：TAX INV 的品名被裁掉半个字、报关单号压在泰文标签上、
+              工资预支的金额盖住表单印刷字。**不要再加回来** —— 要改样例数据请改
+              scripts/build_signature_preview_backgrounds.py 里的样例，重出底图。 */}
           <div className="pdf-template-underlay-viewport">
             <div className="pdf-page-container">
               <img
@@ -579,47 +589,6 @@ export function SignaturePreviewModal({
                 className="pdf-underlay-image"
                 src={currentCfg.bgImage}
               />
-
-              {/* 在系统真实文件底板上叠加开票样例文字 (位置与 ReportLab 生成 PDF 完全对齐) */}
-              {activeTemplate === "wht" && (
-                <div className="overlay-sample-layer wht-sample-layer">
-                  <span className="pdf-field val-bookno" style={{ left: "75%", top: "4.5%" }}>202607BK1</span>
-                  <span className="pdf-field val-refno" style={{ left: "75%", top: "6.2%" }}>ZWT202607001</span>
-                  <span className="pdf-field val-payee" style={{ left: "10%", top: "21.0%" }}>บริษัท จั่วป่าร์รีไซเคิลสหวรุ่งเรือง จำกัด</span>
-                  <span className="pdf-field val-taxid" style={{ left: "80%", top: "21.1%" }}>0105540057561</span>
-                  <span className="pdf-field val-incometype" style={{ left: "30%", top: "69.5%" }}>ค่าบริการ (Services)</span>
-                  <span className="pdf-field val-date" style={{ left: "62%", top: "69.5%" }}>2026/7/3</span>
-                  <span className="pdf-field val-amount" style={{ left: "78%", top: "69.5%" }}>150,000.00</span>
-                  <span className="pdf-field val-tax" style={{ left: "91%", top: "69.5%" }}>4,500.00</span>
-                  <span className="pdf-field val-total-amount" style={{ left: "78%", top: "73.2%" }}>150,000.00</span>
-                  <span className="pdf-field val-total-tax" style={{ left: "91%", top: "73.2%" }}>4,500.00</span>
-                  <span className="pdf-field val-bahttext" style={{ left: "45%", top: "76.5%" }}>-- หนึ่งแสนห้าหมื่นบาทถ้วน --</span>
-                  <span className="pdf-field val-date-thai" style={{ left: "39%", top: "90.8%" }}>3 กรกฎาคม 2569</span>
-                </div>
-              )}
-
-              {activeTemplate === "tax_inv" && (
-                <div className="overlay-sample-layer tax-inv-sample-layer">
-                  <span className="pdf-field val-invno" style={{ left: "80%", top: "12.0%" }}>INV202607089</span>
-                  <span className="pdf-field val-invdate" style={{ left: "80%", top: "13.8%" }}>2026-07-15</span>
-                  <span className="pdf-field val-customer" style={{ left: "18%", top: "21.5%" }}>SIAM LOGISTICS GROUP CO., LTD.</span>
-                  <span className="pdf-field val-declno" style={{ left: "18%", top: "24.0%" }}>A019-06907-00381</span>
-                  <span className="pdf-field val-itemdesc" style={{ left: "12%", top: "35.5%" }}>EXPORT FREIGHT SERVICES</span>
-                  <span className="pdf-field val-itemfob" style={{ left: "65%", top: "35.5%" }}>480,000.00</span>
-                  <span className="pdf-field val-itemvat" style={{ left: "78%", top: "35.5%" }}>33,600.00</span>
-                  <span className="pdf-field val-itemtotal" style={{ left: "90%", top: "35.5%" }}>513,600.00</span>
-                </div>
-              )}
-
-              {activeTemplate === "salary_advance" && (
-                <div className="overlay-sample-layer salary-advance-sample-layer">
-                  <span className="pdf-field val-batchno" style={{ left: "75%", top: "8.5%" }}>SA20260701</span>
-                  <span className="pdf-field val-empname" style={{ left: "20%", top: "18.5%" }}>Somchai Jaidee (EMP08821)</span>
-                  <span className="pdf-field val-dept" style={{ left: "20%", top: "21.5%" }}>Logistics Operations Dept</span>
-                  <span className="pdf-field val-advamt" style={{ left: "20%", top: "32.0%" }}>25,000.00 THB</span>
-                  <span className="pdf-field val-repay" style={{ left: "55%", top: "32.0%" }}>2026-08 (次月扣还)</span>
-                </div>
-              )}
 
               {/* 核心套印签名图层：坐标、居中缩放、等比适配三项都与后端 drawImage 同源 */}
               {currentCfg.stamps.map(({ usage, label }) => {

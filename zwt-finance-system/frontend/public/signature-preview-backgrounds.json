@@ -1,17 +1,20 @@
 {
   "renderDpi": 150,
   "backgrounds": {
-    "wht-template-bg.png": {
+    "wht-template-bg.webp": {
       "source": "WHT-Template.pdf",
-      "sourceSha256": "391ea5409fb4eaa79057f0f596b99e4fe332185597ddc8ea0e758f6f5fd8b31f"
+      "sourceSha256": "391ea5409fb4eaa79057f0f596b99e4fe332185597ddc8ea0e758f6f5fd8b31f",
+      "layoutSha256": "541efb1de39f9a449259cc187f48163f33562b9afd26f19afb78502c194a9b79"
     },
-    "tax-inv-template-bg.png": {
+    "tax-inv-template-bg.webp": {
       "source": "TAX-INV-Template.pdf",
-      "sourceSha256": "8c14bbdc611ecc94cb946921e1c46f95f66eca51cace5e824924932e1e000663"
+      "sourceSha256": "8c14bbdc611ecc94cb946921e1c46f95f66eca51cace5e824924932e1e000663",
+      "layoutSha256": "eba73ca7d4aeb7eadf13831f24ac50531737ca921be8037612cb53c7ed689c49"
     },
-    "salary-advance-template-bg.png": {
+    "salary-advance-template-bg.webp": {
       "source": "Salary-Advance-Template.pdf",
-      "sourceSha256": "a384529a36420970ae02933f840db2931732b6718f7c793bbfbbd90b1a4cb1e6"
+      "sourceSha256": "a384529a36420970ae02933f840db2931732b6718f7c793bbfbbd90b1a4cb1e6",
+      "layoutSha256": "8735d9cd114c7ad48b45a049df9fac09aa937ace220d054a4817d38ad992cd03"
     }
   }
 }

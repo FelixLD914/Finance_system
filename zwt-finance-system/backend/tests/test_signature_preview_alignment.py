@@ -162,25 +162,69 @@ def test_preview_page_container_uses_the_real_mediabox_ratio() -> None:
         )
 
 
-def test_preview_backgrounds_are_rendered_from_the_current_plates() -> None:
-    """底图是底版的一张照片，底版重制后不重出就会静默过期。
+# 每张底图的内容由哪些文件决定：底版 + 把数据画上去的那套坐标。
+# 与 scripts/build_signature_preview_backgrounds.py 的 LAYOUT_SOURCES 一一对应。
+BACKGROUND_LAYOUT_SOURCES: dict[str, tuple[str, ...]] = {
+    "wht-template-bg.webp": ("app/modules/wht/document_generator.py",),
+    "tax-inv-template-bg.webp": (
+        "app/modules/tax_invoice/document_generator.py",
+        "app/modules/tax_invoice/pdf_layout.py",
+    ),
+    "salary-advance-template-bg.webp": (
+        "app/modules/salary_advance/document_generator.py",
+        "app/modules/salary_advance/pdf_layout.py",
+    ),
+}
 
-    底图本身没法自证新旧（PNG 编码不保证可复现），所以记的是源底版的 sha256。
+
+def test_preview_backgrounds_are_rendered_from_the_current_plates_and_layout() -> None:
+    """底图现在是"后端真出的那一页"的照片，底版**或坐标**一变就会静默过期。
+
+    照片没法自证新旧（WebP 编码不保证可复现），所以记两个 sha：源底版的，
+    以及决定字段落在哪儿的那几个模块文件的。只记底版是不够的——底版没动、
+    TextAnchor 改了，底图照样是旧的，而预览的全部意义就是"所见即所出"。
+
+    误报（改了 document_generator 的无关代码也会红）是故意选的方向：
+    重出底图只要跑一条命令，而漏报要等用户拿着错位的预览调完比例才发现。
     """
     assert BACKGROUND_MANIFEST.is_file(), (
         f"缺 {BACKGROUND_MANIFEST.name}；"
         "跑 scripts/build_signature_preview_backgrounds.py 生成。"
     )
     manifest = json.loads(BACKGROUND_MANIFEST.read_text(encoding="utf-8"))
-    stale: list[str] = []
-    for png_name, entry in manifest["backgrounds"].items():
-        assert (PUBLIC_DIR / png_name).is_file(), f"底图 {png_name} 不存在"
-        plate = TEMPLATE_DIR / entry["source"]
-        actual = hashlib.sha256(plate.read_bytes()).hexdigest()
-        if actual != entry["sourceSha256"]:
-            stale.append(f"{png_name}（源 {entry['source']} 已变）")
-    assert not stale, (
-        "这些签名预览底图是用旧底版渲染的：" + "、".join(stale) + "\n"
-        "重制过底版就要重出底图："
-        "python ..\\scripts\\build_signature_preview_backgrounds.py"
+    assert set(manifest["backgrounds"]) == set(BACKGROUND_LAYOUT_SOURCES), (
+        "清单里的底图与本测试记的布局来源对不上，"
+        "改了 build_signature_preview_backgrounds.py 的 LAYOUT_SOURCES 要同步这里。"
     )
+    stale: list[str] = []
+    for image_name, entry in manifest["backgrounds"].items():
+        assert (PUBLIC_DIR / image_name).is_file(), f"底图 {image_name} 不存在"
+        plate = TEMPLATE_DIR / entry["source"]
+        if hashlib.sha256(plate.read_bytes()).hexdigest() != entry["sourceSha256"]:
+            stale.append(f"{image_name}（源底版 {entry['source']} 已变）")
+            continue
+        digest = hashlib.sha256()
+        for relative in BACKGROUND_LAYOUT_SOURCES[image_name]:
+            digest.update((BACKEND_ROOT / relative).read_bytes())
+        if digest.hexdigest() != entry.get("layoutSha256"):
+            stale.append(f"{image_name}（出票坐标/生成代码已变）")
+    assert not stale, (
+        "这些签名预览底图已经不是当前出票效果了：" + "、".join(stale) + "\n"
+        "重出底图：python ..\\scripts\\build_signature_preview_backgrounds.py"
+    )
+
+
+def test_preview_no_longer_hand_places_sample_text() -> None:
+    """样例文字必须来自底图（后端真出的那一页），不能再在前端按百分比手摆。
+
+    手摆那套字体、断词、列宽全靠猜，与底版必然对不上，而且对错了没有任何东西
+    会报警——2026-08-05 用户实拍：TAX INV 的品名被裁掉半个字（EXPORT→XPORT）、
+    报关单号压在泰文标签上、工资预支的金额盖住表单印刷字。
+    """
+    source = PREVIEW_TSX.read_text(encoding="utf-8")
+    for marker in ("overlay-sample-layer", "pdf-field"):
+        assert marker not in source, (
+            f"{PREVIEW_TSX.name} 里又出现了 {marker}：手工摆的样例文字层已经删掉，"
+            "不要加回来。要改样例数据请改 "
+            "scripts/build_signature_preview_backgrounds.py 里的样例并重出底图。"
+        )
