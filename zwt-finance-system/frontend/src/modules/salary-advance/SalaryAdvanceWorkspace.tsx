@@ -886,70 +886,64 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
 
   const renderLedger = () => (
     <div className="salary-ledger">
-      <FinanceLifecycleTabs
-        activeKey={phase}
-        ariaLabel={t("lifecycle.aria", { module: t("nav.salaryAdvance") })}
-        counts={lifecycleCounts}
-        labels={{
-          pending: t("lifecycle.pending"),
-          issuing: t("lifecycle.issuing"),
-          history: t("lifecycle.history"),
-          all: t("lifecycle.all"),
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 16,
+          flexWrap: "wrap",
+          gap: 12,
         }}
-        onChange={(nextPhase) => {
-          setPhase(nextPhase);
-          setSelected(null);
-          setSelectedRecord(null);
-          setFilters((f) => ({ ...f, status: "all", period: "all" }));
-        }}
-      />
-      {filtersCollapsed ? (
-        <div
-          className="filter-bar-collapsed"
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            padding: "12px 16px",
-            background: "#fff",
-            borderRadius: 8,
-            marginBottom: 16,
+      >
+        <FinanceLifecycleTabs
+          activeKey={phase}
+          ariaLabel={t("lifecycle.aria", { module: t("nav.salaryAdvance") })}
+          counts={lifecycleCounts}
+          labels={{
+            pending: t("lifecycle.pending"),
+            issuing: t("lifecycle.issuing"),
+            history: t("lifecycle.history"),
+            all: t("lifecycle.all"),
           }}
-        >
-          <div className="collapsed-left" style={{ display: "flex", gap: 8 }}>
+          onChange={(nextPhase) => {
+            setPhase(nextPhase);
+            setSelected(null);
+            setSelectedRecord(null);
+            setFilters((f) => ({ ...f, status: "all", period: "all" }));
+          }}
+        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Button
+            icon={<UploadOutlined />}
+            type="primary"
+            onClick={() => setImportOpen(true)}
+          >
+            {t("salary.import")}
+          </Button>
+          {filters.period !== "all" && (
             <Button
-              icon={<PlusOutlined />}
-              type="primary"
-              onClick={() => setWorkspaceView("single")}
+              size="small"
+              type="link"
+              onClick={() => {
+                setFilters((f) => ({ ...f, period: "all" }));
+                setSelected(null);
+              }}
             >
-              {t("salary.singleIssuanceButton")}
+              {t("wht.resetFilters")}
             </Button>
-            <Button
-              icon={<UploadOutlined />}
-              onClick={() => setImportOpen(true)}
-            >
-              {t("salary.import")}
-            </Button>
-            {filters.period !== "all" && (
-              <Button
-                size="small"
-                type="link"
-                onClick={() => {
-                  setFilters((f) => ({ ...f, period: "all" }));
-                  setSelected(null);
-                }}
-              >
-                {t("wht.resetFilters")}
-              </Button>
-            )}
-          </div>
+          )}
           <Button
             icon={<FilterOutlined />}
-            onClick={() => setFiltersCollapsed(false)}
+            onClick={() => setFiltersCollapsed((prev) => !prev)}
           >
-            {t("wht.moreFilters")} <DownOutlined />
+            {t("wht.moreFilters")}{" "}
+            {filtersCollapsed ? <DownOutlined /> : <UpOutlined />}
           </Button>
         </div>
-      ) : (
+      </div>
+
+      {!filtersCollapsed && (
         <div
           className="salary-filter-bar"
           style={{
@@ -992,12 +986,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
             onClick={() => void reload()}
           >
             {t("salary.query")}
-          </Button>
-          <Button
-            icon={<UpOutlined />}
-            onClick={() => setFiltersCollapsed(true)}
-          >
-            {t("wht.collapseFilters")}
           </Button>
         </div>
       )}
@@ -1059,9 +1047,7 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
             })}
           />
         </section>
-      ) : null}
-
-      {selected ? (
+      ) : (
         <section className="salary-table-card">
           <div style={{ marginBottom: 16 }}>
             <Button
@@ -1258,10 +1244,6 @@ export function SalaryAdvanceWorkspace({ t }: { t: Translate }) {
               onClick: () => setSelectedRecord(record),
             })}
           />
-        </section>
-      ) : (
-        <section className="salary-empty-card">
-          <Empty description={t("salary.emptyLedger")} />
         </section>
       )}
     </div>

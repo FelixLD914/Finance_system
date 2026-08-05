@@ -201,8 +201,13 @@ describe("SalaryAdvanceWorkspace 签名选择与批量批准开具", () => {
 
     render(<Harness />);
 
-    // 等待批次数据加载
-    await screen.findAllByText(/SA202608-001/);
+    // 等待期数汇总加载，点击进入期数
+    const periodCell = await screen.findByText(/202608/);
+    fireEvent.click(periodCell);
+
+    // 点击批次进入明细
+    const batchCell = await screen.findByText(/SA202608-001/);
+    fireEvent.click(batchCell);
 
     // 点击 批量批准开具 按钮
     const btn = await screen.findByRole("button", { name: /批量批准开具/ });
